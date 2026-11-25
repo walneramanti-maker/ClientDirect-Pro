@@ -56,7 +56,7 @@ export const config = {
   // Recherche automatique des coordonnées (Firecrawl). Rien ne part sans clé ET sans plafond mensuel autorisé.
   firecrawlKey: env.FIRECRAWL_API_KEY || '',
   firecrawlApi: env.FIRECRAWL_API || '',
-  osmEnrich: env.OSM_ENRICH !== '0',
+  osmEnrich: env.OSM_ENRICH ? env.OSM_ENRICH !== '0' : env.NODE_ENV !== 'test',
   // Plusieurs serveurs publics : le principal (overpass-api.de) est souvent saturé
   overpassApis: (env.OVERPASS_API || 'https://overpass.private.coffee/api/interpreter,https://maps.mail.ru/osm/tools/overpass/api/interpreter,https://overpass-api.de/api/interpreter').split(',').map((x) => x.trim()).filter(Boolean),
   // Délai minimal entre deux appels Firecrawl (offre gratuite : nombre de requêtes par minute limité)

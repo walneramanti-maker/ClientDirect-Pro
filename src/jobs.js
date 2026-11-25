@@ -69,13 +69,13 @@ export async function runJobs(db, now = Date.now()) {
     }
     db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.monthly',?,?)", ym, now); r.monthly = sent;
   }
-  // 12. Prospection nationale automatique (une fois par jour, aucun envoi)
+  // 12. Prospection nationale (une fois par jour) et coordonnées (toutes les heures), aucun envoi.
+  // Lancées en arrière-plan : ces tâches longues (services publics espacés) ne retardent jamais les sauvegardes.
   {
     const { runNationalCampaign, prospectDaily } = await import('./prospect.js');
-    if (prospectDaily(db) > 0 && now - lastRun(db, 'job.prospect') > 20 * 36e5) { r.prospect = await runNationalCampaign(db, { now }).catch((e) => ({ error: e.message })); console.log('Prospection nationale :', JSON.stringify(r.prospect)); }
-    // Coordonnées : par petites séries toutes les heures, dans la limite du plafond mensuel autorisé
+    if (prospectDaily(db) > 0 && now - lastRun(db, 'job.prospect') > 20 * 36e5) r.prospect = background('prospect', () => runNationalCampaign(db, { now }), 'Prospection nationale');
     const { enrichEnabled, enrichBatch } = await import('./enrich.js');
-    if (enrichEnabled(db) && now - lastRun(db, 'job.enrich') > 55 * 60e3) { r.enrich = await enrichBatch(db, { now }).catch((e) => ({ error: e.message })); console.log('Coordonnées :', JSON.stringify(r.enrich)); }
+    if ((enrichEnabled(db) || config.osmEnrich) && now - lastRun(db, 'job.enrich') > 55 * 60e3) r.enrich = background('enrich', () => enrichBatch(db, { now }), 'Coordonnées');
   }
   // 13. Parrainage et partenariat : validation des récompenses après 30 jours (une fois par jour)
   if (now - lastRun(db, 'job.rewards') > 20 * 36e5) {
@@ -88,6 +88,16 @@ export async function runJobs(db, now = Date.now()) {
   heartbeat.at = now;
   return r;
 }
+
+const runningBg = new Set();
+/** Lance une tâche longue sans bloquer les autres ; une seule exécution à la fois par tâche. */
+function background(name, fn, label) {
+  if (runningBg.has(name)) return { enCours: true };
+  runningBg.add(name);
+  Promise.resolve().then(fn).then((res) => console.log(`${label} :`, JSON.stringify(res)), (e) => console.log(`${label} : erreur`, e.message)).finally(() => runningBg.delete(name));
+  return { lance: true };
+}
+export const backgroundRunning = () => [...runningBg];
 
 /** Dernier appel de maintien en éveil (serveur gratuit). */
 export const keepAwake = { enabled: () => config.keepAwake, last: null };

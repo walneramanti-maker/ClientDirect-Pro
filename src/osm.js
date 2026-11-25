@@ -23,7 +23,8 @@ export async function osmPlaces(postal, city) {
       res = await net.fetch(apis[i], {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B ; requetes espacees)' },
-        body: 'data=' + encodeURIComponent(overpassQuery(postal))
+        body: 'data=' + encodeURIComponent(overpassQuery(postal)),
+        signal: AbortSignal.timeout(40000)
       });
     } catch (e) { lastErr = e.message; res = null; continue; }
     if (res.ok) { preferred = i; break; }

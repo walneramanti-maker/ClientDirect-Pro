@@ -51,7 +51,7 @@ let lastCall = 0;
 async function paced() { const wait = lastCall + config.firecrawlPauseMs - Date.now(); if (wait > 0) await new Promise((ok) => setTimeout(ok, wait)); lastCall = Date.now(); }
 async function alexandria(db, provider, capability, options, credits, now) {
   await paced();
-  const res = await net.fetch(`${API()}/v2/scrape`, { method: 'POST', headers: { authorization: `Bearer ${config.firecrawlKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ alexandria: { provider, capability, options } }) });
+  const res = await net.fetch(`${API()}/v2/scrape`, { method: 'POST', signal: AbortSignal.timeout(90000), headers: { authorization: `Bearer ${config.firecrawlKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ alexandria: { provider, capability, options } }) });
   spend(db, credits, now);
   if (res.status === 402) throw Object.assign(new Error('Crédits Firecrawl épuisés'), { stop: true });
   if (res.status === 429) throw Object.assign(new Error('Limite de requêtes Firecrawl'), { stop: true });
@@ -70,7 +70,7 @@ export async function searchPlaces(db, { query, postal }, now = Date.now()) {
 // Pages qui ne sont pas le site de l'entreprise (leur e-mail serait celui de la plateforme) : voir potential.js
 async function pageOn(db, url, now) {
   await paced();
-  const res = await net.fetch(`${API()}/v2/scrape`, { method: 'POST', headers: { authorization: `Bearer ${config.firecrawlKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown', 'rawHtml'], onlyMainContent: false }) });
+  const res = await net.fetch(`${API()}/v2/scrape`, { method: 'POST', signal: AbortSignal.timeout(90000), headers: { authorization: `Bearer ${config.firecrawlKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown', 'rawHtml'], onlyMainContent: false }) });
   spend(db, 1, now);
   if (!res.ok) return null;
   const j = await res.json(); if (Number(j.data?.metadata?.statusCode) >= 400) return null;
@@ -114,7 +114,7 @@ export async function verifyInSirene(place, { postal, city, tpl }) {
   const own = (String(place.address || '').match(/\b(97[1-6]\d{2}|[0-9]{2}\d{3})\b/) || [])[1] || postal;
   const q = words(place.name).filter((w) => !words(city).includes(w)).slice(0, 4).join(' ');
   if (!q) return null;
-  const res = await net.fetch(`${config.sireneApi}/search?q=${encodeURIComponent(q)}&code_postal=${own}&etat_administratif=A&per_page=5`, { headers: { accept: 'application/json' } });
+  const res = await net.fetch(`${config.sireneApi}/search?q=${encodeURIComponent(q)}&code_postal=${own}&etat_administratif=A&per_page=5`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
   if (!res.ok) return null;
   postal = own;
   for (const r of (await res.json()).results || []) {

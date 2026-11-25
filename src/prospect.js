@@ -31,7 +31,7 @@ export async function searchSirene({ tpl, commune = null, departement = null, pa
   if (departement) { if (!DEPARTEMENTS[departement]) throw new Error('Département inconnu'); where = `departement=${departement}`; }
   else { if (!COMMUNES[commune]) throw new Error('Commune inconnue'); where = `code_commune=${commune}`; }
   const url = `${config.sireneApi}/search?activite_principale=${encodeURIComponent(T.naf.join(','))}&${where}&etat_administratif=A&per_page=25&page=${page}`;
-  const res = await net.fetch(url, { headers: { accept: 'application/json' } });
+  const res = await net.fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
   if (res.status === 429) throw Object.assign(new Error("L'API publique limite le nombre de requêtes, réessayez dans une minute."), { rateLimited: true });
   if (!res.ok) throw new Error(`API Recherche d'entreprises ${res.status}`);
   const j = await res.json();

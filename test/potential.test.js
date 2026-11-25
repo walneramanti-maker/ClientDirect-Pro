@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, jsonResponse } from './helpers.js';
 
-const app = await setup({ FIRECRAWL_API_KEY: 'fc-test', PROSPECT_PAUSE_MS: '0', ENRICH_PACING: '0' });
+const app = await setup({ FIRECRAWL_API_KEY: 'fc-test', PROSPECT_PAUSE_MS: '0', ENRICH_PACING: '0', OSM_ENRICH: '1' });
 const { db } = app;
 test.after(() => app.close());
 const E = await import('../src/enrich.js');
