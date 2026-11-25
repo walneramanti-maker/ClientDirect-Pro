@@ -98,7 +98,7 @@ export function startScheduler(db) {
   const h = setInterval(tick, config.jobsIntervalMs); h.unref?.(); setTimeout(tick, 2000).unref?.();
   let k = null;
   if (config.keepAwake) {
-    const ping = async () => { try { const r = await net.fetch(`${config.baseUrl}/health?veille=1`, { headers: { 'user-agent': 'ClientDirectPro-veille' } }); keepAwake.last = { at: Date.now(), status: r.status }; } catch (e) { keepAwake.last = { at: Date.now(), error: String(e.message).slice(0, 80) }; } };
+    const ping = async () => { try { const r = await net.fetch(`${config.baseUrl}/health?veille=1`, { headers: { 'user-agent': 'ClientDirectPro-veille' } }); const first = !keepAwake.last; keepAwake.last = { at: Date.now(), status: r.status }; if (first || r.status !== 200) console.log(`Maintien en éveil : /health → ${r.status}`); } catch (e) { keepAwake.last = { at: Date.now(), error: String(e.message).slice(0, 80) }; console.log('Maintien en éveil : échec', keepAwake.last.error); } };
     k = setInterval(ping, 10 * 60e3); k.unref?.(); setTimeout(ping, 60e3).unref?.();
   }
   return () => { clearInterval(h); if (k) clearInterval(k); };
