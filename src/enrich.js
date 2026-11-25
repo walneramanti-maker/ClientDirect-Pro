@@ -53,17 +53,28 @@ export async function searchPlaces(db, { query, postal }, now = Date.now()) {
   return alexandria(db, 'firecrawl-maps', 'businesses/search', { query, country: 'fr', language: 'fr', locality: postal || undefined, include_opening_hours: false }, 10, now);
 }
 /** Adresse e-mail publique sur la page contact du site (1 crédit). Les adresses génériques (contact@…) sont préférées. */
-export async function findEmail(db, website, now = Date.now()) {
-  let url; try { url = new URL(website); } catch { return null; }
-  if (!/^https?:$/.test(url.protocol)) return null;
-  const res = await net.fetch(`${API()}/v2/scrape`, { method: 'POST', headers: { authorization: `Bearer ${config.firecrawlKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url: url.origin + '/contact', formats: ['markdown'], onlyMainContent: false }) });
+// Pages qui ne sont pas le site de l'entreprise : leur adresse e-mail serait celle de la plateforme
+const PLATFORMS = /(^|\.)(facebook|instagram|tiktok|linkedin|twitter|x|youtube|simplybook|planity|treatwell|calendly|doctolib|ubereats|deliveroo|tripadvisor|google|wa|whatsapp|linktr|pagesjaunes)\.[a-z.]+$/i;
+async function emailsOn(db, url, now) {
+  const res = await net.fetch(`${API()}/v2/scrape`, { method: 'POST', headers: { authorization: `Bearer ${config.firecrawlKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown'], onlyMainContent: false }) });
   spend(db, 1, now);
-  if (!res.ok) return null;
-  const md = String((await res.json()).data?.markdown || '');
-  const found = [...new Set((md.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []).map((e) => e.toLowerCase()))].filter((e) => !/\.(png|jpe?g|gif|webp|svg)$/.test(e) && !/(example|sentry|wixpress|domain)\./.test(e));
+  if (!res.ok) return [];
+  const j = await res.json(); if (Number(j.data?.metadata?.statusCode) >= 400) return [];
+  const md = String(j.data?.markdown || '');
+  return [...new Set((md.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []).map((e) => e.toLowerCase()))].filter((e) => !/\.(png|jpe?g|gif|webp|svg)$/.test(e) && !/(example|sentry|wixpress|domain|godaddy|ovh)\./.test(e));
+}
+/** Adresse e-mail publique du site de l'entreprise (page d'accueil, puis page contact) : 2 crédits au maximum. Adresses génériques préférées. */
+export async function findEmail(db, website, now = Date.now(), cap = Infinity) {
+  let url; try { url = new URL(website); } catch { return null; }
+  if (!/^https?:$/.test(url.protocol) || PLATFORMS.test(url.hostname)) return null;
   const host = url.hostname.replace(/^www\./, '');
-  const generic = found.find((e) => /^(contact|info|bonjour|hello|accueil|devis|rdv|reservation|commande|admin|secretariat)@/.test(e));
-  return generic || found.find((e) => e.endsWith('@' + host)) || null;
+  const pick = (list) => list.find((e) => /^(contact|info|bonjour|hello|accueil|devis|rdv|reservation|commande|admin|secretariat)@/.test(e)) || list.find((e) => e.endsWith('@' + host)) || list[0] || null;
+  for (const page of [url.origin + '/', url.origin + '/contact']) {
+    if (creditsUsed(db, now) + 1 > cap) break;
+    const found = await emailsOn(db, page, now).catch(() => []);
+    const e = pick(found); if (e) return e;
+  }
+  return null;
 }
 const phoneOk = (s) => /^\+?[\d\s.()-]{8,20}$/.test(String(s || ''));
 /**
@@ -95,7 +106,13 @@ export async function enrichBatch(db, { maxSearches = 20, now = Date.now(), emai
   if (!enrichEnabled(db)) { r.stopped = 'désactivé'; return r; }
   const start = creditsUsed(db, now); const cap = enrichCap(db);
   const groups = db.all(`SELECT tpl, postal, MIN(city) city, COUNT(*) n FROM prospects WHERE status='new' AND enriched_at IS NULL AND postal!='' GROUP BY tpl, postal ORDER BY MAX(score) DESC, n DESC LIMIT ?`, maxSearches);
-  const emailFor = async (website) => { if (!emails || !website || creditsUsed(db, now) + 1 > cap) return null; try { const e = await findEmail(db, website, now); if (e) r.emails++; return e; } catch { return null; } };
+  const emailFor = async (website) => { if (!emails || !website || creditsUsed(db, now) + 1 > cap) return null; try { const e = await findEmail(db, website, now, cap); if (e) r.emails++; return e; } catch { return null; } };
+  // Sites déjà connus sans e-mail : une seule nouvelle vérification (page d'accueil puis contact)
+  if (emails) for (const p of db.all("SELECT id, website FROM prospects WHERE website IS NOT NULL AND email IS NULL AND status='new' AND contact_source NOT LIKE '%e-mail vérifié%' LIMIT 10")) {
+    if (creditsUsed(db, now) + 2 > cap) break;
+    const e = await emailFor(p.website);
+    db.run("UPDATE prospects SET email=COALESCE(?,email), contact_source=contact_source || ' + e-mail vérifié' WHERE id=?", e, p.id);
+  }
   for (const g of groups) {
     if (creditsUsed(db, now) + 10 > cap) { r.stopped = 'plafond mensuel atteint'; break; }
     const pending = db.all("SELECT * FROM prospects WHERE status='new' AND enriched_at IS NULL AND tpl=? AND postal=?", g.tpl, g.postal);

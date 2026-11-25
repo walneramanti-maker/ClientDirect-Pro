@@ -32,8 +32,8 @@ test('coordonnées : une recherche par ville et métier, téléphone, site et e-
         { name: 'Garage Fermé', address: '69003 Lyon', business_status: 'permanently_closed' }
       ] } }] } });
     }
-    assert.equal(body.url, 'https://garagedufleuve.fr/contact');
-    return jsonResponse({ success: true, data: { markdown: 'Écrivez-nous : contact@garagedufleuve.fr ou jean.dupont@gmail.com — logo@2x.png' } });
+    assert.equal(body.url, 'https://garagedufleuve.fr/');
+    return jsonResponse({ success: true, data: { markdown: 'Écrivez-nous : contact@garagedufleuve.fr ou jean.dupont@gmail.com — logo@2x.png', metadata: { statusCode: 200 } } });
   });
   const r = await E.enrichBatch(db, { maxSearches: 5 });
   assert.equal(r.searches, 1, 'trois entreprises de la même ville et du même métier : une seule recherche');
