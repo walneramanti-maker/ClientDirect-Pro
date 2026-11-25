@@ -38,6 +38,16 @@ server.listen(config.port, () => console.log(`ClientDirect Pro sur ${config.base
 if (process.env.PROSPECT_SEED) import('./prospect.js').then(({ seedProspects }) => seedProspects(db, process.env.PROSPECT_SEED.split(','))).then((r) => console.log('Prospects :', JSON.stringify(r))).catch((e) => console.error('Prospects :', e.message));
 // Stripe (mode test) : produits, prix et webhook créés automatiquement à partir de la seule clé secrète
 import('./potential.js').then(({ refreshPotentials }) => refreshPotentials(db)).then(() => import('./readiness.js')).then(({ readiness }) => { const r = readiness(db); console.log(`Préparation du lancement : ${r.done}/${r.total} — restant : ${r.items.filter((i) => !i.ok).map((i) => `${i.key} (${i.detail})`).join(' ; ')}`); }).catch((e) => console.error('Préparation :', e.message));
+import('./suppression.js').then(({ cleanContacts }) => console.log('Qualité des coordonnées :', JSON.stringify(cleanContacts(db)))).catch((e) => console.error('Qualité :', e.message));
+import('./netprobe.js').then(({ probeNetwork }) => probeNetwork()).then((r) => { console.log('Réseau :', JSON.stringify(r)); db.run("INSERT INTO meta(k,v) VALUES('netprobe',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", JSON.stringify({ ...r, at: new Date().toISOString() })); }).catch((e) => console.error('Réseau :', e.message));
+// Autotest de bout en bout des 3 formules (mode test Stripe, hors production) : AUTOTEST=1, au plus toutes les 6 heures
+if (process.env.AUTOTEST === '1') setTimeout(() => import('./selftest.js').then(async ({ runSelfTest, selfTestAllowed }) => {
+  if (!selfTestAllowed()) return console.log('Autotest : refusé (clé Stripe réelle ou production)');
+  const last = db.one("SELECT MAX(created_at) at FROM audit WHERE action='job.autotest'").at || 0;
+  if (Date.now() - last < 6 * 36e5) return console.log('Autotest : déjà effectué il y a moins de 6 h');
+  const r = await runSelfTest(db);
+  for (const f of r.formules || []) console.log(`Autotest ${f.formule} : ${f.ok ? 'RÉUSSI' : 'ÉCHEC'} — ${f.etapes.map((e) => `${e.ok ? '✓' : '✗'} ${e.etape}${e.detail ? ' (' + e.detail + ')' : ''}`).join(' ; ')}`);
+}).catch((e) => console.error('Autotest :', e.message)), 25000).unref?.();
 import('./billing.js').then(({ ensureStripe }) => ensureStripe(db)).then((r) => r && console.log('Stripe :', JSON.stringify(r))).catch((e) => { console.error('Stripe :', e.message); import('./incidents.js').then(({ recordIncident }) => recordIncident(db, { kind: 'stripe_setup', severity: 'warning', message: `Configuration Stripe impossible : ${String(e.message).slice(0, 160)}` })); });
 
 // Arrêt (mise à jour, redémarrage) : dernière sauvegarde avant de fermer.

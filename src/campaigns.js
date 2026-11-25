@@ -1,5 +1,6 @@
 // Campagnes commerciales : sélection par filtres, aperçu, validation groupée en un clic.
 // Une campagne validée n'envoie RIEN : aucun canal d'envoi n'est branché tant que vous ne l'avez pas autorisé.
+import { isSuppressed } from './suppression.js';
 import { config } from './config.js';
 import { outreachMessage, demoTokenFor, displayName } from './prospect.js';
 import { optoutLink } from './privacy.js';
@@ -31,7 +32,7 @@ export function callOpener(p) {
 export function callScript(p, demoUrl) {
   const n = displayName(p.name); const m = (TEMPLATES[p.tpl]?.metier || 'votre activité').toLowerCase();
   const opener = callOpener(p);
-  return `${opener ? `[Accroche, après la présentation : ${opener}] ` : ''}« Bonjour, ${config.legal.owner}, de ClientDirect Pro. Je vous appelle au sujet de votre activité (${m}) ; vous avez deux minutes ? J'ai préparé gratuitement un exemple de site pour ${n} : vos clients y demandent un devis ou vous écrivent sur WhatsApp, à toute heure. Je peux vous l'envoyer par SMS ou par e-mail ? » — Si oui : envoyer le lien ${demoUrl}. — Si non : « Très bien, je ne vous rappellerai pas » et passer le statut à « Ne plus contacter ».`;
+  return `${opener ? `[Accroche, après la présentation : ${opener}] ` : ''}« Bonjour, ${config.legal.owner}, de ClientDirect Pro. Je vous appelle au sujet de votre activité (${m}) ; vous avez deux minutes ? J'ai préparé gratuitement un exemple de site pour ${n} : vos clients y demandent un devis ou vous écrivent sur WhatsApp, à toute heure. Je peux vous l'envoyer par SMS ou par e-mail ? » — Si oui : envoyer le lien ${demoUrl}. — Si non : « Très bien, je ne vous rappellerai pas » et noter « Ne veut plus être contacté » (opposition enregistrée définitivement). — Si la personne demande d'où vient son numéro : « De sources publiques : le registre des entreprises et votre fiche d'établissement en ligne. Vous pouvez vous opposer à tout moment, je le note tout de suite. » — Ne jamais rappeler plus de 2 fois sans réponse ; appeler en semaine, de 9 h à 18 h (heure locale du prospect).`;
 }
 
 /** Entreprises éligibles : à contacter, coordonnée présente pour le canal, ouvertes, pas déjà dans une campagne. */
@@ -49,7 +50,7 @@ export function createCampaign(db, { name, channel, depts = [], tpls = [], minSc
   if (!CHANNELS[channel]) throw new Error('Canal inconnu');
   size = Math.max(1, Math.min(MAX_CAMPAIGN, Math.floor(Number(size) || 0)));
   const q = eligibleSql({ channel, depts, tpls, minScore, minPotential });
-  const rows = db.all(`SELECT p.* FROM prospects p WHERE ${q.where} ORDER BY p.potential DESC, p.score DESC, p.id LIMIT ?`, ...q.args, size);
+  const rows = db.all(`SELECT p.* FROM prospects p WHERE ${q.where} ORDER BY p.potential DESC, p.score DESC, p.id LIMIT ?`, ...q.args, size).filter((p) => !isSuppressed(db, p));
   if (!rows.length) throw new Error('Aucune entreprise ne correspond à ces critères (coordonnées requises pour ce canal).');
   let id;
   db.tx(() => {
@@ -99,7 +100,7 @@ export async function sendNext(db, { now = Date.now(), send = sendMail } = {}) {
   if (now - last < config.campaignGapMin * 60e3) return { skipped: 'espacement' };
   const cands = db.all("SELECT i.*, p.name, p.postal, p.siren, p.status pstatus FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id JOIN prospects p ON p.id=i.prospect_id WHERE c.status='approved' AND c.channel='email' AND i.status='ready' ORDER BY c.approved_at, i.id LIMIT 50");
   for (const it of cands) {
-    if (it.pstatus === 'optout') { db.run("UPDATE campaign_items SET status='skipped', error='opposition' WHERE id=?", it.id); continue; }
+    if (it.pstatus === 'optout' || isSuppressed(db, { siren: it.siren, email: it.to_addr })) { db.run("UPDATE campaign_items SET status='skipped', error='opposition' WHERE id=?", it.id); continue; }
     if (!businessHours(it, now)) continue;
     db.run("INSERT INTO meta(k,v) VALUES('campaign_last_send',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(now));
     const stop = (/\/stop\/[A-Za-z0-9_-]+/.exec(it.message) || [''])[0];

@@ -9,6 +9,7 @@ import { displayName, fromSirene, importProspects } from './prospect.js';
 import { deptOf } from './france.js';
 import { analyzeSite, isPlatform, refreshPotentials } from './potential.js';
 import { osmPlaces, OSM_SOURCE } from './osm.js';
+import { cleanContacts } from './suppression.js';
 
 const API = () => (config.firecrawlApi || 'https://api.firecrawl.dev').replace(/\/$/, '');
 const month = (now = Date.now()) => new Date(now).toISOString().slice(0, 7);
@@ -135,7 +136,7 @@ export async function verifyInSirene(place, { postal, city, tpl }) {
 export async function osmPass(db, { maxGroups = 60, now = Date.now(), pause = config.prospectPauseMs } = {}) {
   const r = { groups: 0, found: 0, stopped: '' };
   if (!config.osmEnrich) { r.stopped = 'désactivé'; return r; }
-  const groups = db.all(`SELECT postal, MIN(city) city FROM prospects WHERE status='new' AND enriched_at IS NULL AND osm_checked_at IS NULL AND postal!='' GROUP BY postal ORDER BY MAX(score) DESC, COUNT(*) DESC LIMIT ?`, maxGroups);
+  const groups = db.all(`SELECT postal, MIN(city) city FROM prospects p WHERE status='new' AND enriched_at IS NULL AND osm_checked_at IS NULL AND postal!='' GROUP BY postal ORDER BY (SELECT COUNT(*) FROM prospects q WHERE q.dept=MIN(p.dept) AND q.osm_checked_at IS NOT NULL) ASC, MAX(score) DESC, COUNT(*) DESC LIMIT ?`, maxGroups);
   for (const g of groups) {
     let places = [];
     try { places = await osmPlaces(g.postal, g.city); r.groups++; }
@@ -177,7 +178,8 @@ export async function enrichBatch(db, { maxSearches = 20, now = Date.now(), emai
     const e = await siteFor(p.id, p.website, !p.email);
     db.run("UPDATE prospects SET email=COALESCE(email,?), site_checked_at=COALESCE(site_checked_at,?) WHERE id=?", e, now, p.id);
   }
-  const groups = db.all(`SELECT tpl, postal, MIN(city) city, COUNT(*) n FROM prospects WHERE status='new' AND enriched_at IS NULL AND postal!='' GROUP BY tpl, postal ORDER BY MAX(score) DESC, n DESC LIMIT ?`, maxSearches);
+  // Répartition nationale : d'abord les départements les moins couverts, pour ne pas privilégier un territoire
+  const groups = db.all(`SELECT tpl, postal, MIN(city) city, MIN(dept) dept, COUNT(*) n FROM prospects p WHERE status='new' AND enriched_at IS NULL AND postal!='' GROUP BY tpl, postal ORDER BY (SELECT COUNT(*) FROM prospects q WHERE q.dept=MIN(p.dept) AND q.enriched_at IS NOT NULL) ASC, MAX(score) DESC, n DESC LIMIT ?`, maxSearches);
   for (const g of groups) {
     if (creditsUsed(db, now) + 10 > cap) { r.stopped = cap < enrichCap(db) ? 'quota du jour atteint (crédits répartis sur le mois)' : 'plafond mensuel atteint'; break; }
     const pending = db.all("SELECT * FROM prospects WHERE status='new' AND enriched_at IS NULL AND tpl=? AND postal=?", g.tpl, g.postal);
@@ -218,6 +220,7 @@ export async function enrichBatch(db, { maxSearches = 20, now = Date.now(), emai
   return r;
 }
 function finish(db, r, now) {
+  r.qualite = cleanContacts(db); // format international, doublons, oppositions
   setMeta(db, `enrich_reachable_${month(now)}`, Number(meta(db, `enrich_reachable_${month(now)}`) || 0) + r.reachable);
   refreshPotentials(db);
   db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.enrich',?,?)", JSON.stringify(r), now);

@@ -1,3 +1,4 @@
+import { isSuppressed } from './suppression.js';
 import { refreshPotentials } from './potential.js';
 import { config } from './config.js';
 import { net } from './net.js';
@@ -61,7 +62,7 @@ export function scoreProspect(p, today = new Date()) {
 export function importProspects(db, list) {
   let added = 0;
   for (const p of list) {
-    if (!p.siren || db.one('SELECT 1 FROM prospects WHERE siren=?', p.siren)) continue;
+    if (!p.siren || db.one('SELECT 1 FROM prospects WHERE siren=?', p.siren) || isSuppressed(db, { siren: p.siren })) continue;
     db.run('INSERT INTO prospects(siren,siret,name,naf,tpl,city,postal,address,created_on,score,created_at,dept,demo_token_hash,optout_token_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', p.siren, p.siret, p.name, p.naf, p.tpl, p.city, p.postal, p.address, p.created_on, scoreProspect(p), Date.now(), p.dept || deptOf(p.postal), sha256(demoTokenFor(p.siren)), sha256(hmac(config.secret, 'stop:' + p.siren).slice(0, 32)));
     added++;
   }

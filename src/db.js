@@ -94,7 +94,8 @@ const MIGRATIONS = [
   `ALTER TABLE prospects ADD COLUMN osm_checked_at INTEGER`,
   `CREATE INDEX IF NOT EXISTS prospects_potential ON prospects(status, potential DESC)`,
   `CREATE TABLE IF NOT EXISTS contacts(id INTEGER PRIMARY KEY, prospect_id INTEGER NOT NULL, channel TEXT NOT NULL, outcome TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)`,
-  `CREATE INDEX IF NOT EXISTS contacts_at ON contacts(created_at)`
+  `CREATE INDEX IF NOT EXISTS contacts_at ON contacts(created_at)`,
+  `CREATE TABLE IF NOT EXISTS suppressions(kind TEXT NOT NULL, hash TEXT NOT NULL, source TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, PRIMARY KEY(kind, hash))`
 ];
 
 export function openDb(file, { appEnv = null } = {}) {

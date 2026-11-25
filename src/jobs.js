@@ -73,7 +73,10 @@ export async function runJobs(db, now = Date.now()) {
   // Lancées en arrière-plan : ces tâches longues (services publics espacés) ne retardent jamais les sauvegardes.
   {
     const { runNationalCampaign, prospectDaily } = await import('./prospect.js');
-    if (prospectDaily(db) > 0 && now - lastRun(db, 'job.prospect') > 20 * 36e5) r.prospect = background('prospect', () => runNationalCampaign(db, { now }), 'Prospection nationale');
+    // Nouvel ordre national (tous les départements à chaque tour) : un premier passage immédiat
+    const v2 = db.one("SELECT v FROM meta WHERE k='prospect_order'")?.v === 'v2';
+    if (!v2) { db.run("INSERT INTO meta(k,v) VALUES('prospect_order','v2') ON CONFLICT(k) DO UPDATE SET v='v2'"); db.run("INSERT INTO meta(k,v) VALUES('prospect_cursor','0') ON CONFLICT(k) DO UPDATE SET v='0'"); }
+    if (prospectDaily(db) > 0 && (!v2 || now - lastRun(db, 'job.prospect') > 20 * 36e5)) r.prospect = background('prospect', () => runNationalCampaign(db, { now }), 'Prospection nationale');
     const { enrichEnabled, enrichBatch } = await import('./enrich.js');
     if ((enrichEnabled(db) || config.osmEnrich) && now - lastRun(db, 'job.enrich') > 55 * 60e3) r.enrich = background('enrich', () => enrichBatch(db, { now }), 'Coordonnées');
   }

@@ -1,4 +1,5 @@
 // Suivi commercial des 30 premiers jours : chaque appel ou contact est noté, puis relié aux inscriptions et paiements.
+import { applyOptout } from './suppression.js';
 import { config, PLANS } from './config.js';
 import { TEMPLATES } from './templates.js';
 
@@ -19,7 +20,8 @@ export function logContact(db, prospectId, { outcome, channel = 'appel', note = 
   const p = db.one('SELECT id, status FROM prospects WHERE id=?', prospectId); if (!p) throw new Error('Prospect introuvable');
   db.run('INSERT INTO contacts(prospect_id,channel,outcome,note,created_at) VALUES(?,?,?,?,?)', p.id, ch, outcome, String(note).slice(0, 300), now);
   const status = p.status === 'converted' ? 'converted' : o.status;
-  db.run('UPDATE prospects SET status=?, last_contact_at=? WHERE id=?', status, now, p.id);
+  if (status === 'optout') applyOptout(db, p.id, 'opposition exprimée lors d’un contact');
+  else db.run('UPDATE prospects SET status=?, last_contact_at=? WHERE id=?', status, now, p.id);
   return status;
 }
 
@@ -32,7 +34,7 @@ export function salesData(db, fromIso, toIso) {
   const contacts = db.all('SELECT c.*, p.potential, p.tpl, p.dept FROM contacts c JOIN prospects p ON p.id=c.prospect_id WHERE c.created_at BETWEEN ? AND ?', from, to);
   // Clients issus de la prospection : compte relié au prospect, créé pendant la période
   const won = db.all("SELECT t.id, t.status, t.plan, t.created_at, p.potential, p.tpl FROM tenants t JOIN prospects p ON p.id=t.prospect_id WHERE t.example=0 AND t.status!='demo' AND t.created_at BETWEEN ? AND ?", from, to);
-  const paidBy = new Map(db.all("SELECT tenant_id, SUM(amount_cents) c FROM invoices WHERE status='paid' AND paid_at BETWEEN ? AND ? GROUP BY tenant_id", from, to).map((r) => [r.tenant_id, r.c / 100]));
+  const paidBy = new Map(db.all("SELECT i.tenant_id, SUM(i.amount_cents) c FROM invoices i JOIN tenants t ON t.id=i.tenant_id WHERE i.status='paid' AND COALESCE(t.source,'')!='autotest' AND i.paid_at BETWEEN ? AND ? GROUP BY i.tenant_id", from, to).map((r) => [r.tenant_id, r.c / 100]));
   const paying = (t) => ['active', 'past_due'].includes(t.status);
 
   const blank = (label) => ({ label, contacts: 0, prospects: new Set(), positive: 0, signups: 0, paying: 0, revenue: 0 });
@@ -53,7 +55,7 @@ export function salesData(db, fromIso, toIso) {
     for (const g of [byClass[cls(t.potential)], tplRow(t.tpl)]) { g.signups++; if (paying(t)) g.paying++; g.revenue += rev; }
     const d = dayOf(t.created_at); if (d) d.signups++;
   }
-  for (const i of db.all("SELECT paid_at FROM invoices WHERE status='paid' AND paid_at BETWEEN ? AND ?", from, to)) { const d = dayOf(i.paid_at); if (d) d.paid++; }
+  for (const i of db.all("SELECT i.paid_at FROM invoices i JOIN tenants t ON t.id=i.tenant_id WHERE i.status='paid' AND COALESCE(t.source,'')!='autotest' AND i.paid_at BETWEEN ? AND ?", from, to)) { const d = dayOf(i.paid_at); if (d) d.paid++; }
   const fin = (g) => ({ ...g, prospects: g.prospects.size });
 
   // Coûts variables de la prospection sur la période
@@ -63,7 +65,7 @@ export function salesData(db, fromIso, toIso) {
   const reachByClass = Object.fromEntries(db.all("SELECT CASE WHEN potential>=75 THEN 'A' WHEN potential>=50 THEN 'B' ELSE 'C' END k, COUNT(*) n FROM prospects WHERE status='new' AND maps_closed=0 AND (phone IS NOT NULL OR email IS NOT NULL) GROUP BY k").map((r) => [r.k, r.n]));
 
   // Objectif 2027 : 50 000 € de bénéfice, soit environ 4 167 € par mois de revenu récurrent net des coûts fixes
-  const target = 50000 / 12; const mrr = db.all("SELECT plan FROM tenants WHERE status IN ('active','past_due') AND example=0").reduce((a, r) => a + (PLANS[r.plan]?.monthly || 0), 0);
+  const target = 50000 / 12; const mrr = db.all("SELECT plan FROM tenants WHERE status IN ('active','past_due') AND example=0 AND COALESCE(source,'')!='autotest'").reduce((a, r) => a + (PLANS[r.plan]?.monthly || 0), 0);
   const totals = { contacts: contacts.length, prospects: new Set(contacts.map((c) => c.prospect_id)).size, positive: contacts.filter((c) => OUTCOMES[c.outcome]?.positive).length, signups: won.length, paying: won.filter(paying).length, revenue: [...paidBy.values()].reduce((a, b) => a + b, 0) };
   return {
     totals, outcomes, reachable, reachByClass,

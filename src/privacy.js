@@ -1,4 +1,5 @@
 // RGPD : pages légales, export et suppression des données, durées de conservation, opposition à la prospection.
+import { applyOptout } from './suppression.js';
 import { config } from './config.js';
 import { sha256, randomId, hmac } from './util.js';
 import { audit } from './security.js';
@@ -32,8 +33,8 @@ export function optout(db, token) {
   if (!p) return null;
   db.tx(() => {
     // On ne garde que le strict nécessaire pour respecter l'opposition : SIREN + statut.
-    db.run("UPDATE prospects SET status='optout', name='(opposition)', address='', notes='', siret='', optout_token_hash=NULL, last_contact_at=? WHERE id=?", Date.now(), p.id);
-    if (p.demo_tenant_id) db.run("DELETE FROM tenants WHERE id=? AND status='demo'", p.demo_tenant_id);
+    // Liste d'opposition permanente (empreintes du SIREN, du téléphone et de l'e-mail), coordonnées effacées
+    applyOptout(db, p.id, 'lien d’opposition');
     // Alerte : si la liste de démarrage PROSPECT_SEED contient ce SIREN, il faut l'en retirer
     if (config.adminEmail) db.run("INSERT INTO outbox(channel,to_addr,template,payload,next_at,created_at) VALUES('email',?,'admin_alert',?,?,?)", config.adminEmail, JSON.stringify({ kind: 'opposition', message: `Opposition à la prospection : ${p.name} (SIREN ${p.siren}). Ne plus le contacter ; retirez-le de PROSPECT_SEED s'il y figure.`, at: new Date().toISOString(), url: `${config.baseUrl}/admin/prospection?statut=optout` }), Date.now(), Date.now());
   });
