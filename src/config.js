@@ -57,6 +57,10 @@ export const config = {
   firecrawlKey: env.FIRECRAWL_API_KEY || '',
   firecrawlApi: env.FIRECRAWL_API || '',
   enrichMonthlyCredits: num(env.ENRICH_MONTHLY_CREDITS, 0),
+  // Prix d'un crédit en euros pour le calcul du coût par prospect joignable (0 = crédits gratuits)
+  enrichEurPerCredit: num(env.ENRICH_EUR_PER_CREDIT, 0),
+  // Suivi des ouvertures de démo PAR entreprise : désactivé par défaut (seul un total anonyme par jour est compté)
+  trackDemoViews: env.TRACK_DEMO_VIEWS === '1',
   // Recette : les e-mails/WhatsApp ne partent que vers ces adresses ou domaines (ex. "walner.amanti@gmail.com,@exemple.fr")
   testAllowlist: (env.TEST_ALLOWLIST || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
   // Domaines personnalisés (API Render)

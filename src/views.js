@@ -254,7 +254,7 @@ export function legalPage(kind) {
   const [title, body] = pages[kind];
   return layout(t(title), `<header class="mk"><div class="wrap row"><a class="logo" href="/">ClientDirect Pro</a>${langSwitch('/' + kind)}</div></header><main class="band legal"><div class="wrap"><h1>${t(title)}</h1>${body}<p class="note">${t('Dernière mise à jour : 25 novembre 2026.')}</p></div></main>${FOOT()}`);
 }
-export { adminDashboard, adminTicket, adminProspects, adminProfit, adminReview, adminPartners } from './views-admin.js';
+export { adminDashboard, adminTicket, adminProspects, adminProfit, adminReview, adminPartners, adminCampaigns, adminCampaign } from './views-admin.js';
 
 /** Pages par métier : point d'entrée naturel depuis Google (« site internet garage avec rendez-vous », etc.). */
 export function metiersIndex() {
@@ -287,13 +287,15 @@ export function partnersPage({ csrf, sent = false, errors = [], f = {} }) {
   return layout(t('Programme partenaires'), `<header class="mk"><div class="wrap row"><a class="logo" href="/">ClientDirect Pro</a>${langSwitch('/partenaires')}</div></header><main class="band"><div class="wrap two">
   <div><h1>${t('Programme partenaires')}</h1><p class="lead">${t('Vous conseillez des artisans, commerçants ou indépendants ? Recommandez ClientDirect Pro et touchez 20 % des sommes hors taxes que vos clients nous paient pendant leurs 12 premiers mois.')}</p>
   <ul class="feat big"><li>${ICON.check}<span>${t('Commission versée uniquement sur des paiements réellement encaissés.')}</span></li><li>${ICON.check}<span>${t('Validation 30 jours après chaque paiement, sans remboursement entre-temps ; versement par virement dès 50 € dus.')}</span></li><li>${ICON.check}<span>${t('Un lien personnel et un tableau de bord privé : visites, inscriptions, abonnés, commissions.')}</span></li><li>${ICON.check}<span>${t('Aucun coût, aucun engagement, arrêt à tout moment.')}</span></li></ul>
-  <p class="muted small">${t('Exemple : un client Pro paie 399 € HT de mise en service puis 149 € HT par mois ; votre commission sur sa première année est de 437,40 €.')}</p></div>
+  <p class="muted small">${t('Exemple : un client Pro paie 399 € HT de mise en service puis 149 € HT par mois ; votre commission sur sa première année est de 437,40 €.')}</p>
+  <p class="muted small">${t('Organismes publics (chambres de métiers, CCI) et professions réglementées (experts-comptables, avocats…) : partenariat sans commission, avec lien suivi et statistiques, pour respecter vos règles professionnelles.')}</p></div>
   <div class="card">${sent ? `<h2>${t('Merci !')}</h2><p>${t('Votre candidature est enregistrée. Vous recevrez votre lien personnel après validation.')}</p>` : `<h2>${t('Devenir partenaire')}</h2>${errors.length ? `<div class="flash err">${errors.map(esc).join('<br>')}</div>` : ''}<form method="post" action="/partenaires">${csrfField(csrf)}
   <label for="pa-n">${t('Votre nom')}</label><input id="pa-n" name="name" required maxlength="80" value="${v('name')}"><label for="pa-c">${t("Nom de l'entreprise")}</label><input id="pa-c" name="company" required maxlength="120" value="${v('company')}">
-  <label for="pa-a">${t('Activité')}</label><select id="pa-a" name="activity">${['Expert-comptable', 'Chambre de métiers ou CCI', 'Réseau ou association d’entrepreneurs', 'Agence ou consultant', 'Autre'].map((a) => `<option ${f.activity === a ? 'selected' : ''}>${t(a)}</option>`).join('')}</select>
+  <label for="pa-a">${t('Activité')}</label><select id="pa-a" name="activity">${['Agence ou consultant', 'Réseau ou association d’entrepreneurs', 'Fournisseur ou prestataire des artisans', 'Expert-comptable', 'Chambre de métiers ou CCI', 'Avocat ou autre profession réglementée', 'Autre'].map((a) => `<option value="${esc(a)}" ${f.activity === a ? 'selected' : ''}>${t(a)}</option>`).join('')}</select>
   <label for="pa-e">${t('E-mail')}</label><input id="pa-e" name="email" type="email" required maxlength="190" value="${v('email')}"><label for="pa-p">${t('Téléphone')}</label><input id="pa-p" name="phone" type="tel" maxlength="30" value="${v('phone')}">
   <label for="pa-s">${t('SIRET (pour le versement des commissions)')}</label><input id="pa-s" name="siret" inputmode="numeric" maxlength="14" value="${v('siret')}">
-  <label class="ck"><input type="checkbox" name="cgu" required> ${t('J’accepte les conditions du programme partenaires.')}</label><button class="btn blue" type="submit">${t('Envoyer ma candidature')}</button></form>`}</div></div></main>${FOOT()}`, { head: `<link rel="canonical" href="${esc(config.baseUrl)}/partenaires">` });
+  <label class="ck"><input type="checkbox" name="certify"> ${t('Je certifie que ma profession et mon statut m’autorisent à percevoir une commission d’apport d’affaires, que je facturerai.')}</label>
+  <label class="ck"><input type="checkbox" name="cgu" required> ${t('J’accepte les')} <a href="/partenaires/conditions" target="_blank" rel="noopener">${t('conditions du programme partenaires')}</a>.</label><button class="btn blue" type="submit">${t('Envoyer ma candidature')}</button></form>`}</div></div></main>${FOOT()}`, { head: `<link rel="canonical" href="${esc(config.baseUrl)}/partenaires">` });
 }
 export function partnerDashboard(p, st, link) {
   const e = (v) => money(v, 'EUR', locale(currentLang(), 'FR'));
@@ -302,4 +304,19 @@ export function partnerDashboard(p, st, link) {
   <label for="pl">${t('Votre lien à partager')}</label><input id="pl" readonly value="${esc(link)}">
   <div class="kpis">${k(st.clicks, t('visites'))}${k(st.signups, t('inscriptions'))}${k(st.paying, t('abonnés payants'))}${k(e(st.pending), t('commissions en attente (30 jours)'))}${k(e(st.toPay), t('à vous verser'))}${k(e(st.paid), t('déjà versé'))}</div>
   <p class="muted">${t('Commission de {r} % des sommes hors taxes encaissées pendant les 12 premiers mois de chaque client. Versement par virement dès 50 € dus, sur facture de votre part.', { r: p.rate_pct })}</p></div></main>${FOOT()}`, { head: '<meta name="robots" content="noindex">' });
+}
+
+export function partnerTerms() {
+  const L = config.legal;
+  const items = [
+    ['Objet', 'Le partenaire recommande ClientDirect Pro à des professionnels. Il agit en indépendant : il ne représente pas ClientDirect Pro, ne signe rien en son nom et ne reçoit aucune donnée des clients au-delà des statistiques de son espace (visites, inscriptions, abonnés, commissions).'],
+    ['Commission', 'Vingt pour cent des sommes hors taxes réellement encaissées pendant les douze premiers mois de chaque client inscrit avec le lien du partenaire. Rien n’est dû sur une inscription, un essai gratuit, un impayé ou une somme remboursée.'],
+    ['Validation et paiement', 'Chaque commission est validée trente jours après le paiement du client, sauf remboursement. Elle est versée par virement dès cinquante euros dus, sur facture du partenaire mentionnant son SIRET. Les sommes versées sont déclarées à l’administration fiscale lorsque la loi l’exige (déclaration des honoraires et commissions).'],
+    ['Partenaires sans commission', 'Organismes publics et professions dont les règles encadrent ou interdisent ce type de rémunération (experts-comptables, avocats…) : le partenariat est possible sans aucune rémunération. Le partenaire qui demande une commission certifie que sa profession et son statut le lui permettent.'],
+    ['Règles de recommandation', 'Le partenaire présente le service avec exactitude (formules, prix, fonctionnalités) et respecte les règles de prospection : aucun démarchage de particuliers sans leur consentement, aucun envoi en masse non sollicité au nom de ClientDirect Pro, retrait immédiat de toute personne qui s’y oppose.'],
+    ['Durée', 'Sans engagement. Chaque partie peut arrêter à tout moment ; les commissions déjà validées restent dues. Un manquement à ces règles entraîne l’arrêt immédiat et l’annulation des commissions non validées.'],
+    ['Parrainage des clients', 'Un client qui recommande un professionnel reçoit un mois d’abonnement offert, et son filleul aussi, au premier paiement du filleul, validé trente jours plus tard sauf remboursement ; douze mois offerts au maximum par an. Aucun versement d’argent.'],
+    ['Éditeur', `${L.name}, ${L.owner}, SIRET ${L.siret}.`]
+  ];
+  return layout(t('Conditions du programme partenaires'), `<header class="mk"><div class="wrap row"><a class="logo" href="/">ClientDirect Pro</a></div></header><main class="band"><div class="wrap legal"><h1>${t('Conditions du programme partenaires')}</h1>${items.map(([h, p]) => `<h2>${t(h)}</h2><p>${t(p)}</p>`).join('')}</div></main>${FOOT()}`);
 }

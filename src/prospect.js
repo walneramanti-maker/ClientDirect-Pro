@@ -87,8 +87,11 @@ export function prepareDemo(db, prospectId, { stable = false } = {}) {
 
 /** Message de prise de contact, prêt à copier (WhatsApp, e-mail, SMS). */
 /** Message de prise de contact B2B : identifie l'expéditeur, l'origine des données et donne un moyen simple de s'opposer. */
-export function outreachMessage(p, demoUrl, stopUrl) {
-  return `Bonjour, je suis ${config.legal.owner}, de ClientDirect Pro. J'ai préparé gratuitement un exemple de site pour ${displayName(p.name)} : vos clients y voient vos prestations, demandent un devis à toute heure et vous écrivent sur WhatsApp. C'est une démonstration non officielle, visible seulement par vous : ${demoUrl}\nSi ça vous intéresse, je vous le présente en 10 minutes, par téléphone ou en visio. Essai gratuit 14 jours, sans carte bancaire.\n\nVos coordonnées professionnelles proviennent du registre public des entreprises (INSEE). Pour ne plus être contacté et supprimer cette démo : ${stopUrl} (ou répondez STOP).`;
+export const PLAN_LINE = 'Trois formules : Essentiel (79 € HT/mois) pour votre site, vos demandes de devis et WhatsApp ; Pro (149 € HT/mois) qui ajoute la prise de rendez-vous en ligne, les rappels automatiques et les statistiques ; Premium (249 € HT/mois) qui ajoute un assistant qui répond à vos clients 24 h/24. L’exemple montre toutes les fonctions (Premium).';
+export function outreachMessage(p, demoUrl, stopUrl, { channel = 'email' } = {}) {
+  const name = displayName(p.name);
+  if (channel === 'sms') return `Bonjour, Walner de ClientDirect Pro. Exemple de site gratuit préparé pour ${name} (devis, WhatsApp, rendez-vous en ligne) : ${demoUrl} – démo non officielle. Essai 14 j sans carte. Plus de message : STOP ou ${stopUrl}`;
+  return `Bonjour,\n\nJe suis ${config.legal.owner}, fondateur de ClientDirect Pro. J'ai préparé gratuitement un exemple de site pour ${name} : vos clients y voient vos prestations, vous demandent un devis et vous écrivent sur WhatsApp, à toute heure.\n\nC'est une démonstration non officielle, accessible uniquement par ce lien personnel et non référencée sur les moteurs de recherche : ${demoUrl}\n\n${PLAN_LINE} Essai gratuit 14 jours, sans carte bancaire.\n\nSi l'exemple vous plaît, je vous le présente en 10 minutes, par téléphone ou en visio.\n\n${config.legal.owner} – ClientDirect Pro (${config.legal.name}, SIRET ${config.legal.siret})\n\nVos coordonnées professionnelles proviennent du registre public des entreprises (INSEE) et de votre fiche d'établissement publique. Elles servent uniquement à vous présenter ce service et sont conservées au plus 36 mois sans réponse. Vous pouvez y accéder, les faire corriger ou supprimer en répondant à ce message. Pour ne plus être contacté et supprimer la démo : ${stopUrl} (ou répondez STOP).`;
 }
 
 export function demoTenantByToken(db, token) {
@@ -103,7 +106,9 @@ export function demoTenantByToken(db, token) {
   return db.one('SELECT * FROM tenants WHERE id=?', r.tenantId);
 }
 export function recordDemoView(db, tenant) {
-  if (tenant.prospect_id) db.run('UPDATE prospects SET demo_views=demo_views+1 WHERE id=?', tenant.prospect_id);
+  // Total anonyme par jour, sans lien avec l'entreprise
+  db.run("INSERT INTO visits_source(day,source,n) VALUES(?,'demo',1) ON CONFLICT(day,source) DO UPDATE SET n=n+1", new Date().toISOString().slice(0, 10));
+  if (config.trackDemoViews && tenant.prospect_id) db.run('UPDATE prospects SET demo_views=demo_views+1 WHERE id=?', tenant.prospect_id);
 }
 export const PIPELINE = { new: 'À contacter', contacted: 'Contacté', demo: 'Démo envoyée', converted: 'Client', lost: 'Pas intéressé', optout: 'Ne plus contacter' };
 export function prospectStats(db) {

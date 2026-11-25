@@ -27,7 +27,7 @@ export function onInvoicePaid(db, t, o, now = Date.now()) {
   if (t.partner_id) {
     const p = db.one("SELECT * FROM partners WHERE id=? AND status='active'", t.partner_id);
     const first = db.one("SELECT MIN(paid_at) at FROM invoices WHERE tenant_id=? AND status='paid'", t.id).at || now;
-    if (p && now - first <= PROGRAM.partnerMonths * 30.44 * 864e5) ins('commission', { partner: p.id, cents: Math.round(net * (p.rate_pct ?? PROGRAM.partnerRatePct) / 100) });
+    if (p && p.rate_pct > 0 && now - first <= PROGRAM.partnerMonths * 30.44 * 864e5) ins('commission', { partner: p.id, cents: Math.round(net * (p.rate_pct ?? PROGRAM.partnerRatePct) / 100) });
   }
   // Parrainage : au PREMIER paiement du filleul, un mois offert au parrain et au filleul
   if (t.referred_by_tenant_id && db.one("SELECT COUNT(*) n FROM invoices WHERE tenant_id=? AND status='paid'", t.id).n === 1) {
@@ -73,8 +73,20 @@ export async function processRewards(db, { now = Date.now(), stripeCall = null }
 
 // ---------- Partenaires ----------
 const slug = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 12) || 'partenaire';
+/**
+ * Pas de commission pour les organismes publics (CMA, CCI) ni pour les professions dont la déontologie
+ * encadre ou interdit les rémunérations liées aux résultats ou à l'apport d'affaires (experts-comptables, avocats…) :
+ * ils restent partenaires « relais » (lien suivi, statistiques) sans rémunération.
+ * Les autres doivent avoir un SIRET (facture obligatoire) et certifier que leur statut les y autorise.
+ */
+export const NO_COMMISSION = ['Expert-comptable', 'Chambre de métiers ou CCI', 'Avocat ou autre profession réglementée'];
+export function partnerRate(f) {
+  if (NO_COMMISSION.includes(f.activity)) return 0;
+  if (!/^\d{14}$/.test(String(f.siret || '')) || f.certify !== 'on') return 0;
+  return PROGRAM.partnerRatePct;
+}
 export function applyPartner(db, f, now = Date.now()) {
-  return Number(db.run("INSERT INTO partners(name,company,email,phone,siret,activity,status,rate_pct,created_at) VALUES(?,?,?,?,?,?,'pending',?,?)", f.name, f.company, f.email, f.phone || '', f.siret || '', f.activity || '', PROGRAM.partnerRatePct, now).lastInsertRowid);
+  return Number(db.run("INSERT INTO partners(name,company,email,phone,siret,activity,status,rate_pct,created_at) VALUES(?,?,?,?,?,?,'pending',?,?)", f.name, f.company, f.email, f.phone || '', f.siret || '', f.activity || '', partnerRate(f), now).lastInsertRowid);
 }
 /** Validation par l'administrateur : crée le code du lien et l'accès privé au tableau de bord du partenaire. */
 export function approvePartner(db, id, now = Date.now()) {

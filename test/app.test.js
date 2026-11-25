@@ -211,7 +211,8 @@ test('prospection : registre Sirene, démo personnalisée, activation par le pro
   const day = (await v.json(`/demo/${token}/creneaux?service=${svc}`)).days[1];
   const fake = await v.json(`/demo/${token}/rdv`, { date: day, time: '09:00', serviceId: svc, name: 'X', phone: '0694000000' });
   assert.equal(fake.demo, true); assert.equal(db.one('SELECT COUNT(*) n FROM appointments WHERE tenant_id=?', dt.id).n, 0, 'rien enregistré en démo');
-  assert.equal(db.one('SELECT demo_views FROM prospects WHERE id=?', pr.id).demo_views, 1);
+  assert.equal(db.one('SELECT demo_views FROM prospects WHERE id=?', pr.id).demo_views, 0, 'aucun suivi individuel des visites par défaut');
+  assert.ok(db.one("SELECT COALESCE(SUM(n),0) n FROM visits_source WHERE source='demo'").n >= 1, 'total anonyme seulement');
   const claim = await v.submit(`/inscription?claim=${token}`, '/inscription', { claim: token, plan: 'pro', name: 'Patron', email: 'patron@gdm.fr', password: 'Maroni2026ok', cgu: 'on' });
   assert.equal(claim.status, 303);
   const t = db.one('SELECT * FROM tenants WHERE id=?', dt.id);

@@ -13,6 +13,7 @@ import { billingConfigured, createCheckout, createPortal, verifyStripeSignature,
 import { safeSearch, importProspects, prepareDemo, outreachMessage, demoTenantByToken, recordDemoView, prospectStats, PIPELINE, runNationalCampaign, campaignStatus, demoTokenFor, displayName } from './prospect.js';
 import { DEPARTEMENTS } from './france.js';
 import { enrichBatch, enrichStatus } from './enrich.js';
+import { createCampaign, campaignDetail, approveCampaign, cancelCampaign } from './campaigns.js';
 import { applyPartner, approvePartner, partnerByToken, partnerStats, referralStats, PROGRAM } from './rewards.js';
 import { supportAnswer, openTicket, replyTicket } from './support.js';
 import { recordIncident, openIncidents, resolveIncident } from './incidents.js';
@@ -92,7 +93,7 @@ export function createApp(db) {
   on('GET', '/partenaires', (c) => html(c.res, V.partnersPage({ csrf: csrfToken(c) })));
   on('POST', '/partenaires', (c) => {
     checkCsrf(c); limit(c, 'partner', 5, 3600e3);
-    const f = { name: clampStr(c.form.name, 80), company: clampStr(c.form.company, 120), email: clampStr(c.form.email, 190).toLowerCase(), phone: clampStr(c.form.phone, 30), siret: String(c.form.siret || '').replace(/\D/g, '').slice(0, 14), activity: clampStr(c.form.activity, 80) };
+    const f = { name: clampStr(c.form.name, 80), company: clampStr(c.form.company, 120), email: clampStr(c.form.email, 190).toLowerCase(), phone: clampStr(c.form.phone, 30), siret: String(c.form.siret || '').replace(/\D/g, '').slice(0, 14), activity: clampStr(c.form.activity, 80), certify: c.form.certify };
     const errors = [];
     if (!f.name) errors.push(tr('Indiquez votre nom.')); if (!f.company) errors.push(tr('Indiquez le nom de l’entreprise.')); if (!emailOk(f.email)) errors.push(tr('Adresse e-mail invalide.')); if (c.form.cgu !== 'on') errors.push(tr('Vous devez accepter les conditions du programme.'));
     if (errors.length) return html(c.res, V.partnersPage({ csrf: csrfToken(c), errors, f }), 400);
@@ -101,6 +102,7 @@ export function createApp(db) {
     emit(db, 'partenaire', { entreprise: f.company, nom: f.name, activite: f.activity, id });
     html(c.res, V.partnersPage({ csrf: csrfToken(c), sent: true }));
   });
+  on('GET', '/partenaires/conditions', (c) => html(c.res, V.partnerTerms()));
   on('GET', '/partenaire/:token', (c) => {
     const p = partnerByToken(db, c.params.token); if (!p) throw HttpError(404, 'Page introuvable');
     html(c.res, V.partnerDashboard(p, partnerStats(db, p), `${config.baseUrl}/?ref=p-${p.code}`));
@@ -340,7 +342,7 @@ export function createApp(db) {
     const row = demoTenantByToken(db, c.params.token);
     if (!row) return html(c.res, V.messagePage('Démonstration terminée', 'Ce site a été activé ou la démonstration n’existe plus.', ['Découvrir ClientDirect Pro', '/']), 404);
     recordDemoView(db, row);
-    if (row.prospect_id) emit(db, 'demo_vue', { entreprise: row.name, prospect_id: row.prospect_id, vues: db.one('SELECT demo_views FROM prospects WHERE id=?', row.prospect_id)?.demo_views || 0 }, row.id);
+    if (row.prospect_id && config.trackDemoViews) emit(db, 'demo_vue', { entreprise: row.name, prospect_id: row.prospect_id }, row.id);
     renderSite(c, loadTenant(db, 'id', row.id), `/demo/${c.params.token}`, 'demo', c.params.token);
   });
   siteApi('/demo/:token', demoResolve);
@@ -488,9 +490,27 @@ export function createApp(db) {
       byTerritory: [...ter.values()].sort((a, b) => b.signups - a.signups),
       feedback: { list: fbl, count: fbl.length, avg: fbl.length ? Math.round((fbl.reduce((a, f) => a + f.score, 0) / fbl.length) * 10) / 10 : null },
       tickets: db.one("SELECT COUNT(*) total, SUM(status='open') open FROM tickets WHERE created_at BETWEEN ? AND ?", from, to),
-      prospects: { found: pr.found || 0, viewed: pr.viewed || 0, converted: pr.converted || 0, optout: pr.optout || 0, depts: pr.depts || 0 }
+      prospects: { found: pr.found || 0, viewed: db.one("SELECT COALESCE(SUM(n),0) n FROM visits_source WHERE source='demo' AND day BETWEEN ? AND ?", fromIso, toIso).n, converted: pr.converted || 0, optout: pr.optout || 0, depts: pr.depts || 0 }
     };
   }
+  on('GET', '/admin/campagnes', (c) => { requireAdmin(c); html(c.res, V.adminCampaigns(csrfToken(c), { list: db.all('SELECT * FROM campaigns ORDER BY id DESC LIMIT 200') })); });
+  on('POST', '/admin/campagnes', (c) => {
+    requireAdmin(c); checkCsrf(c);
+    const depts = String(c.form.depts || '').split(/[\s,;]+/).map((x) => x.trim().toUpperCase()).filter(Boolean);
+    const tpls = Object.keys(TEMPLATES).filter((k) => c.form[`tpl_${k}`] === 'on');
+    try { const id = createCampaign(db, { name: c.form.name, channel: c.form.channel, depts, tpls, minScore: c.form.minScore, size: c.form.size }); audit(db, { action: 'campagne.preparee', detail: String(id), ip: c.ip }); redirect(c.res, `/admin/campagnes/${id}`); }
+    catch (e) { html(c.res, V.adminCampaigns(csrfToken(c), { list: db.all('SELECT * FROM campaigns ORDER BY id DESC LIMIT 200'), msg: e.message }), 400); }
+  });
+  on('GET', '/admin/campagnes/:id', (c) => { requireAdmin(c); const d = campaignDetail(db, Number(c.params.id)); if (!d) throw HttpError(404, 'Campagne introuvable'); html(c.res, V.adminCampaign(csrfToken(c), d)); });
+  on('POST', '/admin/campagnes/:id/valider', (c) => { requireAdmin(c); checkCsrf(c); approveCampaign(db, Number(c.params.id)); audit(db, { action: 'campagne.validee', detail: String(c.params.id), ip: c.ip }); redirect(c.res, `/admin/campagnes/${Number(c.params.id)}`); });
+  on('POST', '/admin/campagnes/:id/annuler', (c) => { requireAdmin(c); checkCsrf(c); cancelCampaign(db, Number(c.params.id)); redirect(c.res, '/admin/campagnes'); });
+  on('GET', '/admin/campagnes/:id/export.csv', (c) => {
+    requireAdmin(c); const id = Number(c.params.id);
+    const cmp = db.one("SELECT * FROM campaigns WHERE id=? AND status='approved'", id); if (!cmp) throw HttpError(404, 'Campagne non validée');
+    const rows = db.all("SELECT i.*, p.name, p.city, p.dept, p.siren FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? AND i.status='ready' AND p.status!='optout' ORDER BY i.id", id);
+    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    send(c.res, 200, '\ufeff' + [['Entreprise', 'Ville', 'Département', 'SIREN', 'Destinataire', 'Message'].map(q).join(';'), ...rows.map((r) => [displayName(r.name), displayName(r.city), r.dept, r.siren, r.to_addr, r.message].map(q).join(';'))].join('\r\n'), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="campagne-${id}.csv"` });
+  });
   on('GET', '/admin/partenaires', (c) => {
     requireAdmin(c);
     const partners = db.all('SELECT * FROM partners ORDER BY status, id DESC').map((p) => ({ ...p, st: p.code ? partnerStats(db, p) : null }));

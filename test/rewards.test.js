@@ -70,7 +70,7 @@ test('partenaires : candidature, validation, lien suivi, 20 % du HT encaissé, v
   const pub = app.client(); const page = await pub.get('/partenaires');
   assert.match(page.text, /20 %/); assert.match(page.text, /437,40/);
   const bad = await pub.post('/partenaires', { csrf: pub.csrf(page.text), name: 'A', company: '', email: 'x' }); assert.equal(bad.status, 400);
-  const ok = await pub.post('/partenaires', { csrf: pub.csrf(page.text), name: 'Claire Compta', company: 'Cabinet Compta Lyon', email: 'claire@compta.fr', phone: '0478000000', siret: '12345678900012', activity: 'Expert-comptable', cgu: 'on' });
+  const ok = await pub.post('/partenaires', { csrf: pub.csrf(page.text), name: 'Claire Compta', company: 'Cabinet Compta Lyon', email: 'claire@compta.fr', phone: '0478000000', siret: '12345678900012', activity: 'Agence ou consultant', certify: 'on', cgu: 'on' });
   assert.equal(ok.status, 200); assert.match(ok.text, /candidature est enregistrée/);
   const p = db.one("SELECT * FROM partners WHERE email='claire@compta.fr'"); assert.equal(p.status, 'pending');
   const { link, dashboard } = R.approvePartner(db, p.id);
@@ -90,4 +90,17 @@ test('partenaires : candidature, validation, lien suivi, 20 % du HT encaissé, v
   db.run("UPDATE invoices SET paid_at=? WHERE stripe_invoice='in_gc1'", Date.now() - 400 * 864e5);
   await hook(ev('invoice.paid', { id: 'in_gc13', customer: 'cus_gc', amount_paid: 14900, currency: 'eur' }));
   assert.equal(db.one("SELECT COUNT(*) n FROM rewards WHERE kind='commission'").n, 1);
+});
+
+test('partenaires : expert-comptable ou CCI sans commission, et pas de commission sans SIRET', async () => {
+  const ec = R.applyPartner(db, { name: 'EC', company: 'Cabinet EC', email: 'ec@x.fr', siret: '12345678900099', activity: 'Expert-comptable', certify: 'on' });
+  const cci = R.applyPartner(db, { name: 'CCI', company: 'CCI Guyane', email: 'cci@x.fr', activity: 'Chambre de métiers ou CCI', certify: 'on' });
+  const nosiret = R.applyPartner(db, { name: 'Ag', company: 'Agence', email: 'ag@x.fr', activity: 'Agence ou consultant', certify: 'on' });
+  for (const id of [ec, cci, nosiret]) assert.equal(db.one('SELECT rate_pct FROM partners WHERE id=?', id).rate_pct, 0);
+  const { link } = R.approvePartner(db, ec); const code = /ref=p-(\w+)/.exec(link)[1];
+  const cl = await viaLink(`p-${code}`, { business: 'Garage EC', email: 'gec@r.fr' });
+  db.run("UPDATE tenants SET stripe_customer='cus_gec', status='active' WHERE id=?", cl.id);
+  await hook(ev('invoice.paid', { id: 'in_gec', customer: 'cus_gec', amount_paid: 54800, currency: 'eur' }));
+  assert.equal(db.one("SELECT COUNT(*) n FROM rewards WHERE invoice='in_gec'").n, 0, 'partenaire relais : aucune commission');
+  assert.match((await app.client().get('/partenaires/conditions')).text, /SIRET 944 602 226 00010|SIRET/);
 });
