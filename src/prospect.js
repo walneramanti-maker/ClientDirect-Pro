@@ -169,7 +169,12 @@ export async function runNationalCampaign(db, { quota = prospectDaily(db), pause
     const pass = Math.floor(cursor / U); const u = CAMPAIGN_UNITS[cursor % U];
     if (pass >= 40) { r.stopped = 'couverture complète'; break; }
     try {
-      const { list } = await searchSirene({ tpl: u.tpl, departement: u.d, page: pass + 1, withMeta: true });
+      let list = null;
+      // Service public limité à quelques requêtes par seconde : attente progressive avant de réessayer
+      for (let k = 0; ; k++) {
+        try { ({ list } = await searchSirene({ tpl: u.tpl, departement: u.d, page: pass + 1, withMeta: true })); break; }
+        catch (e) { if (!e.rateLimited || k >= 4 || !pause) throw e; r.waits = (r.waits || 0) + 1; await new Promise((ok) => setTimeout(ok, 2000 * 2 ** k)); }
+      }
       r.calls++; r.added += importProspects(db, list);
     } catch (e) {
       r.calls++;

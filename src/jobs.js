@@ -76,7 +76,12 @@ export async function runJobs(db, now = Date.now()) {
     // Nouvel ordre national (tous les départements à chaque tour) : un premier passage immédiat
     const v2 = db.one("SELECT v FROM meta WHERE k='prospect_order'")?.v === 'v2';
     if (!v2) { db.run("INSERT INTO meta(k,v) VALUES('prospect_order','v2') ON CONFLICT(k) DO UPDATE SET v='v2'"); db.run("INSERT INTO meta(k,v) VALUES('prospect_cursor','0') ON CONFLICT(k) DO UPDATE SET v='0'"); }
-    if (prospectDaily(db) > 0 && (!v2 || now - lastRun(db, 'job.prospect') > 20 * 36e5)) r.prospect = background('prospect', () => runNationalCampaign(db, { now }), 'Prospection nationale');
+    // Si le dernier passage a été interrompu (limite du service public) avant le quota du jour, il reprend une heure plus tard
+    const lastP = db.one("SELECT detail, created_at FROM audit WHERE action='job.prospect' ORDER BY id DESC LIMIT 1");
+    let lastAdded = Infinity; try { lastAdded = JSON.parse(lastP?.detail || '{}').added ?? Infinity; } catch { lastAdded = Infinity; }
+    const addedToday = db.one("SELECT COUNT(*) n FROM prospects WHERE created_at > ?", now - 20 * 36e5).n;
+    const resume = lastP && now - lastP.created_at > 60 * 60e3 && lastAdded < prospectDaily(db) && addedToday < prospectDaily(db);
+    if (prospectDaily(db) > 0 && (!v2 || resume || now - lastRun(db, 'job.prospect') > 20 * 36e5)) r.prospect = background('prospect', () => runNationalCampaign(db, { now }), 'Prospection nationale');
     const { enrichEnabled, enrichBatch } = await import('./enrich.js');
     if ((enrichEnabled(db) || config.osmEnrich) && now - lastRun(db, 'job.enrich') > 55 * 60e3) r.enrich = background('enrich', () => enrichBatch(db, { now }), 'Coordonnées');
   }

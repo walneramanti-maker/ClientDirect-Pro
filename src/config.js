@@ -52,7 +52,7 @@ export const config = {
   sireneApi: env.SIRENE_API || 'https://recherche-entreprises.api.gouv.fr',
   // Prospection nationale automatique : nombre de nouvelles entreprises repérées par jour (0 = arrêtée)
   prospectDaily: num(env.PROSPECT_DAILY, 0),
-  prospectPauseMs: num(env.PROSPECT_PAUSE_MS, 300),
+  prospectPauseMs: num(env.PROSPECT_PAUSE_MS, 600),
   // Recherche automatique des coordonnées (Firecrawl). Rien ne part sans clé ET sans plafond mensuel autorisé.
   firecrawlKey: env.FIRECRAWL_API_KEY || '',
   firecrawlApi: env.FIRECRAWL_API || '',

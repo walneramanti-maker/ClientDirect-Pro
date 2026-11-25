@@ -133,7 +133,7 @@ export async function verifyInSirene(place, { postal, city, tpl }) {
  * Coordonnées gratuites d'abord : OpenStreetMap, une requête par code postal et métier.
  * Les entreprises trouvées n'ont plus besoin de Firecrawl ; les autres restent pour la recherche Maps.
  */
-export async function osmPass(db, { maxGroups = 60, now = Date.now(), pause = config.prospectPauseMs } = {}) {
+export async function osmPass(db, { maxGroups = 25, now = Date.now(), pause = config.prospectPauseMs } = {}) {
   const r = { groups: 0, found: 0, stopped: '' };
   if (!config.osmEnrich) { r.stopped = 'désactivé'; return r; }
   const groups = db.all(`SELECT postal, MIN(city) city FROM prospects p WHERE status='new' AND enriched_at IS NULL AND osm_checked_at IS NULL AND postal!='' GROUP BY postal ORDER BY (SELECT COUNT(*) FROM prospects q WHERE q.dept=MIN(p.dept) AND q.osm_checked_at IS NOT NULL) ASC, MAX(score) DESC, COUNT(*) DESC LIMIT ?`, maxGroups);
@@ -151,6 +151,7 @@ export async function osmPass(db, { maxGroups = 60, now = Date.now(), pause = co
         phone, pl.website || null, pl.email || null, OSM_SOURCE, phone || pl.email ? now : null, now, siteFromListing(pl.website, false), p.id);
       if (phone || pl.email) r.found++;
     }
+    if (r.groups % 10 === 0 && config.appEnv !== 'test') console.log(`Coordonnées (OpenStreetMap) : ${r.groups}/${groups.length} codes postaux, ${r.found} trouvées`);
     if (pause) await new Promise((ok) => setTimeout(ok, Math.max(pause, 1000))); // usage raisonnable du service public
   }
   return r;
