@@ -24,9 +24,9 @@ test('i18n : langue détectée depuis le navigateur, choix mémorisé', async ()
   assert.equal(i18n.detectLang({ query: 'en', accept: 'fr-FR' }), 'en');
   assert.equal(i18n.regionFromAccept('fr-BE,fr;q=0.9'), 'BE');
   const en = await app.client().get('/', { 'accept-language': 'en-US,en;q=0.9' });
-  assert.match(en.text, /<html lang="en">/); assert.match(en.text, /Your customers book online/); assert.match(en.text, /\$169/, 'prix en dollars US pour un visiteur américain');
+  assert.match(en.text, /<html lang="en">/); assert.match(en.text, /What if your website worked for you/); assert.match(en.text, /\$169/, 'prix en dollars US pour un visiteur américain');
   const ca = await app.client().get('/', { 'accept-language': 'fr-CA,fr;q=0.9' });
-  assert.match(ca.text, /Vos clients réservent en ligne/); assert.match(ca.text, /219\s\$/, 'Canadien francophone : dollars canadiens');
+  assert.match(ca.text, /Et si votre site Internet travaillait pour vous/); assert.match(ca.text, /219\s\$/, 'Canadien francophone : dollars canadiens');
   const c = app.client(); const r = await c.get('/?lang=en'); assert.match(r.headers.get('set-cookie') || '', /lang=en/);
   assert.match((await c.get('/connexion')).text, /Forgot your password/, 'choix de langue conservé');
 });

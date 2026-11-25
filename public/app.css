@@ -85,3 +85,4 @@ input[type=checkbox]{width:auto;min-height:0;margin-right:6px}input[type=color]{
 
 .feat-off-title{margin:4px 0 0;font-size:.8rem;text-transform:uppercase;letter-spacing:.04em;color:#9aa0aa}.feat.off-list{flex:0;margin-top:6px}.feat.off-list li{text-decoration:line-through;text-decoration-color:#c9ccd2}.feat-all{display:flex;gap:8px;font-weight:600;color:#1f7a4d;margin:0 0 18px}
 .demo-bar .sep{display:inline}@media(max-width:600px){.demo-bar .sep{display:none}}
+.lead-plans{font-size:1rem;opacity:.85;margin:-4px 0 18px;max-width:34em}.cta-sub{margin:-6px 0 18px;opacity:.85}
