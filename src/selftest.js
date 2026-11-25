@@ -5,6 +5,7 @@
 import { config, PLANS } from './config.js';
 import { net } from './net.js';
 import { stripe, isTestKey, priceIds } from './billing.js';
+import { purgeTestTenant } from './privacy.js';
 
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
@@ -65,15 +66,14 @@ async function onePlan(db, plan, stamp) {
     if (got.status !== 'active' || got.plan !== plan) fail('Abonnement activé', JSON.stringify(got));
     ok('Webhook Stripe et activation', `facture enregistrée, compte actif en ${PLANS[plan].name}`);
     // Nettoyage : résiliation immédiate de l'abonnement de test
-    await stripe(`subscriptions/${sub.id}`, {}, 'DELETE').catch(() => null);
-    ok('Nettoyage', 'abonnement de test résilié');
+    ok('Nettoyage', 'compte et client Stripe de test supprimés');
     return { formule: PLANS[plan].name, ok: true, etapes: steps };
   } catch (e) {
     if (!steps.length || steps[steps.length - 1].ok) steps.push({ etape: 'Erreur', ok: false, detail: String(e.message).slice(0, 200) });
     return { formule: PLANS[plan].name, ok: false, etapes: steps };
   } finally {
-    // Les comptes de test sont retirés des statistiques commerciales
-    if (tenant) db.run("UPDATE tenants SET source='autotest', status=CASE WHEN status='demo' THEN status ELSE 'canceled' END WHERE id=?", tenant.id);
+    // Les comptes de test sont supprimés entièrement (rien ne reste dans la base ni chez Stripe)
+    if (tenant) { db.run("UPDATE tenants SET source='autotest' WHERE id=?", tenant.id); await purgeTestTenant(db, tenant.id).catch(() => null); }
   }
 }
 

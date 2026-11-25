@@ -40,6 +40,12 @@ if (process.env.PROSPECT_SEED) import('./prospect.js').then(({ seedProspects }) 
 import('./potential.js').then(({ refreshPotentials }) => refreshPotentials(db)).then(() => import('./readiness.js')).then(({ readiness }) => { const r = readiness(db); console.log(`Préparation du lancement : ${r.done}/${r.total} — restant : ${r.items.filter((i) => !i.ok).map((i) => `${i.key} (${i.detail})`).join(' ; ')}`); }).catch((e) => console.error('Préparation :', e.message));
 import('./suppression.js').then(({ cleanContacts }) => console.log('Qualité des coordonnées :', JSON.stringify(cleanContacts(db)))).catch((e) => console.error('Qualité :', e.message));
 import('./netprobe.js').then(({ probeNetwork }) => probeNetwork()).then((r) => { console.log('Réseau :', JSON.stringify(r)); db.run("INSERT INTO meta(k,v) VALUES('netprobe',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", JSON.stringify({ ...r, at: new Date().toISOString() })); }).catch((e) => console.error('Réseau :', e.message));
+// Comptes de test à supprimer entièrement (PURGE_TEST_ACCOUNTS : adresses e-mail ou noms de site, séparés par des virgules)
+setTimeout(() => import('./privacy.js').then(async ({ purgeTestTenant }) => {
+  const keys = (process.env.PURGE_TEST_ACCOUNTS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const ids = db.all("SELECT t.id FROM tenants t LEFT JOIN users u ON u.id=t.owner_user_id WHERE t.source='autotest'" + (keys.length ? ` OR LOWER(t.slug) IN (${keys.map(() => '?').join(',')}) OR LOWER(u.email) IN (${keys.map(() => '?').join(',')})` : ''), ...keys, ...keys).map((r) => r.id);
+  for (const id of ids) { try { const r = await purgeTestTenant(db, id); if (r) console.log(`Compte de test supprimé entièrement : ${r.slug}`); } catch (e) { console.log('Suppression du compte de test refusée :', e.message); break; } }
+}).catch((e) => console.error('Purge :', e.message)), 5000).unref?.();
 // Autotest de bout en bout des 3 formules (mode test Stripe, hors production) : AUTOTEST=1, au plus toutes les 6 heures
 if (process.env.AUTOTEST === '1') setTimeout(() => import('./selftest.js').then(async ({ runSelfTest, selfTestAllowed }) => {
   if (!selfTestAllowed()) return console.log('Autotest : refusé (clé Stripe réelle ou production)');

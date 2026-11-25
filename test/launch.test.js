@@ -85,3 +85,27 @@ test('e-mail de test (Brevo) depuis la page Lancement', async () => {
   const h = await (await app.realFetch(app.base + '/health')).json();
   assert.equal(h.ready.alertesEmail, true); assert.equal(h.ready.veille.maintienEveil, false, 'pas en test');
 });
+
+test('compte de test supprimé entièrement : même adresse réutilisable, rien ne reste', async () => {
+  const { purgeTestTenant } = await import('../src/privacy.js');
+  const c = app.client();
+  const page = await c.get('/inscription');
+  const form = { business: 'Garage Purge', tpl: 'garage', city: 'Cayenne', country: 'GF', phone: '+594594000001', name: 'Test', email: 'reutilisable+test@exemple.fr', password: 'MotDePasseTest-2026!', cgu: 'on', plan: 'pro', lang: 'fr' };
+  await c.submit('/inscription', '/inscription', form);
+  const t = db.one("SELECT t.id FROM tenants t JOIN users u ON u.id=t.owner_user_id WHERE u.email='reutilisable+test@exemple.fr'");
+  assert.ok(t && page.status === 200);
+  db.run("INSERT INTO invoices(tenant_id,stripe_invoice,amount_cents,currency,status,created_at,paid_at) VALUES(?,?,?,?,?,?,?)", t.id, 'in_purge', 54800, 'eur', 'paid', Date.now(), Date.now());
+  const r = await purgeTestTenant(db, t.id);
+  assert.equal(r.users, 1);
+  assert.equal(db.one('SELECT COUNT(*) n FROM tenants WHERE id=?', t.id).n, 0);
+  assert.equal(db.one("SELECT COUNT(*) n FROM users WHERE email='reutilisable+test@exemple.fr'").n, 0);
+  assert.equal(db.one("SELECT COUNT(*) n FROM invoices WHERE stripe_invoice='in_purge'").n, 0);
+  // La même adresse peut resservir immédiatement
+  app.sec.resetRateLimits();
+  await app.client().submit('/inscription', '/inscription', form);
+  assert.ok(db.one("SELECT 1 x FROM users WHERE email='reutilisable+test@exemple.fr'"));
+  // Interdit en production
+  const { config } = await import('../src/config.js');
+  const prod = config.isProd; config.isProd = true;
+  try { await assert.rejects(purgeTestTenant(db, 1), /test/); } finally { config.isProd = prod; }
+});

@@ -66,3 +66,33 @@ export function deleteTenant(db, tenantId, userId, ip = '') {
   });
   audit(db, { tenantId, action: 'compte.supprime', ip });
 }
+
+/**
+ * Suppression TOTALE d'un compte de test (environnement de test uniquement) : site, réservations, factures de test,
+ * utilisateur et client Stripe de test. Rien n'est conservé : la même adresse e-mail peut resservir.
+ * Interdit en production (les vrais comptes passent par deleteTenant, qui garde les factures 10 ans).
+ */
+export async function purgeTestTenant(db, tenantId) {
+  const { config } = await import('./config.js');
+  const { isTestKey, stripe } = await import('./billing.js');
+  if (config.isProd || (config.stripeKey && !isTestKey())) throw new Error('Suppression totale réservée à l’environnement de test');
+  const t = db.one('SELECT * FROM tenants WHERE id=?', tenantId); if (!t) return null;
+  const users = db.all('SELECT user_id id FROM memberships WHERE tenant_id=? UNION SELECT ? WHERE ? IS NOT NULL', tenantId, t.owner_user_id, t.owner_user_id).map((r) => r.id).filter(Boolean);
+  // Client Stripe de test supprimé (ses abonnements de test sont résiliés avec lui)
+  if (t.stripe_customer && isTestKey()) await stripe(`customers/${t.stripe_customer}`, {}, 'DELETE').catch(() => null);
+  db.tx(() => {
+    for (const tbl of ['appointments', 'quotes', 'services', 'staff', 'hours', 'stats_daily', 'chat_logs', 'ai_usage', 'memberships', 'outbox', 'invoices', 'feedback', 'audit']) db.run(`DELETE FROM ${tbl} WHERE tenant_id=?`, tenantId);
+    db.run('DELETE FROM ticket_messages WHERE ticket_id IN (SELECT id FROM tickets WHERE tenant_id=?)', tenantId);
+    db.run('DELETE FROM tickets WHERE tenant_id=?', tenantId);
+    db.run('DELETE FROM rewards WHERE beneficiary_tenant_id=? OR source_tenant_id=?', tenantId, tenantId);
+    db.run('UPDATE tenants SET referred_by_tenant_id=NULL WHERE referred_by_tenant_id=?', tenantId);
+    db.run('UPDATE prospects SET demo_tenant_id=NULL WHERE demo_tenant_id=?', tenantId);
+    db.run('DELETE FROM tenants WHERE id=?', tenantId);
+    for (const u of users) {
+      if (db.one('SELECT 1 FROM memberships WHERE user_id=?', u) || db.one("SELECT 1 FROM users WHERE id=? AND role IN ('admin','superadmin')", u)) continue;
+      for (const tbl of ['sessions', 'tokens', 'audit', 'feedback']) db.run(`DELETE FROM ${tbl} WHERE user_id=?`, u);
+      db.run('DELETE FROM users WHERE id=?', u);
+    }
+  });
+  return { slug: t.slug, users: users.length };
+}

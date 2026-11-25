@@ -15,7 +15,7 @@ import { createTenant, loadTenant, siteState, updateSettings, userTenants } from
 import { freeSlots, openDays, book, createQuote, setAppointmentStatus, cancelByCustomer } from './booking.js';
 import { notifyAppointment, enqueue, emit } from './notify.js';
 import { answer, aiAvailable, ruleAnswer, aiCostEur } from './ai.js';
-import { billingConfigured, createCheckout, createPortal, verifyStripeSignature, handleStripeEvent, useDb } from './billing.js';
+import { billingConfigured, createCheckout, createPortal, verifyStripeSignature, handleStripeEvent, useDb, isTestKey } from './billing.js';
 import { safeSearch, importProspects, prepareDemo, outreachMessage, demoTenantByToken, recordDemoView, prospectStats, PIPELINE, runNationalCampaign, campaignStatus, demoTokenFor, displayName } from './prospect.js';
 import { DEPARTEMENTS } from './france.js';
 import { enrichBatch, enrichStatus } from './enrich.js';
@@ -31,7 +31,7 @@ import { siteHead, siteUrl, sitemap, robots, publicTenants } from './seo.js';
 import { setDomain, tenantByDomain } from './domains.js';
 import { track, isBot, last30, daily } from './stats.js';
 import { tenantCosts } from './costs.js';
-import { optoutLink, optout, exportTenant, deleteTenant } from './privacy.js';
+import { optoutLink, optout, exportTenant, deleteTenant, purgeTestTenant } from './privacy.js';
 import { verifyPassword } from './security.js';
 
 const SESSION = 'cdp_s', PRE = 'cdp_pre';
@@ -475,7 +475,7 @@ export function createApp(db) {
     const expenses = db.all('SELECT * FROM expenses WHERE month=? OR (recurring=1 AND month<=?) ORDER BY id DESC', m, m);
     const aiCost = aiCostEur(ai.i, ai.o);
     const count = (s) => db.one('SELECT COUNT(*) n FROM tenants WHERE status=?', s).n;
-    return {
+    return { canPurge: !config.isProd && (!config.stripeKey || isTestKey()),
       msg, tenants, expenses, aiCost, aiCalls: ai.calls,
       counts: { active: count('active'), trial: count('trial') },
       mrr: db.all("SELECT plan FROM tenants WHERE status IN ('active','past_due')").reduce((s, r) => s + PLANS[r.plan].monthly, 0),
@@ -590,6 +590,12 @@ export function createApp(db) {
   });
   on('POST', '/admin/depenses/:id/supprimer', (c) => { requireAdmin(c); checkCsrf(c); db.run('DELETE FROM expenses WHERE id=?', Number(c.params.id)); redirect(c.res, '/admin?m=ok'); });
   on('POST', '/admin/incidents/:id/resoudre', (c) => { requireAdmin(c); checkCsrf(c); resolveIncident(db, Number(c.params.id)); redirect(c.res, '/admin?m=ok'); });
+  on('POST', '/admin/entreprises/:id/purger-test', async (c) => {
+    requireAdmin(c); checkCsrf(c);
+    let m; try { const r = await purgeTestTenant(db, Number(c.params.id)); m = r ? `Compte de test « ${r.slug} » supprimé entièrement.` : 'Compte introuvable.'; } catch (e) { m = e.message; }
+    audit(db, { action: 'admin.purge_test', detail: m.slice(0, 200), ip: c.ip });
+    redirect(c.res, '/admin?m=ok');
+  });
   on('POST', '/admin/entreprises/:id/statut', (c) => {
     requireAdmin(c); checkCsrf(c);
     if (!['paused', 'active'].includes(c.form.status)) throw HttpError(400, 'Statut inconnu');
