@@ -151,7 +151,7 @@ export async function osmPass(db, { maxGroups = 25, now = Date.now(), pause = co
         phone, pl.website || null, pl.email || null, OSM_SOURCE, phone || pl.email ? now : null, now, siteFromListing(pl.website, false), p.id);
       if (phone || pl.email) r.found++;
     }
-    if (r.groups % 10 === 0 && config.appEnv !== 'test') console.log(`Coordonnées (OpenStreetMap) : ${r.groups}/${groups.length} codes postaux, ${r.found} trouvées`);
+    if (r.groups % 5 === 0 && config.appEnv !== 'test') console.log(`Coordonnées (OpenStreetMap) : ${r.groups}/${groups.length} codes postaux, ${r.found} trouvées`);
     if (pause) await new Promise((ok) => setTimeout(ok, Math.max(pause, 1000))); // usage raisonnable du service public
   }
   return r;

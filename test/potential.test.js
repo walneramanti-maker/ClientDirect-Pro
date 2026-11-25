@@ -100,7 +100,7 @@ test('appel : accroche adaptée au site, campagne filtrée par potentiel', async
 });
 
 test('OpenStreetMap : serveur saturé (502), bascule automatique sur un autre serveur', async () => {
-  const seen = [];
+  OSM.resetOsmHealth(); const seen = [];
   app.net.setFetch(async (url) => { seen.push(String(url)); return seen.length === 1 ? new Response('busy', { status: 502 }) : jsonResponse({ elements: [{ tags: { name: 'Test', phone: '+33100000000' } }] }); });
   const list = await OSM.osmPlaces('75011', 'PARIS');
   assert.equal(list.length, 1); assert.equal(seen.length, 2); assert.notEqual(seen[0], seen[1]);

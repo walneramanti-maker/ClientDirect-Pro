@@ -15,20 +15,23 @@ export function overpassQuery(postal) {
 
 /** Établissements avec téléphone d'un code postal, au format des fiches utilisées pour la correspondance. */
 let preferred = 0; // dernier serveur qui a répondu
+const down = new Map(); // serveur en échec -> écarté pendant 30 minutes
+export const resetOsmHealth = () => down.clear();
 export async function osmPlaces(postal, city) {
   const apis = config.overpassApis; let res = null; let lastErr = '';
   for (let k = 0; k < apis.length; k++) {
     const i = (preferred + k) % apis.length;
+    if ((down.get(apis[i]) || 0) > Date.now()) { lastErr = lastErr || 'serveurs OpenStreetMap indisponibles'; continue; }
     try {
       res = await net.fetch(apis[i], {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B ; requetes espacees)' },
         body: 'data=' + encodeURIComponent(overpassQuery(postal)),
-        signal: AbortSignal.timeout(40000)
+        signal: AbortSignal.timeout(20000)
       });
-    } catch (e) { lastErr = e.message; res = null; continue; }
+    } catch (e) { lastErr = e.message; res = null; down.set(apis[i], Date.now() + 30 * 60e3); continue; }
     if (res.ok) { preferred = i; break; }
-    lastErr = `OpenStreetMap ${res.status}`; res = null; // saturé ou refusé : serveur suivant
+    lastErr = `OpenStreetMap ${res.status}`; res = null; down.set(apis[i], Date.now() + 30 * 60e3); // saturé ou refusé : serveur suivant
   }
   if (!res) throw Object.assign(new Error(lastErr || 'OpenStreetMap indisponible'), { stop: true });
   const seen = new Set();
