@@ -29,7 +29,7 @@ export async function osmPlaces(postal, city) {
         body: 'data=' + encodeURIComponent(overpassQuery(postal)),
         signal: AbortSignal.timeout(20000)
       });
-    } catch (e) { lastErr = e.message; res = null; down.set(apis[i], Date.now() + 30 * 60e3); continue; }
+    } catch (e) { lastErr = `${e.message}${e.cause?.code ? ' (' + e.cause.code + ')' : ''}`; res = null; down.set(apis[i], Date.now() + 30 * 60e3); continue; }
     if (res.ok) { preferred = i; break; }
     lastErr = `OpenStreetMap ${res.status}`; res = null; down.set(apis[i], Date.now() + 30 * 60e3); // saturé ou refusé : serveur suivant
   }
