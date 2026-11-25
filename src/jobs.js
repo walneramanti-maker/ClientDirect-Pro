@@ -77,7 +77,9 @@ export async function runJobs(db, now = Date.now()) {
     const { processRewards } = await import('./rewards.js'); const { stripe } = await import('./billing.js');
     r.rewards = await processRewards(db, { now, stripeCall: config.stripeKey ? stripe : null }).catch((e) => ({ error: e.message })); mark(db, 'job.rewards', now);
   }
-  // 14. Battement de cœur : prouve que les tâches automatiques tournent
+  // 14. Campagnes e-mail validées : un envoi espacé par passage, seulement si l'envoi a été autorisé (CAMPAIGN_SENDING=on)
+  { const { sendNext } = await import('./campaigns.js'); r.campaign = await sendNext(db, { now }).catch((e) => ({ error: e.message })); }
+  // 15. Battement de cœur : prouve que les tâches automatiques tournent
   db.run("INSERT INTO meta(k,v) VALUES('jobs_heartbeat',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(now));
   return r;
 }

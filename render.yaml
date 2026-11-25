@@ -1,19 +1,76 @@
-# Plan Render (Blueprint). Environnement de RECETTE gratuit : aucun paiement réel possible.
+# Plan de production ClientDirect Pro (Render Blueprint). RIEN n'est créé tant que vous ne lancez pas ce plan
+# depuis Render (New → Blueprint) : la création du service et du disque est payante (Starter 7 $/mois + disque 0,25 $/Go/mois).
 services:
   - type: web
-    name: clientdirect-pro-test
+    name: clientdirect-pro
     runtime: node
-    plan: free
+    plan: starter
     region: frankfurt
-    buildCommand: npm install --omit=dev
+    buildCommand: "true"
     startCommand: npm start
     healthCheckPath: /health
+    autoDeploy: false
+    disk:
+      name: donnees
+      mountPath: /var/data
+      sizeGB: 1
+    domains:
+      - clientdirectpro.fr
+      - www.clientdirectpro.fr
     envVars:
       - key: APP_ENV
-        value: staging
+        value: production
       - key: NODE_VERSION
         value: "22"
+      - key: BASE_URL
+        value: https://clientdirectpro.fr
       - key: DB_PATH
-        value: data/clientdirect.db
+        value: /var/data/clientdirect.db
+      - key: RESTORE_ON_BOOT
+        value: "1"
+      - key: BACKUP_EVERY_HOURS
+        value: "1"
+      - key: BACKUP_KEEP
+        value: "72"
+      - key: BILLING_COUNTRIES
+        value: FR,GF,GP,MQ,RE,YT
+      - key: PROSPECT_DAILY
+        value: "150"
+      - key: LEGAL_NAME
+        value: Pop Chity High-Tech (entreprise individuelle)
+      - key: LEGAL_OWNER
+        value: Walner Amantie
+      - key: LEGAL_SIRET
+        value: 944 602 226 00010
+      # Secrets : à saisir dans Render, jamais dans ce fichier
       - key: APP_SECRET
         generateValue: true
+      - key: BACKUP_KEY
+        generateValue: true
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_LOGIN
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_TOTP_SECRET
+        sync: false
+      - key: LEGAL_ADDRESS
+        sync: false
+      - key: LEGAL_EMAIL
+        sync: false
+      # Envoi des campagnes validées depuis la boîte du domaine (désactivé tant que CAMPAIGN_SENDING n'est pas « on »)
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false

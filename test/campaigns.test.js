@@ -34,7 +34,7 @@ test('campagne : sélection par critères, message conforme, validation groupée
   assert.equal(r.status, 303); const id = Number(r.location.split('/').pop());
   const cmp = db.one('SELECT * FROM campaigns WHERE id=?', id); assert.equal(cmp.size, 30, 'seules les entreprises avec e-mail');
   const det = await admin.get(`/admin/campagnes/${id}`);
-  assert.match(det.text, /Valider les 30 messages/); assert.match(det.text, /Essentiel \(79 € HT\/mois\)/); assert.match(det.text, /Premium \(249 € HT\/mois\)/);
+  assert.match(det.text, /Valider les 30 messages/); assert.match(det.text, /Essentiel, 79 €\/mois \+ 199 € de mise en service/); assert.match(det.text, /Premium, 249 €\/mois \+ 599 € de mise en service/); assert.match(det.text, /engagement de 12 mois/);
   assert.match(det.text, /accessible uniquement par ce lien personnel/); assert.doesNotMatch(det.text, /visible seulement par vous/);
   assert.match(det.text, /SIRET/);
   // une opposition arrive entre la préparation et la validation

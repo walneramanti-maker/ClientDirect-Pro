@@ -4,7 +4,10 @@ import { config } from './config.js';
 import { outreachMessage, demoTokenFor, displayName } from './prospect.js';
 import { optoutLink } from './privacy.js';
 import { TEMPLATES } from './templates.js';
-import { DEPARTEMENTS } from './france.js';
+import { DEPARTEMENTS, territoryOf } from './france.js';
+import { country as countryOf } from './markets.js';
+import { sendMail, buildMessage } from './smtp.js';
+import { recordIncident } from './incidents.js';
 
 export const CHANNELS = { email: 'E-mail', sms: 'SMS', appel: 'Appel téléphonique' };
 export const MAX_CAMPAIGN = 5000;
@@ -59,3 +62,41 @@ export function approveCampaign(db, id, now = Date.now()) {
   return Number(db.run("UPDATE campaigns SET status='approved', approved_at=? WHERE id=? AND status='draft'", now, id).changes);
 }
 export function cancelCampaign(db, id) { return Number(db.run("UPDATE campaigns SET status='canceled' WHERE id=? AND status='draft'", id).changes); }
+
+/** Heure locale du prospect (métropole ou Outre-mer) : envoi en semaine, de 9 h à 18 h, uniquement. */
+function businessHours(p, now) {
+  const tz = countryOf(territoryOf(p.postal)).tz || 'Europe/Paris';
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', hour: 'numeric', hour12: false }).formatToParts(new Date(now)).map((x) => [x.type, x.value]));
+  const h = Number(parts.hour) % 24; return !['Sat', 'Sun'].includes(parts.weekday) && h >= 9 && h < 18;
+}
+export function sendingReady() { const s = config.smtp; return config.campaignSending && !!(s.host && s.user && s.pass && s.from); }
+export function sentToday(db, now = Date.now()) { return db.one('SELECT COUNT(*) n FROM campaign_items WHERE sent_at>=?', now - (now % 864e5)).n; }
+/**
+ * Envoie AU PLUS UN e-mail par passage, espacés d'au moins CAMPAIGN_GAP_MIN minutes, sous le plafond quotidien,
+ * uniquement depuis des campagnes e-mail validées, jamais à une entreprise qui s'est opposée.
+ */
+export async function sendNext(db, { now = Date.now(), send = sendMail } = {}) {
+  if (!sendingReady()) return { skipped: 'envoi désactivé' };
+  if (sentToday(db, now) >= config.campaignDailyMax) return { skipped: 'plafond quotidien' };
+  const last = Number(db.one("SELECT v FROM meta WHERE k='campaign_last_send'")?.v || 0);
+  if (now - last < config.campaignGapMin * 60e3) return { skipped: 'espacement' };
+  const cands = db.all("SELECT i.*, p.name, p.postal, p.siren, p.status pstatus FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id JOIN prospects p ON p.id=i.prospect_id WHERE c.status='approved' AND c.channel='email' AND i.status='ready' ORDER BY c.approved_at, i.id LIMIT 50");
+  for (const it of cands) {
+    if (it.pstatus === 'optout') { db.run("UPDATE campaign_items SET status='skipped', error='opposition' WHERE id=?", it.id); continue; }
+    if (!businessHours(it, now)) continue;
+    db.run("INSERT INTO meta(k,v) VALUES('campaign_last_send',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(now));
+    const stop = (/\/stop\/[A-Za-z0-9_-]+/.exec(it.message) || [''])[0];
+    const data = buildMessage({ from: config.smtp.from, fromName: config.smtp.fromName, to: it.to_addr, subject: `Un exemple de site pour ${displayName(it.name)}`, text: it.message, unsubscribeUrl: stop ? config.baseUrl + stop : null });
+    try {
+      await send({ ...config.smtp, to: it.to_addr, data });
+      db.run("UPDATE campaign_items SET status='sent', sent_at=? WHERE id=?", now, it.id);
+      db.run("UPDATE prospects SET status=CASE WHEN status='new' THEN 'contacted' ELSE status END, last_contact_at=? WHERE id=?", now, it.prospect_id);
+      return { sent: it.id };
+    } catch (e) {
+      db.run("UPDATE campaign_items SET status='skipped', error=? WHERE id=?", String(e.message).slice(0, 200), it.id);
+      recordIncident(db, { kind: 'campagne', severity: /^SMTP 5|auth/i.test(e.message) ? 'warning' : 'info', message: `Envoi refusé : ${String(e.message).slice(0, 140)}` });
+      return { error: e.message };
+    }
+  }
+  return { skipped: 'rien à envoyer à cette heure' };
+}

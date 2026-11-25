@@ -132,7 +132,9 @@ export function createApp(db) {
   for (const k of ['cgu', 'confidentialite', 'mentions-legales']) on('GET', `/${k}`, (c) => html(c.res, V.legalPage(k)));
   on('GET', '/stop/:token', (c) => html(c.res, V.confirmPage('Ne plus être contacté', 'Confirmez-vous ne plus vouloir recevoir de message de ClientDirect Pro ? La démonstration préparée pour votre entreprise sera supprimée.', 'Oui, ne plus me contacter', csrfToken(c))));
   on('POST', '/stop/:token', (c) => {
-    checkCsrf(c); limit(c, 'stop', 20, 3600e3);
+    // Désinscription « en un clic » depuis la messagerie (RFC 8058) : pas de jeton de formulaire possible
+    if (!/List-Unsubscribe=One-Click/.test(c.raw)) checkCsrf(c);
+    limit(c, 'stop', 20, 3600e3);
     const p = optout(db, c.params.token);
     if (p) audit(db, { action: 'prospect.opposition', detail: String(p.id), ip: c.ip });
     html(c.res, V.messagePage('C’est noté', 'Vous ne serez plus contacté par ClientDirect Pro et la démonstration a été supprimée. Merci et bonne continuation.'));
@@ -142,7 +144,10 @@ export function createApp(db) {
     db.one('SELECT 1 x');
     const hb = Number(db.one("SELECT v FROM meta WHERE k='jobs_heartbeat'")?.v || 0);
     const jobsOk = config.disableJobs || !hb || Date.now() - hb < 15 * 60e3;
-    json(c.res, { ok: jobsOk, env: config.appEnv, jobs: hb ? new Date(hb).toISOString() : null, time: new Date().toISOString() }, jobsOk ? 200 : 503);
+    // État de la configuration (sans aucun secret) : permet de vérifier la mise en production
+    const lastBackup = db.one("SELECT created_at FROM backups WHERE status='ok' ORDER BY id DESC LIMIT 1")?.created_at || null;
+    const ready = { backups: !!(config.supabaseUrl && config.supabaseServiceKey), lastBackup: lastBackup ? new Date(lastBackup).toISOString() : null, restoredFrom: db.one("SELECT v FROM meta WHERE k='restored_from'")?.v || null, stripe: !!config.stripeKey, stripeWebhook: !!(config.stripeWebhookSecret || db.one("SELECT 1 FROM meta WHERE k='stripe_webhook_secret'")), firecrawl: !!config.firecrawlKey, emailSending: !!(config.campaignSending && config.smtp.host) };
+    json(c.res, { ok: jobsOk, env: config.appEnv, jobs: hb ? new Date(hb).toISOString() : null, time: new Date().toISOString(), ready }, jobsOk ? 200 : 503);
   });
 
   // ---------- inscription ----------

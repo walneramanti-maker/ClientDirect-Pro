@@ -61,6 +61,11 @@ export const config = {
   enrichEurPerCredit: num(env.ENRICH_EUR_PER_CREDIT, 0),
   // Suivi des ouvertures de démo PAR entreprise : désactivé par défaut (seul un total anonyme par jour est compté)
   trackDemoViews: env.TRACK_DEMO_VIEWS === '1',
+  // Envoi des campagnes validées par la boîte e-mail du domaine. Désactivé tant que CAMPAIGN_SENDING n'est pas « on ».
+  campaignSending: env.CAMPAIGN_SENDING === 'on',
+  campaignDailyMax: num(env.CAMPAIGN_DAILY_MAX, 40),
+  campaignGapMin: num(env.CAMPAIGN_GAP_MIN, 8),
+  smtp: { host: env.SMTP_HOST || '', port: num(env.SMTP_PORT, 465), secure: env.SMTP_SECURE !== '0', user: env.SMTP_USER || '', pass: env.SMTP_PASS || '', from: env.SMTP_FROM || env.SMTP_USER || '', fromName: env.SMTP_FROM_NAME || 'Walner Amantie – ClientDirect Pro' },
   // Recette : les e-mails/WhatsApp ne partent que vers ces adresses ou domaines (ex. "walner.amanti@gmail.com,@exemple.fr")
   testAllowlist: (env.TEST_ALLOWLIST || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
   // Domaines personnalisés (API Render)

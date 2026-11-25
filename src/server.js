@@ -10,8 +10,9 @@ const problems = envProblems();
 if (problems.length) { console.error(`Configuration refusée (${config.appEnv}) :\n- ` + problems.join('\n- ')); process.exit(1); }
 
 // Serveur neuf (disque vide) : on repart automatiquement de la dernière sauvegarde.
+let restoredFrom = null;
 if (config.restoreOnBoot && !fs.existsSync(config.dbPath)) {
-  try { const r = await restore(config.dbPath); console.log(`Base restaurée depuis ${r.restored}`); }
+  try { const r = await restore(config.dbPath); restoredFrom = r.restored; console.log(`Base restaurée depuis ${r.restored}`); }
   catch (e) {
     // Aucune sauvegarde : premier démarrage, on part d'une base neuve. Toute autre erreur (réseau, clé, fichier altéré) :
     // on refuse de démarrer, pour ne jamais remplacer les bonnes sauvegardes par une base vide.
@@ -20,6 +21,8 @@ if (config.restoreOnBoot && !fs.existsSync(config.dbPath)) {
   }
 }
 const db = openDb(config.dbPath, { appEnv: config.appEnv });
+// Trace de la dernière restauration, visible dans /health (preuve que la reprise après redémarrage fonctionne)
+if (restoredFrom) db.run("INSERT INTO meta(k,v) VALUES('restored_from',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", `${restoredFrom} @ ${new Date().toISOString()}`);
 // Premier démarrage sans accès console (hébergement sans terminal) : création du compte administrateur depuis les variables
 // ADMIN_LOGIN, ADMIN_PASSWORD et ADMIN_TOTP_SECRET, uniquement s'il n'existe encore aucun administrateur.
 if (process.env.ADMIN_LOGIN && process.env.ADMIN_PASSWORD && process.env.ADMIN_TOTP_SECRET && !db.one("SELECT 1 FROM users WHERE role='superadmin'")) {

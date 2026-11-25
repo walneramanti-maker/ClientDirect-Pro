@@ -41,6 +41,7 @@ export async function searchSirene({ tpl, commune = null, departement = null, pa
 /** Recherche une entreprise précise par son SIREN. */
 export async function sireneBySiren(siren) {
   const res = await net.fetch(`${config.sireneApi}/search?q=${encodeURIComponent(siren)}&per_page=1`, { headers: { accept: 'application/json' } });
+  if (res.status === 429) throw new Error('API Recherche d’entreprises 429');
   if (!res.ok) throw new Error(`API Recherche d'entreprises ${res.status}`);
   const r = (await res.json()).results?.find((x) => x.siren === siren);
   return r ? fromSirene(r, null, r.siege?.commune) : null;
@@ -87,11 +88,11 @@ export function prepareDemo(db, prospectId, { stable = false } = {}) {
 
 /** Message de prise de contact, prêt à copier (WhatsApp, e-mail, SMS). */
 /** Message de prise de contact B2B : identifie l'expéditeur, l'origine des données et donne un moyen simple de s'opposer. */
-export const PLAN_LINE = 'Trois formules : Essentiel (79 € HT/mois) pour votre site, vos demandes de devis et WhatsApp ; Pro (149 € HT/mois) qui ajoute la prise de rendez-vous en ligne, les rappels automatiques et les statistiques ; Premium (249 € HT/mois) qui ajoute un assistant qui répond à vos clients 24 h/24. L’exemple montre toutes les fonctions (Premium).';
+export const PLAN_LINE = 'Trois formules, prix hors taxes : Essentiel, 79 €/mois + 199 € de mise en service, pour votre site, vos demandes de devis et WhatsApp ; Pro, 149 €/mois + 399 € de mise en service, qui ajoute la prise de rendez-vous en ligne, les rappels automatiques et les statistiques ; Premium, 249 €/mois + 599 € de mise en service, qui ajoute un assistant qui répond à vos clients 24 h/24. Essai gratuit 14 jours sans carte bancaire, puis abonnement avec engagement de 12 mois ; la mise en service est payée une seule fois. L’exemple montre toutes les fonctions (Premium).';
 export function outreachMessage(p, demoUrl, stopUrl, { channel = 'email' } = {}) {
   const name = displayName(p.name);
-  if (channel === 'sms') return `Bonjour, Walner de ClientDirect Pro. Exemple de site gratuit préparé pour ${name} (devis, WhatsApp, rendez-vous en ligne) : ${demoUrl} – démo non officielle. Essai 14 j sans carte. Plus de message : STOP ou ${stopUrl}`;
-  return `Bonjour,\n\nJe suis ${config.legal.owner}, fondateur de ClientDirect Pro. J'ai préparé gratuitement un exemple de site pour ${name} : vos clients y voient vos prestations, vous demandent un devis et vous écrivent sur WhatsApp, à toute heure.\n\nC'est une démonstration non officielle, accessible uniquement par ce lien personnel et non référencée sur les moteurs de recherche : ${demoUrl}\n\n${PLAN_LINE} Essai gratuit 14 jours, sans carte bancaire.\n\nSi l'exemple vous plaît, je vous le présente en 10 minutes, par téléphone ou en visio.\n\n${config.legal.owner} – ClientDirect Pro (${config.legal.name}, SIRET ${config.legal.siret})\n\nVos coordonnées professionnelles proviennent du registre public des entreprises (INSEE) et de votre fiche d'établissement publique. Elles servent uniquement à vous présenter ce service et sont conservées au plus 36 mois sans réponse. Vous pouvez y accéder, les faire corriger ou supprimer en répondant à ce message. Pour ne plus être contacté et supprimer la démo : ${stopUrl} (ou répondez STOP).`;
+  if (channel === 'sms') return `Bonjour, Walner de ClientDirect Pro. Exemple de site gratuit préparé pour ${name} : ${demoUrl} – démo non officielle. Dès 79 € HT/mois + mise en service, essai 14 j sans carte. Plus de message : STOP ou ${stopUrl}`;
+  return `Bonjour,\n\nJe suis ${config.legal.owner}, fondateur de ClientDirect Pro. J'ai préparé gratuitement un exemple de site pour ${name} : vos clients y voient vos prestations, vous demandent un devis et vous écrivent sur WhatsApp, à toute heure.\n\nC'est une démonstration non officielle, accessible uniquement par ce lien personnel et non référencée sur les moteurs de recherche : ${demoUrl}\n\n${PLAN_LINE}\n\nSi l'exemple vous plaît, je vous le présente en 10 minutes, par téléphone ou en visio.\n\n${config.legal.owner} – ClientDirect Pro (${config.legal.name}, SIRET ${config.legal.siret})\n\nVos coordonnées professionnelles proviennent du registre public des entreprises (INSEE) et de votre fiche d'établissement publique. Elles servent uniquement à vous présenter ce service et sont conservées au plus 36 mois sans réponse. Vous pouvez y accéder, les faire corriger ou supprimer en répondant à ce message. Pour ne plus être contacté et supprimer la démo : ${stopUrl} (ou répondez STOP).`;
 }
 
 export function demoTenantByToken(db, token) {
@@ -123,7 +124,7 @@ export const safeSearch = async (db, q) => { try { return await searchSirene(q);
  * avec des liens stables : le même lien fonctionne même après un redémarrage du serveur.
  * Les entreprises qui se sont opposées ou qui figurent sur la liste d'opposition du registre sont ignorées.
  */
-export async function seedProspects(db, sirens, { pause = 160 } = {}) {
+export async function seedProspects(db, sirens, { pause = 350 } = {}) {
   const r = { imported: 0, demos: 0, skipped: 0, errors: 0 };
   const { optoutLink } = await import('./privacy.js');
   for (const siren of sirens.map((x) => x.trim()).filter((x) => /^\d{9}$/.test(x))) {
@@ -131,7 +132,10 @@ export async function seedProspects(db, sirens, { pause = 160 } = {}) {
       let p = db.one('SELECT * FROM prospects WHERE siren=?', siren);
       if (p?.status === 'optout') { r.skipped++; continue; }
       if (!p) {
-        const found = await sireneBySiren(siren); if (pause) await new Promise((ok) => setTimeout(ok, pause));
+        // L'API publique limite le débit : on réessaie après une pause plutôt que de perdre la démo
+        let found = null;
+        for (let k = 0; k < 4; k++) { try { found = await sireneBySiren(siren); break; } catch (e) { if (!/429/.test(e.message) || k === 3) throw e; await new Promise((ok) => setTimeout(ok, 1500 * (k + 1))); } }
+        if (pause) await new Promise((ok) => setTimeout(ok, pause));
         if (!found) { r.skipped++; continue; }
         importProspects(db, [found]); r.imported++; p = db.one('SELECT * FROM prospects WHERE siren=?', siren);
       }

@@ -84,7 +84,9 @@ const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS rewards(id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('credit','credit_referee','commission')), beneficiary_tenant_id INTEGER, partner_id INTEGER, source_tenant_id INTEGER NOT NULL, invoice TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'eur', status TEXT NOT NULL CHECK(status IN ('pending','approved','paid','canceled')), available_at INTEGER NOT NULL, applied_ref TEXT, created_at INTEGER NOT NULL, updated_at INTEGER)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS reward_once ON rewards(kind, invoice, COALESCE(beneficiary_tenant_id,0), COALESCE(partner_id,0))`,
   `CREATE TABLE IF NOT EXISTS campaigns(id INTEGER PRIMARY KEY, name TEXT NOT NULL, channel TEXT NOT NULL CHECK(channel IN ('email','sms','appel')), filters TEXT NOT NULL DEFAULT '{}', size INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('draft','approved','canceled')), created_at INTEGER NOT NULL, approved_at INTEGER)`,
-  `CREATE TABLE IF NOT EXISTS campaign_items(id INTEGER PRIMARY KEY, campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE, prospect_id INTEGER NOT NULL, to_addr TEXT, message TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('ready','sent','skipped')), UNIQUE(campaign_id, prospect_id))`
+  `CREATE TABLE IF NOT EXISTS campaign_items(id INTEGER PRIMARY KEY, campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE, prospect_id INTEGER NOT NULL, to_addr TEXT, message TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('ready','sent','skipped')), UNIQUE(campaign_id, prospect_id))`,
+  `ALTER TABLE campaign_items ADD COLUMN sent_at INTEGER`,
+  `ALTER TABLE campaign_items ADD COLUMN error TEXT`
 ];
 
 export function openDb(file, { appEnv = null } = {}) {
