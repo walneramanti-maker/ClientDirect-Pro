@@ -54,7 +54,7 @@ export async function runJobs(db, now = Date.now()) {
   // 9. Sauvegardes et surveillance de leur fraîcheur
   r.backup = await backupJob(db, now);
   // Test de restauration à blanc une fois par jour (n'affecte pas la base en service)
-  if (remoteConfigured() && now - lastRun(db, 'job.backup_verify') > 20 * 36e5) r.backupVerify = await verifyBackup(db, { now }).catch((e) => ({ error: e.message }));
+  if (remoteConfigured() && now - lastRun(db, 'job.backup_verify') > 20 * 36e5) { r.backupVerify = await verifyBackup(db, { now }).catch((e) => ({ error: e.message })); console.log('Test de restauration :', JSON.stringify({ ok: r.backupVerify.ok, fichier: r.backupVerify.name, erreur: r.backupVerify.error, sauvegarde: r.backupVerify.backup, base: r.backupVerify.live })); }
   // 10. RGPD : durées de conservation (une fois par jour)
   if (now - lastRun(db, 'job.retention') > 20 * 36e5) { r.retention = retentionJob(db, now); mark(db, 'job.retention', now); }
   // 11. Bilan mensuel envoyé à chaque professionnel (le 1er du mois, une seule fois)
@@ -71,10 +71,10 @@ export async function runJobs(db, now = Date.now()) {
   // 12. Prospection nationale automatique (une fois par jour, aucun envoi)
   {
     const { runNationalCampaign, prospectDaily } = await import('./prospect.js');
-    if (prospectDaily(db) > 0 && now - lastRun(db, 'job.prospect') > 20 * 36e5) r.prospect = await runNationalCampaign(db, { now }).catch((e) => ({ error: e.message }));
+    if (prospectDaily(db) > 0 && now - lastRun(db, 'job.prospect') > 20 * 36e5) { r.prospect = await runNationalCampaign(db, { now }).catch((e) => ({ error: e.message })); console.log('Prospection nationale :', JSON.stringify(r.prospect)); }
     // Coordonnées : par petites séries toutes les heures, dans la limite du plafond mensuel autorisé
     const { enrichEnabled, enrichBatch } = await import('./enrich.js');
-    if (enrichEnabled(db) && now - lastRun(db, 'job.enrich') > 55 * 60e3) r.enrich = await enrichBatch(db, { now }).catch((e) => ({ error: e.message }));
+    if (enrichEnabled(db) && now - lastRun(db, 'job.enrich') > 55 * 60e3) { r.enrich = await enrichBatch(db, { now }).catch((e) => ({ error: e.message })); console.log('Coordonnées :', JSON.stringify(r.enrich)); }
   }
   // 13. Parrainage et partenariat : validation des récompenses après 30 jours (une fois par jour)
   if (now - lastRun(db, 'job.rewards') > 20 * 36e5) {
