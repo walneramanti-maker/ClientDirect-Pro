@@ -94,10 +94,16 @@ export async function restore(dbFile, { name = null } = {}) {
 }
 
 /** Surveillance : sauvegarde due ? trop ancienne ? */
+let lastSavedChanges = -1;
 export async function backupJob(db, now = Date.now()) {
   const last = db.one("SELECT MAX(created_at) at FROM backups WHERE status='ok'").at || 0;
   if (config.appEnv === 'test' && !remoteConfigured()) return { skipped: true };
-  if (now - last >= config.backupEveryHours * 36e5 - 30e3) { try { return await createBackup(db); } catch { /* incident déjà enregistré */ } }
+  // Sauvegarde dès qu'il y a eu des modifications (au plus toutes les BACKUP_MIN_GAP secondes), et au minimum à intervalle régulier
+  const changes = db.one('SELECT total_changes() c').c;
+  const dirty = changes !== lastSavedChanges && remoteConfigured() && now - last >= config.backupMinGapSec * 1000;
+  if (dirty || now - last >= config.backupEveryHours * 36e5 - 30e3) {
+    try { const r = await createBackup(db); lastSavedChanges = db.one('SELECT total_changes() c').c; return r; } catch { /* incident déjà enregistré */ }
+  }
   if (last && now - last > Math.max(26, config.backupEveryHours * 3) * 36e5) recordIncident(db, { kind: 'backup_age', severity: 'critical', message: 'Aucune sauvegarde réussie depuis plus de 26 heures' });
   if (config.isProd && !remoteConfigured()) recordIncident(db, { kind: 'backup_offsite', severity: 'warning', message: 'Sauvegardes uniquement locales : configurez SUPABASE_URL et SUPABASE_SERVICE_KEY' });
   return { last };

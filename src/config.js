@@ -78,6 +78,7 @@ export const config = {
   backupBucket: env.BACKUP_BUCKET || 'backups',
   backupKey: env.BACKUP_KEY || '',
   backupEveryHours: num(env.BACKUP_EVERY_HOURS, 6),
+  backupMinGapSec: num(env.BACKUP_MIN_GAP, 120),
   backupKeep: num(env.BACKUP_KEEP, 28),
   restoreOnBoot: env.RESTORE_ON_BOOT === '1',
   // RGPD : durées de conservation

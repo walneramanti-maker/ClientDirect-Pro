@@ -42,7 +42,7 @@ import('./billing.js').then(({ ensureStripe }) => ensureStripe(db)).then((r) => 
 // Arrêt (mise à jour, redémarrage) : dernière sauvegarde avant de fermer.
 const shutdown = async () => {
   stopJobs(); setTimeout(() => process.exit(0), 25000).unref();
-  if (remoteConfigured()) { try { await createBackup(db); } catch { /* incident enregistré */ } }
+  if (remoteConfigured()) { try { const b = await createBackup(db); console.log(`Arrêt : sauvegarde finale envoyée (${b?.name || 'ok'})`); } catch (e) { console.error(`Arrêt : sauvegarde finale impossible : ${e.message}`); } }
   server.close(() => { db.close(); process.exit(0); });
 };
 process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);

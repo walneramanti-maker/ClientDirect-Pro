@@ -8,6 +8,8 @@ import { retentionJob } from './privacy.js';
 import { previousMonth } from './stats.js';
 import { money } from './markets.js';
 
+/** Dernier passage des tâches automatiques (en mémoire : ne compte pas comme une modification des données). */
+export const heartbeat = { at: 0 };
 const lastRun = (db, action) => db.one('SELECT MAX(created_at) at FROM audit WHERE action=?', action).at || 0;
 const mark = (db, action, now) => db.run('INSERT INTO audit(action,created_at) VALUES(?,?)', action, now);
 const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -80,7 +82,7 @@ export async function runJobs(db, now = Date.now()) {
   // 14. Campagnes e-mail validées : un envoi espacé par passage, seulement si l'envoi a été autorisé (CAMPAIGN_SENDING=on)
   { const { sendNext } = await import('./campaigns.js'); r.campaign = await sendNext(db, { now }).catch((e) => ({ error: e.message })); }
   // 15. Battement de cœur : prouve que les tâches automatiques tournent
-  db.run("INSERT INTO meta(k,v) VALUES('jobs_heartbeat',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(now));
+  heartbeat.at = now;
   return r;
 }
 

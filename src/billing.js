@@ -64,9 +64,13 @@ export async function ensureStripe(db, { currencies = (process.env.STRIPE_CURREN
   const url = `${config.baseUrl}/webhooks/stripe`;
   if (!config.stripeWebhookSecret && !meta('stripe_webhook_secret') && url.startsWith('https://')) {
     const list = (await stripe('webhook_endpoints', { limit: 100 }, 'GET')).data || [];
-    if (!list.some((w) => w.url === url)) {
+    const mine = list.filter((w) => w.url === url);
+    // Stripe ne redonne jamais le secret d'un webhook existant. En mode test, on remplace donc le webhook dont le secret
+    // a été perdu ; en mode réel, on ne touche à rien et on demande le secret (STRIPE_WEBHOOK_SECRET).
+    if (mine.length && config.stripeKey.startsWith('sk_test_')) { for (const w of mine) await stripe(`webhook_endpoints/${w.id}`, null, 'DELETE'); }
+    if (!mine.length || config.stripeKey.startsWith('sk_test_')) {
       const w = await stripe('webhook_endpoints', { url, enabled_events: Object.fromEntries(WEBHOOK_EVENTS.map((e, i) => [i, e])), description: `ClientDirect Pro (${config.appEnv})` });
-      setMeta(db, 'stripe_webhook_secret', w.secret); out.webhook = 'créé';
+      setMeta(db, 'stripe_webhook_secret', w.secret); out.webhook = mine.length ? 'recréé (secret perdu)' : 'créé';
     } else out.webhook = 'existe déjà (secret à renseigner dans STRIPE_WEBHOOK_SECRET)';
   }
   return out;

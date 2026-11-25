@@ -13,6 +13,7 @@ import { billingConfigured, createCheckout, createPortal, verifyStripeSignature,
 import { safeSearch, importProspects, prepareDemo, outreachMessage, demoTenantByToken, recordDemoView, prospectStats, PIPELINE, runNationalCampaign, campaignStatus, demoTokenFor, displayName } from './prospect.js';
 import { DEPARTEMENTS } from './france.js';
 import { enrichBatch, enrichStatus } from './enrich.js';
+import { heartbeat as jobsHeartbeat } from './jobs.js';
 import { createCampaign, campaignDetail, approveCampaign, cancelCampaign } from './campaigns.js';
 import { applyPartner, approvePartner, partnerByToken, partnerStats, referralStats, PROGRAM } from './rewards.js';
 import { supportAnswer, openTicket, replyTicket } from './support.js';
@@ -142,11 +143,12 @@ export function createApp(db) {
   // Santé : utilisé par Render et par un service de surveillance externe (UptimeRobot, gratuit). 503 si les tâches automatiques sont bloquées.
   on('GET', '/health', (c) => {
     db.one('SELECT 1 x');
-    const hb = Number(db.one("SELECT v FROM meta WHERE k='jobs_heartbeat'")?.v || 0);
+    const hb = jobsHeartbeat.at;
     const jobsOk = config.disableJobs || !hb || Date.now() - hb < 15 * 60e3;
     // État de la configuration (sans aucun secret) : permet de vérifier la mise en production
     const lastBackup = db.one("SELECT created_at FROM backups WHERE status='ok' ORDER BY id DESC LIMIT 1")?.created_at || null;
     const ready = { backups: !!(config.supabaseUrl && config.supabaseServiceKey), lastBackup: lastBackup ? new Date(lastBackup).toISOString() : null, restoredFrom: db.one("SELECT v FROM meta WHERE k='restored_from'")?.v || null, stripe: !!config.stripeKey, stripeWebhook: !!(config.stripeWebhookSecret || db.one("SELECT 1 FROM meta WHERE k='stripe_webhook_secret'")), firecrawl: !!config.firecrawlKey, emailSending: !!(config.campaignSending && config.smtp.host) };
+    { const e = enrichStatus(db); ready.prospection = { prospects: db.one("SELECT COUNT(*) n FROM prospects WHERE status!='optout'").n, departements: db.one("SELECT COUNT(DISTINCT dept) n FROM prospects WHERE dept!=''").n, coordonnees: { actif: e.enabled, plafond: e.cap, creditsMois: e.used, joignablesMois: e.reachableMonth, creditsParJoignable: e.creditsPerReachable != null ? Math.round(e.creditsPerReachable * 100) / 100 : null, telephones: e.phones || 0, emails: e.emails || 0 } }; }
     json(c.res, { ok: jobsOk, env: config.appEnv, jobs: hb ? new Date(hb).toISOString() : null, time: new Date().toISOString(), ready }, jobsOk ? 200 : 503);
   });
 
