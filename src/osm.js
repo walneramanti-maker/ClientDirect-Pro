@@ -14,14 +14,22 @@ export function overpassQuery(postal) {
 }
 
 /** Établissements avec téléphone d'un code postal, au format des fiches utilisées pour la correspondance. */
+let preferred = 0; // dernier serveur qui a répondu
 export async function osmPlaces(postal, city) {
-  const res = await net.fetch(config.overpassApi, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B; contact via site)' },
-    body: 'data=' + encodeURIComponent(overpassQuery(postal))
-  });
-  if (res.status === 429 || res.status === 504) throw Object.assign(new Error(`OpenStreetMap ${res.status}`), { stop: true });
-  if (!res.ok) throw new Error(`OpenStreetMap ${res.status}`);
+  const apis = config.overpassApis; let res = null; let lastErr = '';
+  for (let k = 0; k < apis.length; k++) {
+    const i = (preferred + k) % apis.length;
+    try {
+      res = await net.fetch(apis[i], {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B ; requetes espacees)' },
+        body: 'data=' + encodeURIComponent(overpassQuery(postal))
+      });
+    } catch (e) { lastErr = e.message; res = null; continue; }
+    if (res.ok) { preferred = i; break; }
+    lastErr = `OpenStreetMap ${res.status}`; res = null; // saturé ou refusé : serveur suivant
+  }
+  if (!res) throw Object.assign(new Error(lastErr || 'OpenStreetMap indisponible'), { stop: true });
   const seen = new Set();
   return ((await res.json()).elements || []).map((e) => e.tags || {}).filter((t) => {
     const k = `${t.name}|${t.phone || t['contact:phone'] || t.mobile || t['contact:mobile']}`; if (seen.has(k)) return false; seen.add(k); return !t.disused && !t['disused:shop'];

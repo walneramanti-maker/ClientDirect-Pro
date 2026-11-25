@@ -57,7 +57,10 @@ export const config = {
   firecrawlKey: env.FIRECRAWL_API_KEY || '',
   firecrawlApi: env.FIRECRAWL_API || '',
   osmEnrich: env.OSM_ENRICH !== '0',
-  overpassApi: env.OVERPASS_API || 'https://overpass-api.de/api/interpreter',
+  // Plusieurs serveurs publics : le principal (overpass-api.de) est souvent saturé
+  overpassApis: (env.OVERPASS_API || 'https://overpass.private.coffee/api/interpreter,https://maps.mail.ru/osm/tools/overpass/api/interpreter,https://overpass-api.de/api/interpreter').split(',').map((x) => x.trim()).filter(Boolean),
+  // Délai minimal entre deux appels Firecrawl (offre gratuite : nombre de requêtes par minute limité)
+  firecrawlPauseMs: num(env.FIRECRAWL_PAUSE_MS, env.NODE_ENV === 'test' ? 0 : 6500),
   enrichMonthlyCredits: num(env.ENRICH_MONTHLY_CREDITS, 0),
   // Prix d'un crédit en euros pour le calcul du coût par prospect joignable (0 = crédits gratuits)
   enrichEurPerCredit: num(env.ENRICH_EUR_PER_CREDIT, 0),

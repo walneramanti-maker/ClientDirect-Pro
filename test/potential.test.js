@@ -98,3 +98,17 @@ test('appel : accroche adaptée au site, campagne filtrée par potentiel', async
   assert.ok(items.length >= 1 && items.every((x) => x.potential >= 75), JSON.stringify(items));
   assert.match(db.one('SELECT message FROM campaign_items WHERE campaign_id=?', id).message, /Accroche/);
 });
+
+test('OpenStreetMap : serveur saturé (502), bascule automatique sur un autre serveur', async () => {
+  const seen = [];
+  app.net.setFetch(async (url) => { seen.push(String(url)); return seen.length === 1 ? new Response('busy', { status: 502 }) : jsonResponse({ elements: [{ tags: { name: 'Test', phone: '+33100000000' } }] }); });
+  const list = await OSM.osmPlaces('75011', 'PARIS');
+  assert.equal(list.length, 1); assert.equal(seen.length, 2); assert.notEqual(seen[0], seen[1]);
+});
+
+test('vérification au registre : code postal pris dans l’adresse de la fiche (commune voisine)', async () => {
+  let asked = '';
+  app.net.setFetch(async (url) => { asked = String(url); return jsonResponse({ results: [] }); });
+  await E.verifyInSirene({ name: 'Salon Kalina', address: '12 Route de Montabo, 97354 Rémire-Montjoly' }, { postal: '97300', city: 'CAYENNE', tpl: 'coiffeur' });
+  assert.match(asked, /code_postal=97354/);
+});

@@ -38,7 +38,10 @@ export function matches(place, p) {
   return common >= Math.min(2, a.size) || (common >= 1 && a.size === 1);
 }
 
+let lastCall = 0;
+async function paced() { const wait = lastCall + config.firecrawlPauseMs - Date.now(); if (wait > 0) await new Promise((ok) => setTimeout(ok, wait)); lastCall = Date.now(); }
 async function alexandria(db, provider, capability, options, credits, now) {
+  await paced();
   const res = await net.fetch(`${API()}/v2/scrape`, { method: 'POST', headers: { authorization: `Bearer ${config.firecrawlKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ alexandria: { provider, capability, options } }) });
   spend(db, credits, now);
   if (res.status === 402) throw Object.assign(new Error('Crédits Firecrawl épuisés'), { stop: true });
@@ -57,6 +60,7 @@ export async function searchPlaces(db, { query, postal }, now = Date.now()) {
 /** Adresse e-mail publique sur la page contact du site (1 crédit). Les adresses génériques (contact@…) sont préférées. */
 // Pages qui ne sont pas le site de l'entreprise (leur e-mail serait celui de la plateforme) : voir potential.js
 async function pageOn(db, url, now) {
+  await paced();
   const res = await net.fetch(`${API()}/v2/scrape`, { method: 'POST', headers: { authorization: `Bearer ${config.firecrawlKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown', 'rawHtml'], onlyMainContent: false }) });
   spend(db, 1, now);
   if (!res.ok) return null;
@@ -97,10 +101,13 @@ const phoneOk = (s) => /^\+?[\d\s.()-]{8,20}$/.test(String(s || ''));
  * sans opposition à la prospection, petite taille. Renvoie le prospect à importer, ou null.
  */
 export async function verifyInSirene(place, { postal, city, tpl }) {
+  // La fiche peut être dans une commune voisine : on prend le code postal de SA propre adresse
+  const own = (String(place.address || '').match(/\b(97[1-6]\d{2}|[0-9]{2}\d{3})\b/) || [])[1] || postal;
   const q = words(place.name).filter((w) => !words(city).includes(w)).slice(0, 4).join(' ');
   if (!q) return null;
-  const res = await net.fetch(`${config.sireneApi}/search?q=${encodeURIComponent(q)}&code_postal=${postal}&etat_administratif=A&per_page=5`, { headers: { accept: 'application/json' } });
+  const res = await net.fetch(`${config.sireneApi}/search?q=${encodeURIComponent(q)}&code_postal=${own}&etat_administratif=A&per_page=5`, { headers: { accept: 'application/json' } });
   if (!res.ok) return null;
+  postal = own;
   for (const r of (await res.json()).results || []) {
     const ens = [...(r.siege?.liste_enseignes || []), ...((r.matching_etablissements || []).flatMap((e) => e.liste_enseignes || []))];
     const label = ens.length ? `${r.nom_complet} (${ens[0]})` : r.nom_complet;
