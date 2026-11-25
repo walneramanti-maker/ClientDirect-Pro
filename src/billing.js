@@ -16,19 +16,76 @@ function form(obj, prefix = '', out = []) {
   }
   return out.join('&');
 }
-async function stripe(path, params) {
-  const res = await net.fetch(`https://api.stripe.com/v1/${path}`, { method: 'POST', headers: { authorization: `Bearer ${config.stripeKey}`, 'content-type': 'application/x-www-form-urlencoded' }, body: form(params) });
+async function stripe(path, params, method = 'POST') {
+  const q = method === 'GET' && params ? `?${form(params)}` : '';
+  const res = await net.fetch(`https://api.stripe.com/v1/${path}${q}`, { method, headers: { authorization: `Bearer ${config.stripeKey}`, ...(method === 'POST' ? { 'content-type': 'application/x-www-form-urlencoded' } : {}), 'stripe-version': '2024-06-20' }, body: method === 'POST' ? form(params) : undefined });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`Stripe ${res.status}: ${j.error?.message || 'erreur'}`);
   return j;
 }
 
-/** Page de paiement Stripe : abonnement mensuel + frais de mise en service. */
+// ---------- configuration automatique de Stripe (produits, prix par devise, webhook) ----------
+let metaDb = null; // base utilisée pour retrouver les identifiants créés automatiquement
+const meta = (k) => metaDb?.one('SELECT v FROM meta WHERE k=?', k)?.v || null;
+const setMeta = (db, k, v) => db.run('INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v', k, v);
+export const isTestKey = (k = config.stripeKey) => /^(sk|rk)_test_/.test(k);
+const WEBHOOK_EVENTS = ['checkout.session.completed', 'invoice.paid', 'invoice.payment_succeeded', 'invoice.payment_failed', 'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'];
+/**
+ * Crée dans Stripe, s'ils n'existent pas, les produits et les prix de chaque formule dans chaque devise,
+ * et le point de réception des notifications (webhook). Idempotent : relancé à chaque démarrage.
+ * Par sécurité, ne s'exécute qu'avec une clé de TEST, sauf si STRIPE_AUTOSETUP=live est défini explicitement.
+ */
+export async function ensureStripe(db, { currencies = (process.env.STRIPE_CURRENCIES || 'EUR,USD,CAD,GBP').split(',') } = {}) {
+  metaDb = db;
+  if (!config.stripeKey) return { skipped: 'Pas de clé Stripe' };
+  if (!isTestKey() && process.env.STRIPE_AUTOSETUP !== 'live') return { skipped: 'Clé réelle : configuration automatique désactivée' };
+  const { PRICES } = await import('./markets.js');
+  const out = { created: 0, existing: 0, webhook: null };
+  const products = {};
+  for (const plan of Object.keys(PLANS)) {
+    for (const cur of currencies.filter((c) => PRICES[c])) {
+      for (const kind of ['month', 'setup']) {
+        const key = `cdp_${plan}_${kind}_${cur.toLowerCase()}`;
+        if (meta(`stripe_price_${key}`)) { out.existing++; continue; }
+        const found = (await stripe('prices', { lookup_keys: { 0: key }, active: 'true', limit: 1 }, 'GET')).data?.[0];
+        if (found) { setMeta(db, `stripe_price_${key}`, found.id); out.existing++; continue; }
+        if (!products[plan]) {
+          const ex = (await stripe('products/search', { query: `metadata['cdp_plan']:'${plan}'` }, 'GET').catch(() => ({ data: [] }))).data?.[0];
+          products[plan] = ex?.id || (await stripe('products', { name: `ClientDirect Pro ${PLANS[plan].name}`, metadata: { cdp_plan: plan } })).id;
+        }
+        const amount = PRICES[cur][plan][kind === 'month' ? 0 : 1] * 100;
+        const p = await stripe('prices', { product: products[plan], currency: cur.toLowerCase(), unit_amount: amount, lookup_key: key, nickname: `${PLANS[plan].name} ${kind === 'month' ? 'mensuel' : 'mise en service'} ${cur}`, tax_behavior: 'exclusive', ...(kind === 'month' ? { recurring: { interval: 'month' } } : {}), metadata: { cdp_plan: plan, cdp_kind: kind } });
+        setMeta(db, `stripe_price_${key}`, p.id); out.created++;
+      }
+    }
+  }
+  const url = `${config.baseUrl}/webhooks/stripe`;
+  if (!config.stripeWebhookSecret && !meta('stripe_webhook_secret') && url.startsWith('https://')) {
+    const list = (await stripe('webhook_endpoints', { limit: 100 }, 'GET')).data || [];
+    if (!list.some((w) => w.url === url)) {
+      const w = await stripe('webhook_endpoints', { url, enabled_events: Object.fromEntries(WEBHOOK_EVENTS.map((e, i) => [i, e])), description: `ClientDirect Pro (${config.appEnv})` });
+      setMeta(db, 'stripe_webhook_secret', w.secret); out.webhook = 'créé';
+    } else out.webhook = 'existe déjà (secret à renseigner dans STRIPE_WEBHOOK_SECRET)';
+  }
+  return out;
+}
+/** Identifiant Stripe du prix d'une formule, dans la devise de l'entreprise. */
+export function priceIds(plan, currency = 'EUR') {
+  const cur = String(currency || 'EUR').toLowerCase();
+  const env = config.stripePrices[plan] || {};
+  const month = meta(`stripe_price_cdp_${plan}_month_${cur}`) || (cur === 'eur' ? env.month : null);
+  const setup = meta(`stripe_price_cdp_${plan}_setup_${cur}`) || (cur === 'eur' ? env.setup : null);
+  return { month, setup };
+}
+export const webhookSecret = () => config.stripeWebhookSecret || meta('stripe_webhook_secret') || '';
+export const useDb = (db) => { metaDb = db; };
+
+/** Page de paiement Stripe : abonnement mensuel + frais de mise en service, dans la devise de l'entreprise. */
 export async function createCheckout(t, userEmail, plan) {
-  const P = config.stripePrices[plan]; if (!PLANS[plan] || !P?.month) throw new Error('Formule non configurée');
+  const P = priceIds(plan, t.currency); if (!PLANS[plan] || !P?.month) throw new Error('Formule non configurée');
   const items = { 0: { price: P.month, quantity: 1 } }; if (P.setup) items[1] = { price: P.setup, quantity: 1 };
   const s = await stripe('checkout/sessions', {
-    mode: 'subscription', locale: 'fr', line_items: items, client_reference_id: t.id,
+    mode: 'subscription', locale: t.lang === 'en' ? 'en' : 'fr', line_items: items, client_reference_id: t.id, tax_id_collection: { enabled: 'true' },
     customer: t.stripe_customer || undefined, customer_email: t.stripe_customer ? undefined : userEmail,
     metadata: { tenant_id: t.id, plan }, subscription_data: { metadata: { tenant_id: t.id, plan } },
     billing_address_collection: 'required', allow_promotion_codes: 'true',
@@ -43,7 +100,7 @@ export async function createPortal(t) {
 }
 
 /** Vérifie la signature Stripe-Signature (HMAC SHA-256, tolérance 5 min). */
-export function verifyStripeSignature(payload, header, secret = config.stripeWebhookSecret, toleranceSec = 300, nowSec = Math.floor(Date.now() / 1000)) {
+export function verifyStripeSignature(payload, header, secret = webhookSecret(), toleranceSec = 300, nowSec = Math.floor(Date.now() / 1000)) {
   if (!secret || !header) return false;
   const parts = Object.fromEntries(String(header).split(',').map((p) => p.split('=')).filter((p) => p.length === 2).map(([k, v]) => [k.trim(), v]));
   const sigs = String(header).split(',').filter((p) => p.startsWith('v1=')).map((p) => p.slice(3));
@@ -84,7 +141,7 @@ export function handleStripeEvent(db, ev) {
       case 'invoice.payment_failed': {
         db.run("UPDATE tenants SET status='past_due' WHERE id=?", t.id);
         const owner = db.one('SELECT u.email FROM users u WHERE u.id=?', t.owner_user_id);
-        if (owner) enqueue(db, { tenantId: t.id, channel: 'email', to: owner.email, template: 'payment_failed', payload: { tenant: t.name, billingUrl: `${config.baseUrl}/pro/abonnement` } });
+        if (owner) enqueue(db, { tenantId: t.id, channel: 'email', to: owner.email, template: 'payment_failed', payload: { lang: t.lang, tenant: t.name, billingUrl: `${config.baseUrl}/pro/abonnement` } });
         recordIncident(db, { kind: 'billing', severity: 'info', message: `Paiement échoué : ${t.name}`, tenantId: t.id });
         emit(db, 'paiement_echoue', { entreprise: t.name, email: owner?.email || '' }, t.id); break;
       }

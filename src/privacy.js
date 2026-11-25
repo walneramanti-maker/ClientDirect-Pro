@@ -1,6 +1,6 @@
 // RGPD : pages légales, export et suppression des données, durées de conservation, opposition à la prospection.
 import { config } from './config.js';
-import { sha256, randomId } from './util.js';
+import { sha256, randomId, hmac } from './util.js';
 import { audit } from './security.js';
 
 /** Supprime ou anonymise ce qui dépasse les durées de conservation annoncées. */
@@ -21,17 +21,21 @@ export function retentionJob(db, now = Date.now()) {
   return r;
 }
 /** Lien « ne plus être contacté » à placer dans chaque message de prospection. */
+export const stopTokenFor = (siren) => hmac(config.secret, 'stop:' + siren).slice(0, 32);
 export function optoutLink(db, prospectId) {
-  const tok = randomId(18); db.run('UPDATE prospects SET optout_token_hash=? WHERE id=?', sha256(tok), prospectId);
+  const p = db.one('SELECT siren FROM prospects WHERE id=?', prospectId);
+  const tok = p?.siren ? stopTokenFor(p.siren) : randomId(18); db.run('UPDATE prospects SET optout_token_hash=? WHERE id=?', sha256(tok), prospectId);
   return `${config.baseUrl}/stop/${tok}`;
 }
 export function optout(db, token) {
-  const p = db.one('SELECT id, name, demo_tenant_id FROM prospects WHERE optout_token_hash=?', sha256(token || ''));
+  const p = db.one('SELECT id, name, siren, demo_tenant_id FROM prospects WHERE optout_token_hash=?', sha256(token || ''));
   if (!p) return null;
   db.tx(() => {
     // On ne garde que le strict nécessaire pour respecter l'opposition : SIREN + statut.
     db.run("UPDATE prospects SET status='optout', name='(opposition)', address='', notes='', siret='', optout_token_hash=NULL, last_contact_at=? WHERE id=?", Date.now(), p.id);
     if (p.demo_tenant_id) db.run("DELETE FROM tenants WHERE id=? AND status='demo'", p.demo_tenant_id);
+    // Alerte : si la liste de démarrage PROSPECT_SEED contient ce SIREN, il faut l'en retirer
+    if (config.adminEmail) db.run("INSERT INTO outbox(channel,to_addr,template,payload,next_at,created_at) VALUES('email',?,'admin_alert',?,?,?)", config.adminEmail, JSON.stringify({ kind: 'opposition', message: `Opposition à la prospection : ${p.name} (SIREN ${p.siren}). Ne plus le contacter ; retirez-le de PROSPECT_SEED s'il y figure.`, at: new Date().toISOString(), url: `${config.baseUrl}/admin/prospection?statut=optout` }), Date.now(), Date.now());
   });
   return p;
 }

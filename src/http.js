@@ -36,9 +36,21 @@ export const json = (res, obj, status = 200, headers = {}) => send(res, status, 
 export const redirect = (res, to, headers = {}) => send(res, 303, '', { Location: to, ...headers });
 
 const PUB = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../public');
-const TYPES = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
-export function serveStatic(res, rel) {
+const TYPES = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webm': 'video/webm', '.mp4': 'video/mp4', '.ico': 'image/x-icon' };
+export function serveStatic(res, rel, req = null) {
   const file = path.resolve(PUB, rel.replace(/^\/+/, ''));
   if (!file.startsWith(PUB + path.sep)) return false;
-  try { const data = fs.readFileSync(file); send(res, 200, data, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'public, max-age=3600' }); return true; } catch { return false; }
+  let stat; try { stat = fs.statSync(file); if (!stat.isFile()) return false; } catch { return false; }
+  const type = TYPES[path.extname(file)] || 'application/octet-stream';
+  const range = req?.headers?.range && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+  // Lecture partielle (obligatoire pour les vidéos sur iPhone / Safari)
+  if (range) {
+    let start = range[1] === '' ? stat.size - Number(range[2]) : Number(range[1]); let end = range[1] !== '' && range[2] !== '' ? Number(range[2]) : stat.size - 1;
+    if (!(start >= 0 && start <= end && end < stat.size)) { send(res, 416, '', { 'Content-Range': `bytes */${stat.size}` }); return true; }
+    const fd = fs.openSync(file, 'r'); const buf = Buffer.alloc(end - start + 1); fs.readSync(fd, buf, 0, buf.length, start); fs.closeSync(fd);
+    send(res, 206, buf, { 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges': 'bytes', 'Cache-Control': 'public, max-age=3600' });
+    return true;
+  }
+  send(res, 200, fs.readFileSync(file), { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'public, max-age=3600' });
+  return true;
 }

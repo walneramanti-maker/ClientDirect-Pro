@@ -1,5 +1,6 @@
 import { nowIn, addDays, dowOf, toMin, fromMin, isDate, isTime, phoneOk, intlPhone, emailOk, clampStr, zonedToUtc, randomId, sha256, dlabel, hfr } from './util.js';
 import { planHas } from './config.js';
+import { t as tr, fmtDay, fmtTime } from './i18n.js';
 import { track } from './stats.js';
 
 export const STEP = 30;
@@ -40,16 +41,16 @@ export function openDays(db, t, n = 10, serviceId = null) {
  * deux demandes simultanées ne peuvent pas obtenir le même poste au même moment.
  */
 export function book(db, t, { date, time, serviceId, name, phone, email = '', source = 'site' }) {
-  if (!planHas(t.plan, 'rdv')) return { ok: false, code: 'plan', msg: "La prise de rendez-vous en ligne n'est pas incluse dans cette formule." };
+  if (!planHas(t.plan, 'rdv')) return { ok: false, code: 'plan', msg: tr("La prise de rendez-vous en ligne n'est pas incluse dans cette formule.") };
   name = clampStr(name, 80); email = clampStr(email, 190);
-  if (!name) return { ok: false, code: 'name', msg: 'Indiquez votre nom.' };
-  if (!phoneOk(phone, t.cc)) return { ok: false, code: 'phone', msg: 'Numéro de téléphone invalide.' };
-  if (email && !emailOk(email)) return { ok: false, code: 'email', msg: 'Adresse e-mail invalide.' };
-  if (!isDate(date) || !isTime(time)) return { ok: false, code: 'slot', msg: 'Date ou heure invalide.' };
-  const svc = t.services.find((s) => s.id === Number(serviceId)); if (!svc) return { ok: false, code: 'service', msg: 'Prestation inconnue.' };
+  if (!name) return { ok: false, code: 'name', msg: tr('Indiquez votre nom.') };
+  if (!phoneOk(phone, t.cc)) return { ok: false, code: 'phone', msg: tr('Numéro de téléphone invalide.') };
+  if (email && !emailOk(email)) return { ok: false, code: 'email', msg: tr('Adresse e-mail invalide.') };
+  if (!isDate(date) || !isTime(time)) return { ok: false, code: 'slot', msg: tr('Date ou heure invalide.') };
+  const svc = t.services.find((s) => s.id === Number(serviceId)); if (!svc) return { ok: false, code: 'service', msg: tr('Prestation inconnue.') };
   const h = t.hours[dowOf(date)]; const start = toMin(time);
-  if (!h || start < toMin(h[0]) || start + svc.dur > toMin(h[1]) || (start - toMin(h[0])) % STEP) return { ok: false, code: 'hours', msg: "En dehors des horaires d'ouverture." };
-  const now = nowIn(t.tz); if (date < now.date || (date === now.date && start < now.min + LEAD_MIN)) return { ok: false, code: 'past', msg: 'Ce créneau est déjà passé.' };
+  if (!h || start < toMin(h[0]) || start + svc.dur > toMin(h[1]) || (start - toMin(h[0])) % STEP) return { ok: false, code: 'hours', msg: tr("En dehors des horaires d'ouverture.") };
+  const now = nowIn(t.tz); if (date < now.date || (date === now.date && start < now.min + LEAD_MIN)) return { ok: false, code: 'past', msg: tr('Ce créneau est déjà passé.') };
   const cancelToken = randomId(18);
   const res = db.tx(() => {
     const stf = freeStaff(t, busyFor(db, t.id, date), start, svc.dur);
@@ -59,17 +60,17 @@ export function book(db, t, { date, time, serviceId, name, phone, email = '', so
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.id, svc.id, svc.name, svc.price, date, time, start, svc.dur, stf.id, stf.name, name, intlPhone(phone, t.cc), email, status, source, zonedToUtc(date, time, t.tz), sha256(cancelToken), Date.now());
     return { id: Number(r.lastInsertRowid), status, staff: stf.name };
   });
-  if (!res) return { ok: false, code: 'taken', msg: 'Ce créneau vient d’être pris. Choisissez une autre heure.' };
+  if (!res) return { ok: false, code: 'taken', msg: tr('Ce créneau vient d’être pris. Choisissez une autre heure.') };
   track(db, t, 'bookings');
-  const when = `${dlabel(date)} à ${hfr(time)}`;
-  return { ok: true, ...res, cancelToken, msg: res.status === 'confirmed' ? `Rendez-vous confirmé le ${when} (${svc.name}).` : `Demande de rendez-vous enregistrée pour le ${when} (${svc.name}). ${t.name} vous la confirme.` };
+  const when = `${fmtDay(date)} · ${fmtTime(time)}`;
+  return { ok: true, ...res, cancelToken, msg: res.status === 'confirmed' ? tr('Rendez-vous confirmé le {w} ({s}).', { w: when, s: svc.name }) : tr('Demande de rendez-vous enregistrée pour le {w} ({s}). {n} vous la confirme.', { w: when, s: svc.name, n: t.name }) };
 }
 
 export function createQuote(db, t, { name, phone, email = '', obj = '', service = '', message = '' }) {
   name = clampStr(name, 80);
-  if (!name) return { ok: false, msg: 'Indiquez votre nom.' };
-  if (!phoneOk(phone, t.cc)) return { ok: false, msg: 'Numéro de téléphone invalide.' };
-  if (email && !emailOk(email)) return { ok: false, msg: 'Adresse e-mail invalide.' };
+  if (!name) return { ok: false, msg: tr('Indiquez votre nom.') };
+  if (!phoneOk(phone, t.cc)) return { ok: false, msg: tr('Numéro de téléphone invalide.') };
+  if (email && !emailOk(email)) return { ok: false, msg: tr('Adresse e-mail invalide.') };
   const r = db.run('INSERT INTO quotes(tenant_id,customer_name,customer_phone,customer_email,obj,service,message,created_at) VALUES(?,?,?,?,?,?,?,?)',
     t.id, name, intlPhone(phone, t.cc), clampStr(email, 190), clampStr(obj, 160), clampStr(service, 80), clampStr(message, 2000), Date.now());
   track(db, t, 'quotes');
@@ -80,8 +81,8 @@ const TRANSITIONS = { pending: ['confirmed', 'refused', 'canceled'], confirmed: 
 /** Change le statut d'un rendez-vous de l'entreprise (jamais d'une autre). */
 export function setAppointmentStatus(db, tenantId, id, status) {
   const a = db.one('SELECT * FROM appointments WHERE id=? AND tenant_id=?', id, tenantId);
-  if (!a) return { ok: false, msg: 'Rendez-vous introuvable.' };
-  if (!TRANSITIONS[a.status].includes(status)) return { ok: false, msg: 'Changement de statut impossible.' };
+  if (!a) return { ok: false, msg: tr('Rendez-vous introuvable.') };
+  if (!TRANSITIONS[a.status].includes(status)) return { ok: false, msg: tr('Changement de statut impossible.') };
   db.run('UPDATE appointments SET status=? WHERE id=? AND tenant_id=?', status, id, tenantId);
   return { ok: true, appt: { ...a, status } };
 }

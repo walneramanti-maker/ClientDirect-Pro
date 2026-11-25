@@ -36,15 +36,25 @@ export function zonedToUtc(date, time, tz) {
 
 /** Numéro au format international, chiffres seuls (E.164 sans +). */
 export function intlPhone(raw, cc = '594') {
-  const s = String(raw || '').trim(); const d = s.replace(/\D/g, '');
+  const s = String(raw || '').trim(); const d = s.replace(/\D/g, ''); cc = String(cc || '');
   if (!d) return '';
   if (s.startsWith('+')) return d;
   if (d.startsWith('00')) return d.slice(2);
-  if (d.startsWith('0')) return String(cc) + d.slice(1);
+  if (d.startsWith('011') && cc === '1') return d.slice(3); // préfixe international nord-américain
+  if (d.startsWith('0') && cc !== '1') return cc + d.slice(1); // préfixe national (France, Belgique, Royaume-Uni…)
+  if (cc === '1' && d.length === 10) return '1' + d; // États-Unis / Canada
+  if (cc && !d.startsWith(cc) && d.length <= 10) return cc + d;
   return d;
 }
 export const phoneOk = (raw, cc) => { const n = intlPhone(raw, cc); return n.length >= 8 && n.length <= 15; };
-export const phoneFmt = (n) => { n = String(n || ''); if (n.length < 10) return n ? '+' + n : ''; return '+' + n.slice(0, n.length - 9) + ' ' + n.slice(-9).replace(/(\d{3})(\d{2})(\d{2})(\d{2})/, '$1 $2 $3 $4'); };
+const DIALS = ['1', '7', '20', '27', '30', '31', '32', '33', '34', '39', '41', '44', '45', '46', '47', '49', '52', '55', '61', '64', '81', '86', '91', '212', '221', '225', '262', '351', '352', '353', '377', '509', '590', '594', '596', '597', '687', '689'];
+export const phoneFmt = (n) => {
+  n = String(n || ''); if (!n) return '';
+  if (n.startsWith('1') && n.length === 11) return `+1 ${n.slice(1, 4)} ${n.slice(4, 7)} ${n.slice(7)}`;
+  const cc = DIALS.filter((x) => n.startsWith(x)).sort((a, b) => b.length - a.length)[0] || n.slice(0, 2);
+  const rest = n.slice(cc.length); const groups = rest.length === 9 ? rest.replace(/(\d{3})(\d{2})(\d{2})(\d{2})/, '$1 $2 $3 $4') : rest.replace(/(\d{2,3})(?=(\d{2,3})+$)/g, '$1 ');
+  return `+${cc} ${groups}`;
+};
 export const emailOk = (e) => /^[^\s@]{1,64}@[^\s@]{1,190}\.[a-z]{2,24}$/i.test(String(e || ''));
 
 export const slugify = (t) => String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'site';

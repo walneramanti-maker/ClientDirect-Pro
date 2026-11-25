@@ -2,12 +2,15 @@
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
+  let I18N = {}; try { I18N = JSON.parse(($('i18n') || {}).textContent || '{}'); } catch (e) { /* textes par défaut */ }
+  const T = (k) => I18N[k] || k;
+  const LANG = document.documentElement.lang || 'fr';
   async function call(url, body) {
     const opt = body ? { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(body) } : { headers: { accept: 'application/json' } };
     const r = await fetch(url, opt); let j = {}; try { j = await r.json(); } catch (e) { /* vide */ }
     return { status: r.status, ...j };
   }
-  const fmt = (h) => { const [a, b] = h.split(':'); return Number(a) + 'h' + (b === '00' ? '' : b); };
+  const fmt = (h) => { const [a, b] = h.split(':').map(Number); if (LANG === 'fr') return a + 'h' + (b ? String(b).padStart(2, '0') : ''); return ((a + 11) % 12 + 1) + ':' + String(b).padStart(2, '0') + ' ' + (a < 12 ? 'AM' : 'PM'); };
 
   // ----- réservation -----
   const book = $('book');
@@ -16,11 +19,11 @@
     const slotsBox = $('b-slots'), err = $('b-err'), ok = $('b-ok'), svc = $('b-svc');
     const chips = () => Array.from($('b-days').querySelectorAll('.chip'));
     async function loadSlots() {
-      time = null; slotsBox.innerHTML = '<p class="muted">Chargement…</p>';
-      if (!day) { slotsBox.innerHTML = '<p class="muted">Aucun jour disponible.</p>'; return; }
+      time = null; slotsBox.innerHTML = '<p class="muted">' + T('Chargement…') + '</p>';
+      if (!day) { slotsBox.innerHTML = '<p class="muted">' + T('Aucun jour disponible.') + '</p>'; return; }
       const r = await call(`${base}/creneaux?service=${encodeURIComponent(svc.value)}&date=${day}`);
       const list = r.slots || [];
-      slotsBox.innerHTML = list.length ? '' : '<p class="muted">Plus de créneau libre ce jour-là. Choisissez un autre jour.</p>';
+      slotsBox.innerHTML = list.length ? '' : '<p class="muted">' + T('Plus de créneau libre ce jour-là. Choisissez un autre jour.') + '</p>';
       for (const s of list) {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = fmt(s); b.dataset.t = s; b.setAttribute('aria-pressed', 'false');
         b.addEventListener('click', () => { time = s; slotsBox.querySelectorAll('.chip').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); });
@@ -33,13 +36,13 @@
     selectDay(chips()[0] || null);
     book.addEventListener('submit', async (e) => {
       e.preventDefault(); err.textContent = ''; ok.textContent = '';
-      if (!time) { err.textContent = 'Choisissez une heure.'; return; }
+      if (!time) { err.textContent = T('Choisissez une heure.'); return; }
       const btn = book.querySelector('button[type=submit]'); btn.disabled = true;
       try {
         const r = await call(`${base}/rdv`, { date: day, time, serviceId: svc.value, name: $('b-name').value, phone: $('b-phone').value, email: $('b-email').value });
         if (r.ok) { ok.className = r.demo ? 'note' : 'success'; ok.textContent = r.msg; if (!r.demo) { book.reset(); } loadSlots(); }
-        else { err.textContent = r.msg || 'Réservation impossible, réessayez.'; if (r.code === 'taken') loadSlots(); }
-      } catch (x) { err.textContent = 'Connexion impossible. Vérifiez votre réseau et réessayez.'; }
+        else { err.textContent = r.msg || T('Réservation impossible, réessayez.'); if (r.code === 'taken') loadSlots(); }
+      } catch (x) { err.textContent = T('Connexion impossible. Vérifiez votre réseau et réessayez.'); }
       btn.disabled = false;
     });
   }
@@ -52,8 +55,8 @@
       const btn = quote.querySelector('button[type=submit]'); btn.disabled = true;
       try {
         const r = await call(`${quote.dataset.base}/devis`, { name: $('q-name').value, phone: $('q-phone').value, email: $('q-email').value, obj: $('q-obj').value, service: $('q-svc').value, message: $('q-msg').value });
-        if (r.ok) { ok.className = r.demo ? 'note' : 'success'; ok.textContent = r.msg; if (!r.demo) quote.reset(); } else err.textContent = r.msg || 'Envoi impossible, réessayez.';
-      } catch (x) { err.textContent = 'Connexion impossible. Vérifiez votre réseau et réessayez.'; }
+        if (r.ok) { ok.className = r.demo ? 'note' : 'success'; ok.textContent = r.msg; if (!r.demo) quote.reset(); } else err.textContent = r.msg || T('Envoi impossible, réessayez.');
+      } catch (x) { err.textContent = T('Connexion impossible. Vérifiez votre réseau et réessayez.'); }
       btn.disabled = false;
     });
   }
@@ -68,8 +71,8 @@
     $('ask').addEventListener('submit', async (e) => {
       e.preventDefault(); const q = input.value.trim(); if (!q) return; input.value = ''; add(q, 'me');
       const wait = add('…');
-      try { const r = await call(`${chat.dataset.base}/chat`, { q, conv }); wait.textContent = r.text || r.msg || 'Je n’ai pas compris, reformulez votre question.'; if (r.text && /réserv|confirm/i.test(r.text) && book) { const ev = new Event('change'); $('b-svc').dispatchEvent(ev); } }
-      catch (x) { wait.textContent = 'Connexion impossible. Réessayez.'; }
+      try { const r = await call(`${chat.dataset.base}/chat`, { q, conv }); wait.textContent = r.text || r.msg || T('Je n’ai pas compris, reformulez votre question.'); if (r.text && /réserv|confirm/i.test(r.text) && book) { const ev = new Event('change'); $('b-svc').dispatchEvent(ev); } }
+      catch (x) { wait.textContent = T('Connexion impossible. Réessayez.'); }
     });
   }
 })();

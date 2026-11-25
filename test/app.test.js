@@ -91,10 +91,10 @@ test('isolation : un professionnel ne peut pas toucher aux données d’un autre
 test('réglages : les modifications du pro apparaissent sur son site', async () => {
   const { c, t } = await signup(app, { business: 'Garage Reglages', email: 'reg@test.fr' });
   const page = await c.get('/pro/reglages');
-  const form = { csrf: c.csrf(page.text), name: 'Garage Réglé', cc: '594', tz: 'America/Cayenne', phone: '0694998877', color: '#123456', city: 'Kourou', address: '1 rue Test', lead: 'Accueil', faq: 'CB acceptée', svc_name_0: 'Vidange express', svc_price_0: '55', svc_dur_0: '45', svc_desc_0: 'Rapide', staff_name_0: 'Pont 1', open_1: 'on', from_1: '08:00', to_1: '12:00' };
+  const form = { csrf: c.csrf(page.text), name: 'Garage Réglé', country: 'GF', currency: 'EUR', lang: 'fr', tz: 'America/Cayenne', phone: '0694998877', color: '#123456', city: 'Kourou', address: '1 rue Test', lead: 'Accueil', faq: 'CB acceptée', svc_name_0: 'Vidange express', svc_price_0: '55', svc_dur_0: '45', svc_desc_0: 'Rapide', staff_name_0: 'Pont 1', open_1: 'on', from_1: '08:00', to_1: '12:00' };
   const r = await c.post('/pro/reglages', form); assert.equal(r.status, 303);
   const site = (await app.client().get(`/s/${t.slug}`)).text;
-  assert.match(site, /Garage Réglé/); assert.match(site, /Vidange express/); assert.match(site, /55 €/); assert.match(site, /--brand:#123456/);
+  assert.match(site, /Garage Réglé/); assert.match(site, /Vidange express/); assert.match(site, /55\s€/); assert.match(site, /--brand:#123456/);
   assert.equal(db.one('SELECT COUNT(*) n FROM services WHERE tenant_id=? AND active=1', t.id).n, 1);
   const bad = await c.post('/pro/reglages', { ...form, csrf: c.csrf((await c.get('/pro/reglages')).text), svc_dur_0: '50' });
   assert.equal(bad.status, 400); assert.match(bad.text, /multiple de 15/);
@@ -191,8 +191,8 @@ test('rappels automatiques la veille, une seule fois', async () => {
 test('prospection : registre Sirene, démo personnalisée, activation par le prospect', async () => {
   const admin = await makeAdmin();
   mock((url) => {
-    assert.match(url, /recherche-entreprises\.api\.gouv\.fr\/search\?code_naf=45\.20[AB]&code_commune=97311/);
-    return jsonResponse({ results: url.includes('45.20A') ? [{ siren: '111222333', nom_complet: 'GARAGE DU MARONI (GDM)', activite_principale: '45.20A', date_creation: '2025-06-01', siege: { siret: '11122233300011', libelle_commune: 'SAINT-LAURENT-DU-MARONI', code_postal: '97320', adresse: '5 AV GASTON MONNERVILLE 97320 SAINT-LAURENT-DU-MARONI' } }] : [] });
+    assert.match(url, /recherche-entreprises\.api\.gouv\.fr\/search\?activite_principale=45\.20A%2C45\.20B&code_commune=97311/);
+    return jsonResponse({ results: [{ siren: '111222333', nom_complet: 'GARAGE DU MARONI (GDM)', activite_principale: '45.20A', date_creation: '2025-06-01', tranche_effectif_salarie: 'NN', siege: { siret: '11122233300011', libelle_commune: 'SAINT-LAURENT-DU-MARONI', code_postal: '97320', adresse: '5 AV GASTON MONNERVILLE 97320 SAINT-LAURENT-DU-MARONI' } }, { siren: '999888777', nom_complet: 'GARAGE OPPOSE', activite_principale: '45.20A', opposition_diffusion_commerciale: true, siege: {} }] });
   });
   let p = await admin.get('/admin/prospection');
   let r = await admin.post('/admin/prospection/recherche', { csrf: admin.csrf(p.text), tpl: 'garage', commune: '97311' });
@@ -202,9 +202,9 @@ test('prospection : registre Sirene, démo personnalisée, activation par le pro
   const pr = db.one("SELECT * FROM prospects WHERE siren='111222333'"); assert.equal(pr.score, 5, 'créée il y a moins de 5 ans + métier prioritaire');
   r = await admin.post(`/admin/prospection/${pr.id}/demo`, { csrf: admin.csrf(p.text) });
   const url = /Lien : <a href="([^"]+)"/.exec(r.text)[1]; const token = url.split('/demo/')[1];
-  assert.match(r.text, /GARAGE DU MARONI/); assert.match(r.text, /Pour ne plus être contacté/); assert.match(r.text, /\/stop\//);
+  assert.match(r.text, /Gdm|GDM/); assert.match(r.text, /Pour ne plus être contacté/); assert.match(r.text, /non officielle/); assert.equal(db.one("SELECT COUNT(*) n FROM prospects WHERE siren='999888777'").n, 0, 'opposition à la prospection respectée'); assert.match(r.text, /\/stop\//);
   const v = app.client(); const demo = await v.get(`/demo/${token}`);
-  assert.equal(demo.status, 200); assert.match(demo.text, /Démonstration préparée/);
+  assert.equal(demo.status, 200); assert.match(demo.text, /Démonstration non officielle/);
   const dt = db.one("SELECT * FROM tenants WHERE status='demo' AND prospect_id=?", pr.id);
   assert.equal((await app.client().get(`/s/${dt.slug}`)).status, 404, 'une démo n’est pas publique');
   const svc = db.one('SELECT id FROM services WHERE tenant_id=? LIMIT 1', dt.id).id;
@@ -219,7 +219,7 @@ test('prospection : registre Sirene, démo personnalisée, activation par le pro
   assert.equal(db.one('SELECT status FROM prospects WHERE id=?', pr.id).status, 'converted');
   assert.equal((await app.client().get(`/s/${t.slug}`)).status, 200, 'site publié après activation');
   assert.equal((await app.client().get(`/demo/${token}`)).status, 404, 'lien de démo désactivé');
-  assert.match((await v.get('/pro')).text, /GARAGE DU MARONI/);
+  assert.match((await v.get('/pro')).text, /Gdm|GDM/);
 });
 
 async function makeAdmin() {

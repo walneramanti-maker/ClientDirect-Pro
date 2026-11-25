@@ -17,7 +17,7 @@ export async function setup(env = {}) {
   return { db, base, close, net, sec, realFetch, client: () => makeClient(base, realFetch) };
 }
 
-function makeClient(base, f) {
+export function makeClient(base, f = globalThis.fetch) {
   const jar = {};
   const store = (res) => { for (const c of res.headers.getSetCookie()) { const [kv] = c.split(';'); const i = kv.indexOf('='); const k = kv.slice(0, i); const v = kv.slice(i + 1); if (/Max-Age=0/.test(c)) delete jar[k]; else jar[k] = v; } };
   const hdr = () => ({ cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') });

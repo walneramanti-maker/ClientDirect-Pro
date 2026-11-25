@@ -31,7 +31,7 @@ export function createSession(db, userId) {
 }
 export function readSession(db, token) {
   if (!token) return null;
-  const s = db.one('SELECT s.*, u.email, u.name, u.role, u.email_verified, u.totp_secret FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id_hash=?', sha256(token));
+  const s = db.one('SELECT s.*, u.email, u.name, u.role, u.email_verified, u.totp_secret, u.lang FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id_hash=?', sha256(token));
   if (!s || s.expires_at < Date.now()) return null;
   return s;
 }

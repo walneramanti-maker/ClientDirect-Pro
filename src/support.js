@@ -25,7 +25,7 @@ export async function supportAnswer(q) {
   if (config.anthropicKey) {
     try {
       const res = await net.fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': config.anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: config.aiModel, max_tokens: 300, system: "Tu es l'assistance de ClientDirect Pro. Réponds en français en 2 à 4 phrases, uniquement à partir des fiches fournies. Si les fiches ne répondent pas, dis-le et propose d'ouvrir un ticket.\nFiches :\n" + KB.map((a) => `- ${a.title} : ${a.body}`).join('\n'), messages: [{ role: 'user', content: clampStr(q, 800) }] }) });
+        body: JSON.stringify({ model: config.aiModel, max_tokens: 300, system: "Tu es l'assistance de ClientDirect Pro. Réponds dans la langue de la question, en 2 à 4 phrases, uniquement à partir des fiches fournies. Si les fiches ne répondent pas, dis-le et propose d'ouvrir un ticket.\nFiches :\n" + KB.map((a) => `- ${a.title} : ${a.body}`).join('\n'), messages: [{ role: 'user', content: clampStr(q, 800) }] }) });
       if (res.ok) { const j = await res.json(); const text = (j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim(); if (text) return { text, articles: hits.slice(0, 3), mode: 'ia' }; }
     } catch {}
   }

@@ -11,7 +11,13 @@ if (problems.length) { console.error(`Configuration refusée (${config.appEnv}) 
 
 // Serveur neuf (disque vide) : on repart automatiquement de la dernière sauvegarde.
 if (config.restoreOnBoot && !fs.existsSync(config.dbPath)) {
-  try { const r = await restore(config.dbPath); console.log(`Base restaurée depuis ${r.restored}`); } catch (e) { console.log(`Pas de restauration : ${e.message}`); }
+  try { const r = await restore(config.dbPath); console.log(`Base restaurée depuis ${r.restored}`); }
+  catch (e) {
+    // Aucune sauvegarde : premier démarrage, on part d'une base neuve. Toute autre erreur (réseau, clé, fichier altéré) :
+    // on refuse de démarrer, pour ne jamais remplacer les bonnes sauvegardes par une base vide.
+    if (e.message !== 'Aucune sauvegarde disponible') { console.error(`Restauration impossible, démarrage refusé : ${e.message}`); process.exit(1); }
+    console.log('Aucune sauvegarde : nouvelle base.');
+  }
 }
 const db = openDb(config.dbPath, { appEnv: config.appEnv });
 // Premier démarrage sans accès console (hébergement sans terminal) : création du compte administrateur depuis les variables
@@ -25,6 +31,10 @@ const server = http.createServer(createApp(db));
 server.headersTimeout = 20_000; server.requestTimeout = 30_000;
 const stopJobs = config.disableJobs ? () => {} : startScheduler(db);
 server.listen(config.port, () => console.log(`ClientDirect Pro sur ${config.baseUrl} (port ${config.port})`));
+// Prospects préparés à l'avance (liens de démonstration stables)
+if (process.env.PROSPECT_SEED) import('./prospect.js').then(({ seedProspects }) => seedProspects(db, process.env.PROSPECT_SEED.split(','))).then((r) => console.log('Prospects :', JSON.stringify(r))).catch((e) => console.error('Prospects :', e.message));
+// Stripe (mode test) : produits, prix et webhook créés automatiquement à partir de la seule clé secrète
+import('./billing.js').then(({ ensureStripe }) => ensureStripe(db)).then((r) => r && console.log('Stripe :', JSON.stringify(r))).catch((e) => { console.error('Stripe :', e.message); import('./incidents.js').then(({ recordIncident }) => recordIncident(db, { kind: 'stripe_setup', severity: 'warning', message: `Configuration Stripe impossible : ${String(e.message).slice(0, 160)}` })); });
 
 // Arrêt (mise à jour, redémarrage) : dernière sauvegarde avant de fermer.
 const shutdown = async () => {

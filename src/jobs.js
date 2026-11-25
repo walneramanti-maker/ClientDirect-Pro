@@ -6,6 +6,7 @@ import { checkDomains } from './domains.js';
 import { backupJob } from './backup.js';
 import { retentionJob } from './privacy.js';
 import { previousMonth } from './stats.js';
+import { money } from './markets.js';
 
 const lastRun = (db, action) => db.one('SELECT MAX(created_at) at FROM audit WHERE action=?', action).at || 0;
 const mark = (db, action, now) => db.run('INSERT INTO audit(action,created_at) VALUES(?,?)', action, now);
@@ -27,7 +28,7 @@ export async function runJobs(db, now = Date.now()) {
   // 2. Prévenir 3 jours avant la fin de l'essai
   for (const t of db.all("SELECT t.*, u.email owner_email FROM tenants t JOIN users u ON u.id=t.owner_user_id WHERE t.status='trial' AND t.trial_ends_at BETWEEN ? AND ?", now, now + 3 * 864e5)) {
     if (db.one("SELECT 1 FROM outbox WHERE tenant_id=? AND template='trial_ending'", t.id)) continue;
-    enqueue(db, { tenantId: t.id, channel: 'email', to: t.owner_email, template: 'trial_ending', payload: { tenant: t.name, trialEnd: new Date(t.trial_ends_at).toLocaleDateString('fr-FR'), billingUrl: `${config.baseUrl}/pro/abonnement` } });
+    enqueue(db, { tenantId: t.id, channel: 'email', to: t.owner_email, template: 'trial_ending', payload: { lang: t.lang, tenant: t.name, trialEnd: new Date(t.trial_ends_at).toLocaleDateString(t.lang === 'fr' ? 'fr-FR' : 'en-US'), billingUrl: `${config.baseUrl}/pro/abonnement` } });
     r.trialNotices++;
   }
   // 3. Impayés au-delà du délai de grâce : site en pause
@@ -59,7 +60,7 @@ export async function runJobs(db, now = Date.now()) {
     for (const row of db.all("SELECT t.id, u.email FROM tenants t JOIN users u ON u.id=t.owner_user_id WHERE t.status IN ('trial','active','past_due')")) {
       const t = loadTenant(db, 'id', row.id); const m = previousMonth(db, t, new Date(now));
       if (!m.views && !m.requests) continue;
-      enqueue(db, { tenantId: t.id, channel: 'email', to: row.email, template: 'monthly_report', payload: { tenant: t.name, monthLabel: `${MONTHS[Number(m.month.slice(5)) - 1]} ${m.month.slice(0, 4)}`, ...m, dashUrl: `${config.baseUrl}/pro` } }); sent++;
+      enqueue(db, { tenantId: t.id, channel: 'email', to: row.email, template: 'monthly_report', payload: { lang: t.lang, tenant: t.name, monthLabel: new Intl.DateTimeFormat(t.lang === 'fr' ? 'fr-FR' : 'en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(m.month + '-15T00:00:00Z')), ...m, valueLabel: money(m.value, t.currency || 'EUR', t.lang === 'fr' ? 'fr-FR' : 'en-US'), dashUrl: `${config.baseUrl}/pro` } }); sent++;
     }
     db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.monthly',?,?)", ym, now); r.monthly = sent;
   }

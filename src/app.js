@@ -9,10 +9,13 @@ import { createTenant, loadTenant, siteState, updateSettings, userTenants } from
 import { freeSlots, openDays, book, createQuote, setAppointmentStatus, cancelByCustomer } from './booking.js';
 import { notifyAppointment, enqueue, emit } from './notify.js';
 import { answer, aiAvailable, ruleAnswer, aiCostEur } from './ai.js';
-import { billingConfigured, createCheckout, createPortal, verifyStripeSignature, handleStripeEvent } from './billing.js';
+import { billingConfigured, createCheckout, createPortal, verifyStripeSignature, handleStripeEvent, useDb } from './billing.js';
 import { safeSearch, importProspects, prepareDemo, outreachMessage, demoTenantByToken, recordDemoView, prospectStats, PIPELINE } from './prospect.js';
 import { supportAnswer, openTicket, replyTicket } from './support.js';
 import { recordIncident, openIncidents, resolveIncident } from './incidents.js';
+import { t as tr, withLang, detectLang, regionFromAccept, LANGS, setLang, currentLang } from './i18n.js';
+import { COUNTRIES, country as countryOf, billingOpen, validTz, PRICES, countryByTz } from './markets.js';
+import { exampleTenant, exampleDashboardData, EXAMPLE_TPLS } from './examples.js';
 import { siteHead, siteUrl, sitemap, robots, publicTenants } from './seo.js';
 import { setDomain, tenantByDomain } from './domains.js';
 import { track, isBot, last30, daily } from './stats.js';
@@ -35,6 +38,7 @@ function sameOrigin(req) {
 }
 
 export function createApp(db) {
+  useDb(db);
   const routes = [];
   const on = (method, pattern, handler) => routes.push({ method, re: new RegExp('^' + pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '/?$'), handler });
 
@@ -51,17 +55,28 @@ export function createApp(db) {
     if (c.session.role === 'superadmin') throw Object.assign(new Error('admin'), { redirect: '/admin' });
     const list = userTenants(db, c.session.user_id); if (!list.length) throw HttpError(403, 'Aucune entreprise associée à ce compte.');
     c.tenant = loadTenant(db, 'id', list[0].id);
-    c.user = { id: c.session.user_id, email: c.session.email, name: c.session.name, email_verified: c.session.email_verified };
+    c.user = { id: c.session.user_id, email: c.session.email, name: c.session.name, email_verified: c.session.email_verified, lang: c.session.lang };
+    if (!c.url.searchParams.get('lang')) c.setLang(c.session.lang || c.tenant.lang || 'fr');
+    else if (LANGS[c.url.searchParams.get('lang')]) db.run('UPDATE users SET lang=? WHERE id=?', c.url.searchParams.get('lang'), c.session.user_id);
   }
   function requireAdmin(c) {
     if (!c.session || c.session.role !== 'superadmin') throw Object.assign(new Error('auth'), { redirect: '/connexion' });
     if (!c.session.totp_ok) throw Object.assign(new Error('2fa'), { redirect: '/connexion/2fa' });
   }
   const proEmail = (t) => db.one('SELECT email FROM users WHERE id=?', t.owner_user_id)?.email || t.email;
-  const notifyPro = (t, kind, summary) => enqueue(db, { tenantId: t.id, channel: 'email', to: proEmail(t), template: 'pro_new_request', payload: { kind, tenant: t.name, summary, dashUrl: `${config.baseUrl}/pro` } });
+  const notifyPro = (t, kind, summary) => enqueue(db, { tenantId: t.id, channel: 'email', to: proEmail(t), template: 'pro_new_request', payload: { lang: t.lang, kind, tenant: t.name, summary, dashUrl: `${config.baseUrl}/pro` } });
 
   // ---------- site public ClientDirect Pro ----------
-  on('GET', '/', (c) => html(c.res, V.marketing({ csrf: csrfToken(c) })));
+  /** Pays probable du visiteur : choix explicite, région du navigateur, sinon France. */
+  const guessCountry = (c) => { const q = c.url.searchParams.get('pays'); if (COUNTRIES[q]) return q; const r = regionFromAccept(c.req.headers['accept-language']); return COUNTRIES[r] ? r : (c.lang === 'en' ? 'US' : 'FR'); };
+  on('GET', '/', (c) => { const ctry = guessCountry(c); const cur = PRICES[c.url.searchParams.get('devise')] ? c.url.searchParams.get('devise') : countryOf(ctry).cur; html(c.res, V.marketing({ csrf: csrfToken(c), cur: PRICES[cur] ? cur : 'EUR', country: ctry })); });
+  // ---------- exemples à tester sans inscription ----------
+  on('GET', '/exemples', (c) => html(c.res, V.examplesPage()));
+  on('GET', '/exemple/espace-pro', (c) => { const d = exampleDashboardData(db, c.lang); html(c.res, V.proDashboard(d.tenant, d.user, '', { ...d, example: true })); });
+  on('GET', '/exemple/:tpl', (c) => {
+    if (!EXAMPLE_TPLS.includes(c.params.tpl)) throw HttpError(404, 'Page introuvable');
+    const tn = exampleTenant(db, c.params.tpl, c.lang); renderSite(c, tn, `/exemple/${c.params.tpl}`, 'example');
+  });
   on('GET', '/robots.txt', (c) => send(c.res, 200, robots(`${config.baseUrl}/sitemap.xml`, { allow: config.isProd }), { 'Content-Type': 'text/plain; charset=utf-8' }));
   on('GET', '/sitemap.xml', (c) => {
     // Seules les adresses du même domaine sont acceptées par Google dans un sitemap ; les domaines propres ont le leur.
@@ -72,7 +87,7 @@ export function createApp(db) {
   });
   on('GET', '/annuaire', (c) => html(c.res, V.directoryPage(publicTenants(db), (t) => siteUrl({ ...t, services: [] }))));
   for (const k of ['cgu', 'confidentialite', 'mentions-legales']) on('GET', `/${k}`, (c) => html(c.res, V.legalPage(k)));
-  on('GET', '/stop/:token', (c) => html(c.res, V.layout('Ne plus être contacté', `<main class="auth"><h1>Ne plus être contacté</h1><form method="post" class="card"><input type="hidden" name="csrf" value="${csrfToken(c)}"><p>Confirmez-vous ne plus vouloir recevoir de message de ClientDirect Pro ? La démonstration préparée pour votre entreprise sera supprimée.</p><button class="btn red wide" type="submit">Oui, ne plus me contacter</button></form></main>`)));
+  on('GET', '/stop/:token', (c) => html(c.res, V.confirmPage('Ne plus être contacté', 'Confirmez-vous ne plus vouloir recevoir de message de ClientDirect Pro ? La démonstration préparée pour votre entreprise sera supprimée.', 'Oui, ne plus me contacter', csrfToken(c))));
   on('POST', '/stop/:token', (c) => {
     checkCsrf(c); limit(c, 'stop', 20, 3600e3);
     const p = optout(db, c.params.token);
@@ -91,25 +106,26 @@ export function createApp(db) {
   on('GET', '/inscription', (c) => {
     const claim = c.url.searchParams.get('claim'); const demo = claim ? demoTenantByToken(db, claim) : null;
     if (claim && !demo) return html(c.res, V.messagePage('Lien expiré', 'Cette démonstration a déjà été activée ou n’existe plus.', ['Créer un site', '/inscription']), 404);
-    const plan = c.url.searchParams.get('formule');
-    html(c.res, V.signupPage({ csrf: csrfToken(c), f: { plan: PLANS[plan] ? plan : 'pro', tpl: demo?.tpl }, claim: demo ? claim : null, demo }));
+    const plan = c.url.searchParams.get('formule'); const tpl = c.url.searchParams.get('tpl');
+    html(c.res, V.signupPage({ csrf: csrfToken(c), f: { plan: PLANS[plan] ? plan : 'pro', tpl: demo?.tpl || (TEMPLATES[tpl] ? tpl : undefined), country: demo?.country || guessCountry(c), lang: c.lang }, claim: demo ? claim : null, demo }));
   });
   on('POST', '/inscription', (c) => {
     checkCsrf(c); limit(c, 'signup', 10, 3600e3);
     const f = c.form; const errors = [];
     const demo = f.claim ? demoTenantByToken(db, f.claim) : null;
-    if (f.claim && !demo) errors.push('Cette démonstration a déjà été activée.');
+    if (f.claim && !demo) errors.push(tr('Cette démonstration a déjà été activée.'));
     const email = clampStr(f.email, 190).toLowerCase(); const name = clampStr(f.name, 80);
-    if (!demo) { if (!clampStr(f.business, 80)) errors.push("Indiquez le nom de l'entreprise."); if (!TEMPLATES[f.tpl]) errors.push('Choisissez un métier.'); }
-    if (!name) errors.push('Indiquez votre nom.');
-    if (!emailOk(email)) errors.push('Adresse e-mail invalide.');
-    const pw = passwordProblem(f.password); if (pw) errors.push(pw);
-    if (f.cgu !== 'on') errors.push("Vous devez accepter les conditions d'utilisation.");
-    if (!PLANS[f.plan]) errors.push('Formule inconnue.');
-    if (emailOk(email) && db.one('SELECT 1 FROM users WHERE email=?', email)) errors.push('Un compte existe déjà avec cette adresse. Connectez-vous.');
+    if (!demo) { if (!clampStr(f.business, 80)) errors.push(tr("Indiquez le nom de l'entreprise.")); if (!TEMPLATES[f.tpl]) errors.push(tr('Choisissez un métier.')); if (f.country && !COUNTRIES[f.country]) errors.push(tr('Pays inconnu.')); }
+    if (!name) errors.push(tr('Indiquez votre nom.'));
+    if (!emailOk(email)) errors.push(tr('Adresse e-mail invalide.'));
+    const pw = passwordProblem(f.password); if (pw) errors.push(tr(pw));
+    if (f.cgu !== 'on') errors.push(tr("Vous devez accepter les conditions d'utilisation."));
+    if (!PLANS[f.plan]) errors.push(tr('Formule inconnue.'));
+    if (emailOk(email) && db.one('SELECT 1 FROM users WHERE email=?', email)) errors.push(tr('Un compte existe déjà avec cette adresse. Connectez-vous.'));
     if (errors.length) return html(c.res, V.signupPage({ csrf: csrfToken(c), f, errors, claim: demo ? f.claim : null, demo }), 400);
     const now = Date.now();
-    const userId = Number(db.run('INSERT INTO users(email,pass_hash,name,role,created_at) VALUES(?,?,?,?,?)', email, hashPassword(f.password), name, 'pro', now).lastInsertRowid);
+    const ulang = LANGS[f.lang] ? f.lang : c.lang;
+    const userId = Number(db.run('INSERT INTO users(email,pass_hash,name,role,created_at,lang) VALUES(?,?,?,?,?,?)', email, hashPassword(f.password), name, 'pro', now, ulang).lastInsertRowid);
     let tenantId;
     if (demo) {
       db.tx(() => {
@@ -119,12 +135,13 @@ export function createApp(db) {
       });
       tenantId = demo.id;
     } else {
-      tenantId = createTenant(db, { name: f.business, tpl: f.tpl, city: f.city, phone: f.phone, email, tz: f.tz, plan: f.plan, status: 'trial', ownerId: userId }).id;
+      const ctry = COUNTRIES[f.country] ? f.country : (countryByTz(f.tz) || guessCountry(c));
+      tenantId = createTenant(db, { name: f.business, tpl: f.tpl, city: f.city, phone: f.phone, email, country: ctry, tz: validTz(f.tz) ? f.tz : null, lang: ulang, plan: f.plan, status: 'trial', ownerId: userId }).id;
     }
     const t = loadTenant(db, 'id', tenantId);
     const vt = issueToken(db, 'verify', { userId, hours: 48 });
-    enqueue(db, { tenantId, channel: 'email', to: email, template: 'verify_email', payload: { url: `${config.baseUrl}/verifier/${vt}` } });
-    enqueue(db, { tenantId, channel: 'email', to: email, template: 'welcome', payload: { tenant: t.name, siteUrl: `${config.baseUrl}/s/${t.slug}`, dashUrl: `${config.baseUrl}/pro`, trialEnd: new Date(t.trial_ends_at).toLocaleDateString('fr-FR') } });
+    enqueue(db, { tenantId, channel: 'email', to: email, template: 'verify_email', payload: { lang: ulang, url: `${config.baseUrl}/verifier/${vt}` } });
+    enqueue(db, { tenantId, channel: 'email', to: email, template: 'welcome', payload: { lang: ulang, tenant: t.name, siteUrl: `${config.baseUrl}/s/${t.slug}`, dashUrl: `${config.baseUrl}/pro`, trialEnd: new Date(t.trial_ends_at).toLocaleDateString(ulang === 'fr' ? 'fr-FR' : 'en-US') } });
     audit(db, { userId, tenantId, action: demo ? 'inscription.demo' : 'inscription', ip: c.ip });
     emit(db, 'inscription', { entreprise: t.name, metier: t.metier, ville: t.city, formule: t.plan, email, nom: name, depuis_demo: !!demo, site: `${config.baseUrl}/s/${t.slug}` }, tenantId);
     const s = createSession(db, userId);
@@ -132,13 +149,13 @@ export function createApp(db) {
   });
 
   // ---------- connexion ----------
-  on('GET', '/connexion', (c) => html(c.res, V.loginPage({ csrf: csrfToken(c), info: c.url.searchParams.get('ok') === 'mdp' ? 'Mot de passe modifié. Connectez-vous.' : '' })));
+  on('GET', '/connexion', (c) => html(c.res, V.loginPage({ csrf: csrfToken(c), info: c.url.searchParams.get('ok') === 'mdp' ? tr('Mot de passe modifié. Connectez-vous.') : '' })));
   on('POST', '/connexion', (c) => {
     checkCsrf(c); limit(c, 'login', 20, 15 * 60e3);
     const email = clampStr(c.form.email, 190).toLowerCase();
     if (!rateLimit(`login-mail:${email}`, 10, 15 * 60e3)) throw HttpError(429, 'Trop de tentatives pour ce compte. Patientez 15 minutes.');
     const r = login(db, email, c.form.password);
-    if (!r.ok) { audit(db, { action: 'connexion.echec', detail: email, ip: c.ip }); return html(c.res, V.loginPage({ csrf: csrfToken(c), email, error: r.locked ? 'Compte verrouillé 15 minutes après plusieurs échecs.' : 'E-mail ou mot de passe incorrect.' }), 401); }
+    if (!r.ok) { audit(db, { action: 'connexion.echec', detail: email, ip: c.ip }); return html(c.res, V.loginPage({ csrf: csrfToken(c), email, error: tr(r.locked ? 'Compte verrouillé 15 minutes après plusieurs échecs.' : 'E-mail ou mot de passe incorrect.') }), 401); }
     if (c.session) destroySession(db, c.cookies[SESSION]);
     const s = createSession(db, r.user.id);
     audit(db, { userId: r.user.id, action: 'connexion', ip: c.ip });
@@ -152,7 +169,7 @@ export function createApp(db) {
   on('POST', '/connexion/2fa', (c) => {
     if (!c.session || c.session.role !== 'superadmin') return redirect(c.res, '/connexion');
     checkCsrf(c); limit(c, 'totp', 10, 15 * 60e3);
-    if (!totpOk(c.session.totp_secret, c.form.code)) { audit(db, { userId: c.session.user_id, action: '2fa.echec', ip: c.ip }); return html(c.res, V.totpPage({ csrf: csrfToken(c), error: 'Code incorrect.' }), 401); }
+    if (!totpOk(c.session.totp_secret, c.form.code)) { audit(db, { userId: c.session.user_id, action: '2fa.echec', ip: c.ip }); return html(c.res, V.totpPage({ csrf: csrfToken(c), error: tr('Code incorrect.') }), 401); }
     db.run('UPDATE sessions SET totp_ok=1 WHERE id_hash=?', c.session.id_hash);
     audit(db, { userId: c.session.user_id, action: '2fa.ok', ip: c.ip });
     redirect(c.res, '/admin');
@@ -167,8 +184,8 @@ export function createApp(db) {
   on('GET', '/mot-de-passe-oublie', (c) => html(c.res, V.forgotPage({ csrf: csrfToken(c) })));
   on('POST', '/mot-de-passe-oublie', (c) => {
     checkCsrf(c); limit(c, 'forgot', 5, 3600e3);
-    const u = db.one('SELECT id,email FROM users WHERE email=?', clampStr(c.form.email, 190).toLowerCase());
-    if (u) { const t = issueToken(db, 'reset', { userId: u.id, hours: 2 }); enqueue(db, { channel: 'email', to: u.email, template: 'reset_password', payload: { url: `${config.baseUrl}/reinitialiser/${t}` } }); }
+    const u = db.one('SELECT id,email,lang FROM users WHERE email=?', clampStr(c.form.email, 190).toLowerCase());
+    if (u) { const t = issueToken(db, 'reset', { userId: u.id, hours: 2 }); enqueue(db, { channel: 'email', to: u.email, template: 'reset_password', payload: { lang: u.lang, url: `${config.baseUrl}/reinitialiser/${t}` } }); }
     html(c.res, V.forgotPage({ csrf: csrfToken(c), sent: true }));
   });
   on('GET', '/reinitialiser/:token', (c) => {
@@ -178,7 +195,7 @@ export function createApp(db) {
   on('POST', '/reinitialiser/:token', (c) => {
     checkCsrf(c);
     const p = passwordProblem(c.form.password);
-    if (p) return html(c.res, V.resetPage({ csrf: csrfToken(c), token: c.params.token, error: p }), 400);
+    if (p) return html(c.res, V.resetPage({ csrf: csrfToken(c), token: c.params.token, error: tr(p) }), 400);
     const tk = useToken(db, 'reset', c.params.token);
     if (!tk) return html(c.res, V.messagePage('Lien expiré', 'Demandez un nouveau lien.', ['Mot de passe oublié', '/mot-de-passe-oublie']), 400);
     db.run('UPDATE users SET pass_hash=?, failed_logins=0, locked_until=0 WHERE id=?', hashPassword(c.form.password), tk.user_id);
@@ -187,7 +204,7 @@ export function createApp(db) {
   });
 
   // ---------- annulation par le client ----------
-  on('GET', '/annuler/:token', (c) => html(c.res, V.layout('Annuler mon rendez-vous', `<main class="auth"><h1>Annuler mon rendez-vous</h1><form method="post" class="card"><input type="hidden" name="csrf" value="${csrfToken(c)}"><p>Voulez-vous vraiment annuler ce rendez-vous ?</p><button class="btn red wide" type="submit">Oui, annuler</button></form></main>`)));
+  on('GET', '/annuler/:token', (c) => html(c.res, V.confirmPage('Annuler mon rendez-vous', 'Voulez-vous vraiment annuler ce rendez-vous ?', 'Oui, annuler', csrfToken(c))));
   on('POST', '/annuler/:token', (c) => {
     checkCsrf(c); limit(c, 'cancel', 20, 3600e3);
     const r = cancelByCustomer(db, c.params.token);
@@ -195,18 +212,20 @@ export function createApp(db) {
     if (!r.ok) return html(c.res, V.messagePage('Lien expiré', 'Ce rendez-vous est déjà annulé ou n’existe pas.'), 404);
     const t = loadTenant(db, 'id', r.appt.tenant_id);
     notifyPro(t, 'annulation', `${r.appt.customer_name} a annulé son rendez-vous du ${r.appt.date} à ${r.appt.time} (${r.appt.service_name}).`);
-    html(c.res, V.messagePage('Rendez-vous annulé', `Votre rendez-vous chez ${t.name} est annulé. Le professionnel est prévenu.`));
+    html(c.res, V.messagePage('Rendez-vous annulé', tr('Votre rendez-vous chez {n} est annulé. Le professionnel est prévenu.', { n: t.name })));
   });
 
   // ---------- sites des entreprises ----------
   const firstSvc = (t) => t.services[0]?.id || null;
   function renderSite(c, t, base, mode, demoClaim = null) {
+    c.setLang(t.lang || 'fr');
     if (mode === 'live' && !isBot(c.req.headers['user-agent'])) track(db, t, 'views');
     html(c.res, V.tenantSite(t, { base, mode, days: openDays(db, t, 10, firstSvc(t)), aiMode: mode === 'live' && aiAvailable(t) ? 'ia' : 'simple', demoClaim, head: siteHead(t, { mode }) }));
   }
-  function liveTenant(slug) {
+  function liveTenant(slug, c = null) {
     const t = loadTenant(db, 'slug', slug);
     if (!t || t.status === 'demo') throw HttpError(404, 'Site introuvable.');
+    if (c) c.setLang(t.lang || 'fr');
     return t;
   }
   on('GET', '/s/:slug', (c) => {
@@ -230,7 +249,7 @@ export function createApp(db) {
     });
     on('POST', `${prefix}/rdv`, (c) => {
       const { t, demo } = resolve(c); limit(c, 'book', config.rateBookMax, 600e3);
-      if (demo) return json(c.res, { ok: true, demo: true, msg: 'Démonstration : sur le site activé, ce créneau serait réservé et le professionnel prévenu. Rien n’a été enregistré.' });
+      if (demo) return json(c.res, { ok: true, demo: true, msg: tr('Démonstration : sur le site activé, ce créneau serait réservé et le professionnel prévenu. Rien n’a été enregistré.') });
       const r = book(db, t, { ...c.form, source: 'site' });
       if (!r.ok) return json(c.res, { ok: false, code: r.code, msg: r.msg }, r.code === 'taken' ? 409 : 400);
       const a = db.one('SELECT * FROM appointments WHERE id=?', r.id);
@@ -241,12 +260,12 @@ export function createApp(db) {
     });
     on('POST', `${prefix}/devis`, (c) => {
       const { t, demo } = resolve(c); limit(c, 'quote', 10, 600e3);
-      if (demo) return json(c.res, { ok: true, demo: true, msg: 'Démonstration : sur le site activé, cette demande arriverait dans l’espace du professionnel. Rien n’a été enregistré.' });
+      if (demo) return json(c.res, { ok: true, demo: true, msg: tr('Démonstration : sur le site activé, cette demande arriverait dans l’espace du professionnel. Rien n’a été enregistré.') });
       const r = createQuote(db, t, c.form);
-      if (!r.ok) return json(c.res, r, 400);
+      if (!r.ok) return json(c.res, { ...r, msg: tr(r.msg) }, 400);
       notifyPro(t, 'demande de devis', `${clampStr(c.form.name, 80)} (+${intlPhone(c.form.phone, t.cc)}) · ${clampStr(c.form.service, 80)} · ${clampStr(c.form.message, 300)}`);
       emit(db, 'devis', { entreprise: t.name, client: clampStr(c.form.name, 80), telephone: '+' + intlPhone(c.form.phone, t.cc), prestation: clampStr(c.form.service, 80), message: clampStr(c.form.message, 500) }, t.id);
-      json(c.res, { ok: true, msg: `Demande envoyée à ${t.name}. Vous serez recontacté rapidement.` });
+      json(c.res, { ok: true, msg: tr('Demande envoyée à {n}. Vous serez recontacté rapidement.', { n: t.name }) });
     });
     on('POST', `${prefix}/chat`, async (c) => {
       const { t, demo } = resolve(c); limit(c, 'chat', 30, 60e3);
@@ -258,14 +277,20 @@ export function createApp(db) {
   }
   siteApi('/s/:slug', (c) => {
     if (!sameOrigin(c.req)) throw HttpError(403, 'Origine refusée');
-    const t = liveTenant(c.params.slug); if (siteState(t) !== 'live') throw HttpError(503, 'Site indisponible');
+    const t = liveTenant(c.params.slug, c); if (siteState(t) !== 'live') throw HttpError(503, 'Site indisponible');
     return { t, demo: false };
   });
   const demoResolve = (c) => {
     if (!sameOrigin(c.req)) throw HttpError(403, 'Origine refusée');
     const row = demoTenantByToken(db, c.params.token); if (!row) throw HttpError(404, 'Démonstration introuvable');
+    c.setLang(row.lang || 'fr');
     return { t: loadTenant(db, 'id', row.id), demo: true };
   };
+  siteApi('/exemple/:tpl', (c) => {
+    if (!sameOrigin(c.req)) throw HttpError(403, 'Origine refusée');
+    if (!EXAMPLE_TPLS.includes(c.params.tpl)) throw HttpError(404, 'Page introuvable');
+    const tn = exampleTenant(db, c.params.tpl, c.lang); c.setLang(tn.lang); return { t: tn, demo: true };
+  });
   on('GET', '/demo/:token', (c) => {
     const row = demoTenantByToken(db, c.params.token);
     if (!row) return html(c.res, V.messagePage('Démonstration terminée', 'Ce site a été activé ou la démonstration n’existe plus.', ['Découvrir ClientDirect Pro', '/']), 404);
@@ -276,7 +301,7 @@ export function createApp(db) {
   siteApi('/demo/:token', demoResolve);
 
   // ---------- espace professionnel ----------
-  const msgFrom = (c) => ({ bienvenue: 'Votre site est en ligne ! Vérifiez vos prestations et horaires dans Réglages.', ok: 'Modification enregistrée.' })[c.url.searchParams.get('bienvenue') ? 'bienvenue' : c.url.searchParams.get('m')] || '';
+  const msgFrom = (c) => { const k = c.url.searchParams.get('bienvenue') ? 'bienvenue' : c.url.searchParams.get('m'); const m = { bienvenue: 'Votre site est en ligne ! Vérifiez vos prestations et horaires dans Réglages.', ok: 'Modification enregistrée.' }[k]; return m ? tr(m) : ''; };
   on('GET', '/pro', (c) => {
     requirePro(c); const t = c.tenant; const today = nowIn(t.tz).date;
     const appts = db.all("SELECT * FROM appointments WHERE tenant_id=? AND date>=? AND status IN ('pending','confirmed') ORDER BY date, time LIMIT 200", t.id, today);
@@ -308,7 +333,7 @@ export function createApp(db) {
     const r = await setDomain(db, c.tenant, c.form.domain);
     audit(db, { userId: c.user.id, tenantId: c.tenant.id, action: 'domaine', detail: String(c.form.domain || '').slice(0, 120), ip: c.ip });
     c.tenant = loadTenant(db, 'id', c.tenant.id);
-    settingsPage(c, r.ok ? { domainMsg: r.msg } : { errors: [r.msg] }, r.ok ? 200 : 400);
+    settingsPage(c, r.ok ? { domainMsg: tr(r.msg) } : { errors: [tr(r.msg)] }, r.ok ? 200 : 400);
   });
   on('GET', '/pro/donnees/export', (c) => {
     requirePro(c); audit(db, { userId: c.user.id, tenantId: c.tenant.id, action: 'export', ip: c.ip });
@@ -317,7 +342,7 @@ export function createApp(db) {
   on('POST', '/pro/compte/supprimer', (c) => {
     requirePro(c); checkCsrf(c); limit(c, 'delete', 5, 3600e3);
     const u = db.one('SELECT pass_hash FROM users WHERE id=?', c.user.id);
-    if (!verifyPassword(c.form.password || '', u.pass_hash)) return settingsPage(c, { errors: ['Mot de passe incorrect : compte non supprimé.'] }, 400);
+    if (!verifyPassword(c.form.password || '', u.pass_hash)) return settingsPage(c, { errors: [tr('Mot de passe incorrect : compte non supprimé.')] }, 400);
     deleteTenant(db, c.tenant.id, c.user.id, c.ip);
     redirect(c.res, '/?compte=supprime', { 'Set-Cookie': cookie(SESSION, '', { maxAge: 0 }) });
   });
@@ -331,11 +356,12 @@ export function createApp(db) {
   on('GET', '/pro/abonnement', (c) => {
     requirePro(c); const q = c.url.searchParams;
     const msg = q.get('ok') ? 'Paiement reçu. Votre abonnement s’active dès la confirmation de Stripe (quelques secondes).' : q.get('annule') ? 'Paiement annulé, rien n’a été débité.' : '';
-    html(c.res, V.proBilling(c.tenant, c.user, csrfToken(c), { configured: billingConfigured(), msg, invoices: db.all('SELECT * FROM invoices WHERE tenant_id=? ORDER BY id DESC LIMIT 24', c.tenant.id) }));
+    html(c.res, V.proBilling(c.tenant, c.user, csrfToken(c), { configured: billingConfigured(), open: billingOpen(c.tenant.country), msg: tr(msg), invoices: db.all('SELECT * FROM invoices WHERE tenant_id=? ORDER BY id DESC LIMIT 24', c.tenant.id) }));
   });
   on('POST', '/pro/abonnement/checkout', async (c) => {
     requirePro(c); checkCsrf(c);
     if (!billingConfigured()) throw HttpError(503, 'Le paiement en ligne n’est pas encore activé.');
+    if (!billingOpen(c.tenant.country)) throw HttpError(403, 'Les abonnements payants ne sont pas encore ouverts dans votre pays.');
     const url = await createCheckout(c.tenant, c.user.email, c.form.plan);
     audit(db, { userId: c.user.id, tenantId: c.tenant.id, action: 'checkout', detail: c.form.plan, ip: c.ip });
     redirect(c.res, url);
@@ -345,7 +371,7 @@ export function createApp(db) {
   on('GET', '/pro/aide', (c) => { requirePro(c); html(c.res, V.proHelp(c.tenant, c.user, csrfToken(c), { tickets: proTickets(c), msg: c.url.searchParams.get('m') === 'ticket' ? 'Ticket envoyé. Nous vous répondons par e-mail.' : '' })); });
   on('POST', '/pro/aide/question', async (c) => {
     requirePro(c); checkCsrf(c); limit(c, 'support', 30, 3600e3);
-    const q = clampStr(c.form.q, 800); const a = q ? await supportAnswer(q) : null;
+    const q = clampStr(c.form.q, 800); const a = q ? await supportAnswer(q) : null; if (a && a.mode !== 'ia') a.text = tr(a.text);
     html(c.res, V.proHelp(c.tenant, c.user, csrfToken(c), { q, answer: a, tickets: proTickets(c) }));
   });
   on('POST', '/pro/aide/ticket', async (c) => {
@@ -439,7 +465,7 @@ export function createApp(db) {
   return async function handle(req, res) {
     const url = new URL(req.url, 'http://x');
     let path = url.pathname; let base;
-    if (path.startsWith('/static/')) { if (!serveStatic(res, path.slice(8))) send(res, 404, 'Introuvable', { 'Content-Type': 'text/plain; charset=utf-8' }); return; }
+    if (path.startsWith('/static/')) { if (!serveStatic(res, path.slice(8), req)) send(res, 404, 'Introuvable', { 'Content-Type': 'text/plain; charset=utf-8' }); return; }
     // Sous-domaine : garage-x.<ROOT_DOMAIN>/  =>  /s/garage-x/
     const host = String(req.headers.host || '').split(':')[0].toLowerCase();
     const mainHost = new URL(config.baseUrl).hostname;
@@ -453,10 +479,14 @@ export function createApp(db) {
     if (siteSlug) { path = `/s/${siteSlug}${path === '/' ? '' : path}`; base = ''; }
     const cookies = parseCookies(req.headers.cookie);
     const session = readSession(db, cookies[SESSION]);
-    const c = { req, res, url, cookies, session, ip: clientIp(req), base, form: {}, raw: '' };
+    const qLang = url.searchParams.get('lang');
+    const lang = detectLang({ query: qLang, cookie: cookies.lang, accept: req.headers['accept-language'] });
+    const c = { req, res, url, cookies, session, ip: clientIp(req), base, form: {}, raw: '', lang, setLang: (l) => { setLang(l); c.lang = currentLang(); } };
     const extra = [];
     if (!session) { c.pre = cookies[PRE] && /^[\w-]{20,}$/.test(cookies[PRE]) ? cookies[PRE] : randomId(18); if (c.pre !== cookies[PRE]) extra.push(cookie(PRE, c.pre, { maxAge: 86400 })); }
+    if (qLang && LANGS[qLang] && qLang !== cookies.lang) extra.push(cookie('lang', qLang, { maxAge: 365 * 86400, httpOnly: false }));
     if (extra.length) { const orig = res.writeHead.bind(res); res.writeHead = (st, h = {}) => { const sc = h['Set-Cookie']; h['Set-Cookie'] = [...extra, ...(sc ? [].concat(sc) : [])]; return orig(st, h); }; }
+    return withLang(lang, async () => {
     try {
       const method = req.method === 'HEAD' ? 'GET' : req.method;
       let found = null, methodMismatch = false;
@@ -469,9 +499,10 @@ export function createApp(db) {
       if (e.redirect) return redirect(res, e.redirect);
       const status = e.status || 500;
       if (status >= 500 && status !== 503) { recordIncident(db, { kind: 'http', severity: 'critical', message: `${req.method} ${path} : ${String(e.message).slice(0, 160)}` }); if (config.env !== 'test') console.error(e); }
-      const msg = status >= 500 && status !== 503 && status !== 502 ? 'Une erreur est survenue. Elle a été signalée automatiquement.' : e.message;
+      const msg = tr(status >= 500 && status !== 503 && status !== 502 ? 'Une erreur est survenue. Elle a été signalée automatiquement.' : e.message);
       const wantsJson = String(req.headers.accept || '').includes('application/json') || String(req.headers['content-type'] || '').includes('application/json');
       if (wantsJson) json(res, { ok: false, msg }, status); else html(res, V.messagePage(status === 404 ? 'Page introuvable' : 'Oups', msg, ['Accueil', '/']), status);
     }
+    });
   };
 }

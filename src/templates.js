@@ -45,4 +45,32 @@ export const TEMPLATES = {
     services: [['Visite pour devis', 0, 60, 'Déplacement et devis gratuits sur la commune.'], ['Dépannage plomberie', 65, 60, 'À partir de.'], ['Dépannage électricité', 65, 60, 'À partir de.']]
   }
 };
+// Versions anglaises (mêmes prix et durées)
+const EN = {
+  garage: { label: 'Auto repair shop', metier: 'Auto repair shop', obj: 'Vehicle (make, model, year)', verb: 'Book an appointment', staff: ['Bay 1', 'Bay 2'],
+    lead: 'Servicing, brakes, air conditioning, batteries. Book online or ask our assistant anything, even after hours.', faq: 'Card, cash or bank transfer. Parts priced per vehicle. Free quotes.',
+    services: [['Oil and filter change', 'Oil, oil filter, fluid level check.'], ['Front brake pads', 'Replacement and disc inspection.'], ['A/C recharge', 'Gas recharge and leak test.'], ['Battery and starting', 'Test, replacement, roadside help.'], ['Electronic diagnostics', 'Fault code reading.']] },
+  coiffeur: { label: 'Hair salon', metier: 'Hair salon', obj: 'Hair length', verb: 'Book', staff: ['Stylist 1', 'Stylist 2'],
+    lead: 'Cuts, braids, colour and treatments. Book your slot online, no waiting on the phone.', faq: 'Card or cash. Please give 24 hours notice if you cancel.',
+    services: [["Men's cut", 'Cut and finish.'], ["Women's cut and blow-dry", 'Wash, cut, blow-dry.'], ['Braids', 'Depending on length, extensions not included.'], ['Colour', 'Full colour and treatment.']] },
+  restaurant: { label: 'Restaurant', metier: 'Restaurant', obj: 'Number of guests', verb: 'Book a table', staff: ['Table A', 'Table B', 'Table C', 'Table D'],
+    lead: 'Home-made food, lunch and dinner. Book your table or ask for a catering quote.', faq: 'Takeaway available. Card or cash.',
+    services: [['Table for 2', 'Free booking.'], ['Table for 4', 'Free booking.'], ['Event catering', 'Price per person, from 20 guests.']] },
+  securite: { label: 'Security company', metier: 'Security company', obj: 'Type of site to protect', verb: 'Book a quote meeting', staff: ['Sales manager'],
+    lead: 'Guarding, patrols, event security. Ask for a quote or a meeting with a manager.', faq: 'Licensed officers. Free quotes.',
+    services: [['Guarding quote meeting', 'Visit or call with a manager.'], ['Event officer (per hour)', 'Price per hour and per officer, from.'], ['Site security audit', 'Visit and written report.']] },
+  location: { label: 'Vehicle rental', metier: 'Vehicle rental', obj: 'Rental dates', verb: 'Book a pick-up', staff: ['Desk 1', 'Desk 2'],
+    lead: 'City cars, vans and 4x4s. Book your vehicle pick-up time online.', faq: 'Licence held 2+ years and security deposit required. Card payment.',
+    services: [['City car pick-up (per day)', 'Unlimited mileage, from.'], ['Van pick-up (per day)', 'From.'], ['4x4 pick-up truck (per day)', 'From.']] },
+  artisan: { label: 'Building trades', metier: 'Plumbing and electrical', obj: 'Job address', verb: 'Book an appointment', staff: ['Team 1'],
+    lead: 'Plumbing, electrical, small works. Book a job or a quote visit.', faq: 'Fully insured. Bank transfer or cheque.',
+    services: [['Quote visit', 'Free travel and quote in town.'], ['Plumbing call-out', 'From.'], ['Electrical call-out', 'From.']] }
+};
+/** Modèle dans la langue voulue (le français reste la référence pour les prix, durées, horaires). */
+export function templateFor(key, lang = 'fr') {
+  const T = TEMPLATES[key] || TEMPLATES.garage; if (lang !== 'en') return T;
+  const E = EN[key] || EN.garage;
+  return { ...T, ...E, color: T.color, naf: T.naf, hours: T.hours, staff: E.staff, services: T.services.map((s, i) => [E.services[i]?.[0] || s[0], s[1], s[2], E.services[i]?.[1] || s[3]]) };
+}
+export const tplLabel = (key, lang = 'fr') => templateFor(key, lang).label;
 export const tplFromNaf = (naf) => Object.entries(TEMPLATES).find(([, t]) => t.naf.includes(naf))?.[0] || null;
