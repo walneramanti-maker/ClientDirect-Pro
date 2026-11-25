@@ -63,7 +63,14 @@ const MIGRATIONS = [
   `ALTER TABLE tenants ADD COLUMN country TEXT NOT NULL DEFAULT 'GF'`,
   `ALTER TABLE tenants ADD COLUMN currency TEXT NOT NULL DEFAULT 'EUR'`,
   `ALTER TABLE users ADD COLUMN lang TEXT NOT NULL DEFAULT 'fr'`,
-  `ALTER TABLE tenants ADD COLUMN example INTEGER NOT NULL DEFAULT 0`
+  `ALTER TABLE tenants ADD COLUMN example INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE prospects ADD COLUMN demo_token_hash TEXT`,
+  `CREATE INDEX IF NOT EXISTS prospect_demo ON prospects(demo_token_hash)`,
+  `ALTER TABLE prospects ADD COLUMN dept TEXT NOT NULL DEFAULT ''`,
+  `CREATE INDEX IF NOT EXISTS prospect_dept ON prospects(dept, status)`,
+  `ALTER TABLE tenants ADD COLUMN source TEXT NOT NULL DEFAULT ''`,
+  `CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, tenant_id INTEGER, user_id INTEGER, score INTEGER NOT NULL CHECK(score BETWEEN 1 AND 5), comment TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS visits_source(day TEXT NOT NULL, source TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(day, source))`
 ];
 
 export function openDb(file, { appEnv = null } = {}) {

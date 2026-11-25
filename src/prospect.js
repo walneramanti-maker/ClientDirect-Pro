@@ -4,6 +4,7 @@ import { TEMPLATES, tplFromNaf } from './templates.js';
 import { createTenant } from './tenants.js';
 import { clampStr, sha256, hmac } from './util.js';
 import { recordIncident } from './incidents.js';
+import { DEPARTEMENTS, DEPT_CODES, deptOf, territoryOf } from './france.js';
 
 // Codes commune INSEE des principales villes ciblées
 export const COMMUNES = {
@@ -12,26 +13,30 @@ export const COMMUNES = {
 };
 
 /** Convertit un résultat de l'API Recherche d'entreprises. Renvoie null pour les entreprises à ne jamais démarcher. */
-export function fromSirene(r, fallbackTpl = null, commune = null) {
+export function fromSirene(r, fallbackTpl = null, commune = null, dept = null) {
   // Non-diffusion (« [ND] ») ou opposition à l'utilisation commerciale des données : jamais importées
   if (r.statut_diffusion === 'P' || r.opposition_diffusion_commerciale === true || /\[ND\]/.test(r.nom_complet || '')) return null;
-  const e = (commune && (r.matching_etablissements || []).find((x) => x.commune === commune)) || r.siege || {};
+  const m = r.matching_etablissements || [];
+  const e = (commune && m.find((x) => x.commune === commune)) || (dept && m.find((x) => deptOf(x.code_postal) === dept)) || r.siege || {};
   if (/\[ND\]/.test(e.adresse || '')) return null;
   return { siren: r.siren, siret: e.siret || '', name: clampStr(r.nom_complet || r.nom_raison_sociale || '', 120), naf: r.activite_principale || '',
     tpl: tplFromNaf(r.activite_principale) || fallbackTpl || 'artisan', city: e.libelle_commune || COMMUNES[commune] || '', postal: e.code_postal || '', address: clampStr(e.adresse || '', 200),
-    created_on: r.date_creation || null, staff: r.tranche_effectif_salarie || 'NN' };
+    created_on: r.date_creation || null, staff: r.tranche_effectif_salarie || 'NN', dept: deptOf(e.code_postal) };
 }
-/** Interroge l'API publique Recherche d'entreprises (gratuite, sans clé) : activité principale + commune de l'établissement. */
-export async function searchSirene({ tpl, commune, page = 1 }) {
+/** Interroge l'API publique Recherche d'entreprises (gratuite, sans clé) : activité principale + commune OU département. */
+export async function searchSirene({ tpl, commune = null, departement = null, page = 1, withMeta = false }) {
   const T = TEMPLATES[tpl]; if (!T) throw new Error('Métier inconnu');
-  if (!COMMUNES[commune]) throw new Error('Commune inconnue');
-  const url = `${config.sireneApi}/search?activite_principale=${encodeURIComponent(T.naf.join(','))}&code_commune=${commune}&etat_administratif=A&per_page=25&page=${page}`;
+  let where;
+  if (departement) { if (!DEPARTEMENTS[departement]) throw new Error('Département inconnu'); where = `departement=${departement}`; }
+  else { if (!COMMUNES[commune]) throw new Error('Commune inconnue'); where = `code_commune=${commune}`; }
+  const url = `${config.sireneApi}/search?activite_principale=${encodeURIComponent(T.naf.join(','))}&${where}&etat_administratif=A&per_page=25&page=${page}`;
   const res = await net.fetch(url, { headers: { accept: 'application/json' } });
-  if (res.status === 429) throw new Error("L'API publique limite le nombre de requêtes, réessayez dans une minute.");
+  if (res.status === 429) throw Object.assign(new Error("L'API publique limite le nombre de requêtes, réessayez dans une minute."), { rateLimited: true });
   if (!res.ok) throw new Error(`API Recherche d'entreprises ${res.status}`);
   const j = await res.json();
   // Les grandes entreprises (plus de 20 salariés) ne sont pas la cible
-  return (j.results || []).map((r) => fromSirene(r, tpl, commune)).filter((p) => p && ['NN', '00', '01', '02', '03', '11'].includes(p.staff));
+  const list = (j.results || []).map((r) => fromSirene(r, tpl, commune, departement)).filter((p) => p && ['NN', '00', '01', '02', '03', '11'].includes(p.staff));
+  return withMeta ? { list, totalPages: Number(j.total_pages) || 0, raw: (j.results || []).length } : list;
 }
 /** Recherche une entreprise précise par son SIREN. */
 export async function sireneBySiren(siren) {
@@ -55,7 +60,7 @@ export function importProspects(db, list) {
   let added = 0;
   for (const p of list) {
     if (!p.siren || db.one('SELECT 1 FROM prospects WHERE siren=?', p.siren)) continue;
-    db.run('INSERT INTO prospects(siren,siret,name,naf,tpl,city,postal,address,created_on,score,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)', p.siren, p.siret, p.name, p.naf, p.tpl, p.city, p.postal, p.address, p.created_on, scoreProspect(p), Date.now());
+    db.run('INSERT INTO prospects(siren,siret,name,naf,tpl,city,postal,address,created_on,score,created_at,dept,demo_token_hash,optout_token_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', p.siren, p.siret, p.name, p.naf, p.tpl, p.city, p.postal, p.address, p.created_on, scoreProspect(p), Date.now(), p.dept || deptOf(p.postal), sha256(demoTokenFor(p.siren)), sha256(hmac(config.secret, 'stop:' + p.siren).slice(0, 32)));
     added++;
   }
   return added;
@@ -75,7 +80,7 @@ export function prepareDemo(db, prospectId, { stable = false } = {}) {
   if (p.status === 'optout') throw new Error("Cette entreprise a demandé à ne plus être contactée.");
   if (p.demo_tenant_id && db.one("SELECT 1 FROM tenants WHERE id=? AND status='demo'", p.demo_tenant_id) && stable) return { tenantId: p.demo_tenant_id, demoUrl: `${config.baseUrl}/demo/${demoTokenFor(p.siren)}`, demoToken: demoTokenFor(p.siren) };
   const name = displayName(p.name);
-  const r = createTenant(db, { name, tpl: p.tpl, city: displayName(p.city), address: p.address, status: 'demo', prospectId: p.id, demoToken: stable ? demoTokenFor(p.siren) : null });
+  const r = createTenant(db, { name, tpl: p.tpl, city: displayName(p.city), address: p.address, country: territoryOf(p.postal), lang: 'fr', status: 'demo', prospectId: p.id, demoToken: stable ? demoTokenFor(p.siren) : null });
   db.run("UPDATE prospects SET status=CASE WHEN status IN ('new','contacted') THEN 'demo' ELSE status END, demo_tenant_id=? WHERE id=?", r.id, p.id);
   return { tenantId: r.id, demoUrl: `${config.baseUrl}/demo/${r.demoToken}`, demoToken: r.demoToken };
 }
@@ -83,12 +88,19 @@ export function prepareDemo(db, prospectId, { stable = false } = {}) {
 /** Message de prise de contact, prêt à copier (WhatsApp, e-mail, SMS). */
 /** Message de prise de contact B2B : identifie l'expéditeur, l'origine des données et donne un moyen simple de s'opposer. */
 export function outreachMessage(p, demoUrl, stopUrl) {
-  return `Bonjour, je suis ${config.legal.owner}, de ClientDirect Pro. J'ai préparé gratuitement un exemple de site pour ${displayName(p.name)} : vos clients y voient vos prestations, prennent rendez-vous en ligne et vous écrivent sur WhatsApp. C'est une démonstration non officielle, visible seulement par vous : ${demoUrl}\nSi ça vous intéresse, je passe vous le montrer en 10 minutes.\n\nVos coordonnées professionnelles proviennent du registre public des entreprises (INSEE). Pour ne plus être contacté et supprimer cette démo : ${stopUrl} (ou répondez STOP).`;
+  return `Bonjour, je suis ${config.legal.owner}, de ClientDirect Pro. J'ai préparé gratuitement un exemple de site pour ${displayName(p.name)} : vos clients y voient vos prestations, demandent un devis à toute heure et vous écrivent sur WhatsApp. C'est une démonstration non officielle, visible seulement par vous : ${demoUrl}\nSi ça vous intéresse, je vous le présente en 10 minutes, par téléphone ou en visio. Essai gratuit 14 jours, sans carte bancaire.\n\nVos coordonnées professionnelles proviennent du registre public des entreprises (INSEE). Pour ne plus être contacté et supprimer cette démo : ${stopUrl} (ou répondez STOP).`;
 }
 
 export function demoTenantByToken(db, token) {
-  if (!token) return null;
-  return db.one("SELECT * FROM tenants WHERE demo_token_hash=? AND status='demo'", sha256(token));
+  if (!token || !/^[\w-]{16,64}$/.test(token)) return null;
+  const h = sha256(token);
+  const t = db.one("SELECT * FROM tenants WHERE demo_token_hash=? AND status='demo'", h);
+  if (t) return t;
+  // Prospection nationale : la démo n'est fabriquée qu'à la première visite (des milliers de prospects, peu de visites)
+  const p = db.one("SELECT * FROM prospects WHERE demo_token_hash=? AND status NOT IN ('optout','converted','lost')", h);
+  if (!p || (p.demo_tenant_id && db.one('SELECT 1 FROM tenants WHERE id=?', p.demo_tenant_id))) return null;
+  const r = prepareDemo(db, p.id, { stable: true });
+  return db.one('SELECT * FROM tenants WHERE id=?', r.tenantId);
 }
 export function recordDemoView(db, tenant) {
   if (tenant.prospect_id) db.run('UPDATE prospects SET demo_views=demo_views+1 WHERE id=?', tenant.prospect_id);
@@ -122,4 +134,43 @@ export async function seedProspects(db, sirens, { pause = 160 } = {}) {
     } catch (e) { r.errors++; recordIncident(db, { kind: 'prospect_seed', severity: 'info', message: `Prospect ${siren} : ${String(e.message).slice(0, 120)}` }); }
   }
   return r;
+}
+
+// ---------- Prospection nationale automatique ----------
+/** Toutes les combinaisons métier × département, parcourues page par page pour couvrir toute la France. */
+export const CAMPAIGN_UNITS = DEPT_CODES.flatMap((d) => Object.keys(TEMPLATES).map((tpl) => ({ d, tpl })));
+/**
+ * Repère chaque jour de nouvelles entreprises dans le registre public, sur toute la France (métropole et Outre-mer).
+ * Premier passage : la 1re page de chaque métier dans chaque département, puis la 2e page, etc.
+ * N'envoie AUCUN message : les entreprises arrivent au statut « À contacter », avec démo et lien d'opposition prêts.
+ */
+export async function runNationalCampaign(db, { quota = config.prospectDaily, pause = config.prospectPauseMs, maxCalls = null, now = Date.now() } = {}) {
+  const U = CAMPAIGN_UNITS.length;
+  let cursor = Number(db.one("SELECT v FROM meta WHERE k='prospect_cursor'")?.v || 0);
+  const r = { added: 0, calls: 0, cursorStart: cursor, stopped: '' };
+  const limitCalls = maxCalls ?? Math.max(10, Math.ceil(quota / 3));
+  while (r.added < quota && r.calls < limitCalls) {
+    const pass = Math.floor(cursor / U); const u = CAMPAIGN_UNITS[cursor % U];
+    if (pass >= 40) { r.stopped = 'couverture complète'; break; }
+    try {
+      const { list } = await searchSirene({ tpl: u.tpl, departement: u.d, page: pass + 1, withMeta: true });
+      r.calls++; r.added += importProspects(db, list);
+    } catch (e) {
+      r.calls++;
+      if (e.rateLimited) { r.stopped = 'limite API'; break; }
+      recordIncident(db, { kind: 'prospection', severity: 'info', message: `Campagne nationale (${u.tpl}, ${u.d}) : ${String(e.message).slice(0, 120)}` });
+    }
+    cursor++;
+    if (pause) await new Promise((ok) => setTimeout(ok, pause));
+  }
+  db.run("INSERT INTO meta(k,v) VALUES('prospect_cursor',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(cursor));
+  db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.prospect',?,?)", JSON.stringify({ added: r.added, calls: r.calls }), now);
+  return { ...r, cursor, coverage: Math.min(1, cursor / U) };
+}
+/** Avancement de la campagne pour l'administration. */
+export function campaignStatus(db) {
+  const cursor = Number(db.one("SELECT v FROM meta WHERE k='prospect_cursor'")?.v || 0);
+  const last = db.one("SELECT detail, created_at FROM audit WHERE action='job.prospect' ORDER BY id DESC LIMIT 1");
+  const depts = db.one("SELECT COUNT(DISTINCT dept) n FROM prospects WHERE dept!=''").n;
+  return { cursor, units: CAMPAIGN_UNITS.length, pass: Math.floor(cursor / CAMPAIGN_UNITS.length) + 1, depts, daily: config.prospectDaily, last: last ? { ...JSON.parse(last.detail || '{}'), at: last.created_at } : null };
 }

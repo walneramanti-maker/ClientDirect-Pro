@@ -10,7 +10,8 @@ import { freeSlots, openDays, book, createQuote, setAppointmentStatus, cancelByC
 import { notifyAppointment, enqueue, emit } from './notify.js';
 import { answer, aiAvailable, ruleAnswer, aiCostEur } from './ai.js';
 import { billingConfigured, createCheckout, createPortal, verifyStripeSignature, handleStripeEvent, useDb } from './billing.js';
-import { safeSearch, importProspects, prepareDemo, outreachMessage, demoTenantByToken, recordDemoView, prospectStats, PIPELINE } from './prospect.js';
+import { safeSearch, importProspects, prepareDemo, outreachMessage, demoTenantByToken, recordDemoView, prospectStats, PIPELINE, runNationalCampaign, campaignStatus, demoTokenFor, displayName } from './prospect.js';
+import { DEPARTEMENTS } from './france.js';
 import { supportAnswer, openTicket, replyTicket } from './support.js';
 import { recordIncident, openIncidents, resolveIncident } from './incidents.js';
 import { t as tr, withLang, detectLang, regionFromAccept, LANGS, setLang, currentLang } from './i18n.js';
@@ -35,6 +36,21 @@ function clientIp(req) {
 function sameOrigin(req) {
   const o = req.headers.origin; if (!o) return true;
   try { const u = new URL(o); return u.host === req.headers.host || o === new URL(config.baseUrl).origin; } catch { return false; }
+}
+
+const method0 = (req) => (req.method === 'HEAD' ? 'GET' : req.method);
+/** Canal d'acquisition d'une visite : lien de recommandation, campagne, page métier, sinon rien. */
+export function sourceFrom(url, path) {
+  const clean = (v) => String(v || '').toLowerCase().replace(/[^\w.-]/g, '').slice(0, 40);
+  const ref = clean(url.searchParams.get('ref')); if (ref) return `site:${ref}`;
+  const utm = clean(url.searchParams.get('utm_source')); if (utm) return `utm:${utm}`;
+  if (path.startsWith('/metiers/')) return `metier:${clean(path.split('/')[2])}`;
+  if (path === '/' || path === '/exemples' || path.startsWith('/exemple/')) return 'direct';
+  return '';
+}
+function countVisit(db, source) {
+  const day = new Date().toISOString().slice(0, 10);
+  try { db.run('INSERT INTO visits_source(day,source,n) VALUES(?,?,1) ON CONFLICT(day,source) DO UPDATE SET n=n+1', day, source.startsWith('site:') ? 'site' : source); } catch { /* jamais bloquant */ }
 }
 
 export function createApp(db) {
@@ -70,6 +86,12 @@ export function createApp(db) {
   /** Pays probable du visiteur : choix explicite, région du navigateur, sinon France. */
   const guessCountry = (c) => { const q = c.url.searchParams.get('pays'); if (COUNTRIES[q]) return q; const r = regionFromAccept(c.req.headers['accept-language']); return COUNTRIES[r] ? r : (c.lang === 'en' ? 'US' : 'FR'); };
   on('GET', '/', (c) => { const ctry = guessCountry(c); const cur = PRICES[c.url.searchParams.get('devise')] ? c.url.searchParams.get('devise') : countryOf(ctry).cur; html(c.res, V.marketing({ csrf: csrfToken(c), cur: PRICES[cur] ? cur : 'EUR', country: ctry })); });
+  // ---------- pages par métier (référencement naturel) ----------
+  on('GET', '/metiers', (c) => html(c.res, V.metiersIndex()));
+  on('GET', '/metiers/:tpl', (c) => {
+    if (!TEMPLATES[c.params.tpl]) throw HttpError(404, 'Page introuvable');
+    const cur = countryOf(guessCountry(c)).cur; html(c.res, V.metierPage(c.params.tpl, { cur: PRICES[cur] ? cur : 'EUR' }));
+  });
   // ---------- exemples à tester sans inscription ----------
   on('GET', '/exemples', (c) => html(c.res, V.examplesPage()));
   on('GET', '/exemple/espace-pro', (c) => { const d = exampleDashboardData(db, c.lang); html(c.res, V.proDashboard(d.tenant, d.user, '', { ...d, example: true })); });
@@ -81,7 +103,7 @@ export function createApp(db) {
   on('GET', '/sitemap.xml', (c) => {
     // Seules les adresses du même domaine sont acceptées par Google dans un sitemap ; les domaines propres ont le leur.
     const own = publicTenants(db).filter((t) => !(t.custom_domain && t.domain_status === 'verified'));
-    const entries = [{ loc: `${config.baseUrl}/`, lastmod: Date.now() }, { loc: `${config.baseUrl}/annuaire`, lastmod: Date.now() }];
+    const entries = [{ loc: `${config.baseUrl}/`, lastmod: Date.now() }, { loc: `${config.baseUrl}/annuaire`, lastmod: Date.now() }, { loc: `${config.baseUrl}/metiers`, lastmod: Date.now() }, ...Object.keys(TEMPLATES).map((k) => ({ loc: `${config.baseUrl}/metiers/${k}`, lastmod: Date.now() }))];
     if (!config.rootDomain) for (const t of own) entries.push({ loc: `${config.baseUrl}/s/${t.slug}`, lastmod: t.updated_at || t.created_at });
     send(c.res, 200, sitemap(entries), { 'Content-Type': 'application/xml; charset=utf-8' });
   });
@@ -129,7 +151,7 @@ export function createApp(db) {
     let tenantId;
     if (demo) {
       db.tx(() => {
-        db.run("UPDATE tenants SET status='trial', trial_ends_at=?, owner_user_id=?, email=?, plan=?, demo_token_hash=NULL WHERE id=? AND status='demo'", now + config.trialDays * 864e5, userId, email, f.plan, demo.id);
+        db.run("UPDATE tenants SET status='trial', trial_ends_at=?, owner_user_id=?, email=?, plan=?, demo_token_hash=NULL, source=? WHERE id=? AND status='demo'", now + config.trialDays * 864e5, userId, email, f.plan, demo.prospect_id ? 'prospection' : (c.source || 'direct'), demo.id);
         db.run('INSERT INTO memberships(user_id,tenant_id,role) VALUES(?,?,?)', userId, demo.id, 'owner');
         if (demo.prospect_id) db.run("UPDATE prospects SET status='converted' WHERE id=?", demo.prospect_id);
       });
@@ -137,6 +159,7 @@ export function createApp(db) {
     } else {
       const ctry = COUNTRIES[f.country] ? f.country : (countryByTz(f.tz) || guessCountry(c));
       tenantId = createTenant(db, { name: f.business, tpl: f.tpl, city: f.city, phone: f.phone, email, country: ctry, tz: validTz(f.tz) ? f.tz : null, lang: ulang, plan: f.plan, status: 'trial', ownerId: userId }).id;
+      db.run('UPDATE tenants SET source=? WHERE id=?', c.source || 'direct', tenantId);
     }
     const t = loadTenant(db, 'id', tenantId);
     const vt = issueToken(db, 'verify', { userId, hours: 48 });
@@ -301,13 +324,22 @@ export function createApp(db) {
   siteApi('/demo/:token', demoResolve);
 
   // ---------- espace professionnel ----------
-  const msgFrom = (c) => { const k = c.url.searchParams.get('bienvenue') ? 'bienvenue' : c.url.searchParams.get('m'); const m = { bienvenue: 'Votre site est en ligne ! Vérifiez vos prestations et horaires dans Réglages.', ok: 'Modification enregistrée.' }[k]; return m ? tr(m) : ''; };
+  const msgFrom = (c) => { const k = c.url.searchParams.get('bienvenue') ? 'bienvenue' : c.url.searchParams.get('m'); const m = { bienvenue: 'Votre site est en ligne ! Vérifiez vos prestations et horaires dans Réglages.', ok: 'Modification enregistrée.', avis: 'Merci pour votre avis !' }[k]; return m ? tr(m) : ''; };
+  on('POST', '/pro/avis', (c) => {
+    requirePro(c); checkCsrf(c);
+    const score = Number(c.form.score); if (!(score >= 1 && score <= 5)) throw HttpError(400, 'Note invalide');
+    db.run('INSERT INTO feedback(tenant_id,user_id,score,comment,created_at) VALUES(?,?,?,?,?)', c.tenant.id, c.user.id, score, clampStr(c.form.comment, 1000), Date.now());
+    emit(db, 'avis', { entreprise: c.tenant.name, note: score, commentaire: clampStr(c.form.comment, 300) }, c.tenant.id);
+    redirect(c.res, '/pro?m=avis');
+  });
   on('GET', '/pro', (c) => {
     requirePro(c); const t = c.tenant; const today = nowIn(t.tz).date;
     const appts = db.all("SELECT * FROM appointments WHERE tenant_id=? AND date>=? AND status IN ('pending','confirmed') ORDER BY date, time LIMIT 200", t.id, today);
     const quotes = db.all("SELECT * FROM quotes WHERE tenant_id=? ORDER BY CASE status WHEN 'new' THEN 0 ELSE 1 END, id DESC LIMIT 50", t.id);
     const stats = { pending: appts.filter((a) => a.status === 'pending').length, upcoming: appts.length, quotes: quotes.filter((q) => q.status === 'new').length, revenue: appts.filter((a) => a.status === 'confirmed').reduce((s, a) => s + a.price, 0) };
-    html(c.res, V.proDashboard(t, c.user, csrfToken(c), { appts, quotes, stats, msg: msgFrom(c), perf: last30(db, t), curve: daily(db, t, 30) }));
+    // Avis demandé après 7 jours d'utilisation, puis au plus une fois par mois
+    const askFeedback = Date.now() - t.created_at > 7 * 864e5 && !db.one('SELECT 1 FROM feedback WHERE tenant_id=? AND created_at>?', t.id, Date.now() - 30 * 864e5);
+    html(c.res, V.proDashboard(t, c.user, csrfToken(c), { appts, quotes, stats, msg: msgFrom(c), perf: last30(db, t), curve: daily(db, t, 30), askFeedback }));
   });
   on('POST', '/pro/rdv/:id/statut', (c) => {
     requirePro(c); checkCsrf(c); const t = c.tenant;
@@ -406,6 +438,44 @@ export function createApp(db) {
     };
   }
   on('GET', '/admin', (c) => { requireAdmin(c); html(c.res, V.adminDashboard(csrfToken(c), adminData(c, c.url.searchParams.get('m') === 'ok' ? 'Enregistré.' : ''))); });
+  // Bilan d'une période : inscriptions, abonnements, revenus, dépenses, canaux, territoires, avis
+  function reviewData(fromIso, toIso) {
+    const from = Date.parse(fromIso + 'T00:00:00Z'), to = Date.parse(toIso + 'T23:59:59Z');
+    const T = db.all("SELECT id, plan, status, country, source, created_at FROM tenants WHERE status NOT IN ('demo') AND example=0 AND created_at BETWEEN ? AND ?", from, to);
+    const paid = db.all("SELECT tenant_id, amount_cents FROM invoices WHERE status='paid' AND paid_at BETWEEN ? AND ?", from, to);
+    const revBy = new Map(); for (const i of paid) revBy.set(i.tenant_id, (revBy.get(i.tenant_id) || 0) + i.amount_cents / 100);
+    const isPaying = (t) => ['active', 'past_due'].includes(t.status);
+    const months = []; for (let d = new Date(fromIso + 'T00:00:00Z'); d <= new Date(to); d.setUTCMonth(d.getUTCMonth() + 1, 1)) months.push(d.toISOString().slice(0, 7));
+    const exp = months.reduce((sum, m) => sum + db.all('SELECT amount_cents FROM expenses WHERE month=? OR (recurring=1 AND month<=?)', m, m).reduce((a, e) => a + e.amount_cents, 0) / 100, 0);
+    const ai = months.reduce((sum, m) => { const r = db.one('SELECT COALESCE(SUM(in_tokens),0) i, COALESCE(SUM(out_tokens),0) o FROM ai_usage WHERE month=?', m); return sum + aiCostEur(r.i, r.o); }, 0);
+    const label = (src) => !src || src === 'direct' ? 'Accès direct' : src === 'prospection' ? 'Prospection (démo activée)' : src === 'site' || src.startsWith('site:') ? 'Recommandation (site client)' : src.startsWith('metier:') ? 'Pages métiers (Google)' : src.startsWith('utm:') ? `Campagne ${src.slice(4)}` : src;
+    const groups = new Map();
+    const add = (key, lab) => { if (!groups.has(key)) groups.set(key, { label: lab, visits: 0, signups: 0, paying: 0, revenue: 0 }); return groups.get(key); };
+    for (const v of db.all('SELECT source, SUM(n) n FROM visits_source WHERE day BETWEEN ? AND ? GROUP BY source', fromIso, toIso)) add(label(v.source), label(v.source)).visits += v.n;
+    for (const t of T) { const g = add(label(t.source), label(t.source)); g.signups++; if (isPaying(t)) g.paying++; g.revenue += revBy.get(t.id) || 0; }
+    const ter = new Map();
+    for (const t of T) { const lab = COUNTRIES[t.country]?.fr || t.country; if (!ter.has(lab)) ter.set(lab, { label: lab, signups: 0, paying: 0, revenue: 0 }); const g = ter.get(lab); g.signups++; if (isPaying(t)) g.paying++; g.revenue += revBy.get(t.id) || 0; }
+    const fbl = db.all('SELECT f.*, t.name FROM feedback f LEFT JOIN tenants t ON t.id=f.tenant_id WHERE f.created_at BETWEEN ? AND ? ORDER BY f.id DESC LIMIT 100', from, to);
+    const pr = db.one("SELECT COUNT(*) found, SUM(demo_views>0) viewed, SUM(status='converted') converted, SUM(status='optout') optout, COUNT(DISTINCT NULLIF(dept,'')) depts FROM prospects WHERE created_at BETWEEN ? AND ?", from, to);
+    return {
+      from: fromIso, to: toIso, signups: T.length, trials: T.filter((t) => t.status === 'trial').length, paying: T.filter(isPaying).length,
+      revenue: paid.reduce((a, i) => a + i.amount_cents, 0) / 100, expenses: exp + ai,
+      mrr: db.all("SELECT plan FROM tenants WHERE status IN ('active','past_due')").reduce((a, r) => a + PLANS[r.plan].monthly, 0),
+      churn: T.filter((t) => ['canceled', 'paused'].includes(t.status)).length,
+      bySource: [...groups.values()].sort((a, b) => b.signups - a.signups || b.visits - a.visits),
+      byTerritory: [...ter.values()].sort((a, b) => b.signups - a.signups),
+      feedback: { list: fbl, count: fbl.length, avg: fbl.length ? Math.round((fbl.reduce((a, f) => a + f.score, 0) / fbl.length) * 10) / 10 : null },
+      tickets: db.one("SELECT COUNT(*) total, SUM(status='open') open FROM tickets WHERE created_at BETWEEN ? AND ?", from, to),
+      prospects: { found: pr.found || 0, viewed: pr.viewed || 0, converted: pr.converted || 0, optout: pr.optout || 0, depts: pr.depts || 0 }
+    };
+  }
+  on('GET', '/admin/bilan', (c) => {
+    requireAdmin(c);
+    const iso = (d) => d.toISOString().slice(0, 10); const ok = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') && !Number.isNaN(Date.parse(v));
+    const to = ok(c.url.searchParams.get('au')) ? c.url.searchParams.get('au') : iso(new Date());
+    const from = ok(c.url.searchParams.get('du')) ? c.url.searchParams.get('du') : iso(new Date(Date.parse(to) - 29 * 864e5));
+    html(c.res, V.adminReview(csrfToken(c), reviewData(from, to)));
+  });
   on('GET', '/admin/rentabilite', (c) => { requireAdmin(c); const m = /^\d{4}-\d{2}$/.test(c.url.searchParams.get('mois') || '') ? c.url.searchParams.get('mois') : undefined; html(c.res, V.adminProfit(csrfToken(c), tenantCosts(db, m))); });
   on('POST', '/admin/depenses', (c) => {
     requireAdmin(c); checkCsrf(c);
@@ -434,14 +504,35 @@ export function createApp(db) {
   });
   function prospectPage(c, { msg = '', demo = null, status = 200 } = {}) {
     const filter = PIPELINE[c.url.searchParams.get('statut')] ? c.url.searchParams.get('statut') : '';
-    const list = filter ? db.all('SELECT * FROM prospects WHERE status=? ORDER BY score DESC, id DESC LIMIT 300', filter) : db.all("SELECT * FROM prospects WHERE status!='optout' ORDER BY score DESC, id DESC LIMIT 300");
-    html(c.res, V.adminProspects(csrfToken(c), { list, stats: prospectStats(db), filter, msg, demo }), status);
+    const dept = DEPARTEMENTS[c.url.searchParams.get('dept')] ? c.url.searchParams.get('dept') : '';
+    const where = []; const args = [];
+    if (filter) { where.push('status=?'); args.push(filter); } else where.push("status!='optout'");
+    if (dept) { where.push('dept=?'); args.push(dept); }
+    const list = db.all(`SELECT * FROM prospects WHERE ${where.join(' AND ')} ORDER BY score DESC, id DESC LIMIT 300`, ...args);
+    const byDept = db.all("SELECT dept, COUNT(*) n, COALESCE(SUM(demo_views),0) v, SUM(status='converted') c FROM prospects WHERE dept!='' AND status!='optout' GROUP BY dept ORDER BY n DESC");
+    html(c.res, V.adminProspects(csrfToken(c), { list, stats: prospectStats(db), filter, msg, demo, campaign: campaignStatus(db), byDept, dept }), status);
   }
   on('GET', '/admin/prospection', (c) => { requireAdmin(c); prospectPage(c); });
   on('POST', '/admin/prospection/recherche', async (c) => {
     requireAdmin(c); checkCsrf(c);
-    try { const found = await safeSearch(db, { tpl: c.form.tpl, commune: c.form.commune }); const added = importProspects(db, found); prospectPage(c, { msg: `${found.length} entreprise(s) trouvée(s), ${added} nouvelle(s) ajoutée(s).` }); }
+    try { const q = DEPARTEMENTS[c.form.departement] ? { tpl: c.form.tpl, departement: c.form.departement } : { tpl: c.form.tpl, commune: c.form.commune }; const found = await safeSearch(db, q); const added = importProspects(db, found); prospectPage(c, { msg: `${found.length} entreprise(s) trouvée(s), ${added} nouvelle(s) ajoutée(s).` }); }
     catch (e) { prospectPage(c, { msg: `Recherche impossible : ${e.message}`, status: 502 }); }
+  });
+  on('POST', '/admin/prospection/campagne', async (c) => {
+    requireAdmin(c); checkCsrf(c);
+    const r = await runNationalCampaign(db, { quota: 50, maxCalls: 25 });
+    prospectPage(c, { msg: `Campagne nationale : ${r.added} nouvelle(s) entreprise(s) repérée(s) en ${r.calls} recherche(s)${r.stopped ? ` (${r.stopped})` : ''}. Aucun message envoyé.` });
+  });
+  // Export des messages à valider : rien n'est envoyé, le fichier sert à relire et à contacter à la main
+  on('GET', '/admin/prospection/export.csv', (c) => {
+    requireAdmin(c);
+    const st = PIPELINE[c.url.searchParams.get('statut')] ? c.url.searchParams.get('statut') : 'new';
+    const dept = DEPARTEMENTS[c.url.searchParams.get('dept')] ? c.url.searchParams.get('dept') : '';
+    const rows = db.all(`SELECT * FROM prospects WHERE status=?${dept ? ' AND dept=?' : ''} ORDER BY score DESC, id LIMIT 5000`, ...(dept ? [st, dept] : [st]));
+    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const head = ['Entreprise', 'Métier', 'Ville', 'Département', 'Priorité', 'SIREN', 'Démo (non officielle)', "Lien d'opposition", 'Message proposé (NON ENVOYÉ)'];
+    const lines = rows.map((p) => { const demoUrl = `${config.baseUrl}/demo/${demoTokenFor(p.siren)}`; const stop = optoutLink(db, p.id); return [displayName(p.name), TEMPLATES[p.tpl]?.label || p.naf, displayName(p.city), p.dept, p.score, p.siren, demoUrl, stop, outreachMessage(p, demoUrl, stop)].map(q).join(';'); });
+    send(c.res, 200, '\ufeff' + [head.map(q).join(';'), ...lines].join('\r\n'), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="prospects-${st}${dept ? '-' + dept : ''}.csv"` });
   });
   on('POST', '/admin/prospection/:id/demo', (c) => {
     requireAdmin(c); checkCsrf(c);
@@ -485,6 +576,11 @@ export function createApp(db) {
     const extra = [];
     if (!session) { c.pre = cookies[PRE] && /^[\w-]{20,}$/.test(cookies[PRE]) ? cookies[PRE] : randomId(18); if (c.pre !== cookies[PRE]) extra.push(cookie(PRE, c.pre, { maxAge: 86400 })); }
     if (qLang && LANGS[qLang] && qLang !== cookies.lang) extra.push(cookie('lang', qLang, { maxAge: 365 * 86400, httpOnly: false }));
+    // Origine du visiteur (premier contact, 90 jours) : sert uniquement à mesurer les canaux d'acquisition, sans pistage tiers
+    const newSrc = !siteSlug && method0(req) === 'GET' ? sourceFrom(url, path) : '';
+    c.source = cookies.cdp_src && /^[\w:.-]{1,60}$/.test(cookies.cdp_src) ? cookies.cdp_src : newSrc;
+    if (newSrc && !cookies.cdp_src) extra.push(cookie('cdp_src', newSrc, { maxAge: 90 * 86400 }));
+    if (newSrc && (path === '/' || path.startsWith('/metiers/'))) countVisit(db, newSrc);
     if (extra.length) { const orig = res.writeHead.bind(res); res.writeHead = (st, h = {}) => { const sc = h['Set-Cookie']; h['Set-Cookie'] = [...extra, ...(sc ? [].concat(sc) : [])]; return orig(st, h); }; }
     return withLang(lang, async () => {
     try {

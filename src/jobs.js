@@ -64,7 +64,12 @@ export async function runJobs(db, now = Date.now()) {
     }
     db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.monthly',?,?)", ym, now); r.monthly = sent;
   }
-  // 12. Battement de cœur : prouve que les tâches automatiques tournent
+  // 12. Prospection nationale automatique (une fois par jour, aucun envoi)
+  if (config.prospectDaily > 0 && now - lastRun(db, 'job.prospect') > 20 * 36e5) {
+    const { runNationalCampaign } = await import('./prospect.js');
+    r.prospect = await runNationalCampaign(db, { now }).catch((e) => ({ error: e.message }));
+  }
+  // 13. Battement de cœur : prouve que les tâches automatiques tournent
   db.run("INSERT INTO meta(k,v) VALUES('jobs_heartbeat',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(now));
   return r;
 }

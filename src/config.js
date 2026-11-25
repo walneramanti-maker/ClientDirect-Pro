@@ -50,6 +50,9 @@ export const config = {
   makeEvents: (env.MAKE_EVENTS || 'inscription,paiement_recu,paiement_echoue,incident,ticket,demo_vue').split(',').map((x) => x.trim()).filter(Boolean),
   // Prospection : API publique Recherche d'entreprises (gratuite, sans clé)
   sireneApi: env.SIRENE_API || 'https://recherche-entreprises.api.gouv.fr',
+  // Prospection nationale automatique : nombre de nouvelles entreprises repérées par jour (0 = arrêtée)
+  prospectDaily: num(env.PROSPECT_DAILY, 0),
+  prospectPauseMs: num(env.PROSPECT_PAUSE_MS, 300),
   // Recette : les e-mails/WhatsApp ne partent que vers ces adresses ou domaines (ex. "walner.amanti@gmail.com,@exemple.fr")
   testAllowlist: (env.TEST_ALLOWLIST || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
   // Domaines personnalisés (API Render)
