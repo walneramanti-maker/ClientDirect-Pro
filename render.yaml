@@ -1,0 +1,19 @@
+# Plan Render (Blueprint). Environnement de RECETTE gratuit : aucun paiement réel possible.
+services:
+  - type: web
+    name: clientdirect-pro-test
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: staging
+      - key: NODE_VERSION
+        value: "22"
+      - key: DB_PATH
+        value: data/clientdirect.db
+      - key: APP_SECRET
+        generateValue: true

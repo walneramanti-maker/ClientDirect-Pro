@@ -1,0 +1,35 @@
+import http from 'node:http';
+import { config, envProblems } from './config.js';
+import { openDb } from './db.js';
+import { createApp } from './app.js';
+import fs from 'node:fs';
+import { startScheduler } from './jobs.js';
+import { restore, createBackup, remoteConfigured } from './backup.js';
+
+const problems = envProblems();
+if (problems.length) { console.error(`Configuration refusée (${config.appEnv}) :\n- ` + problems.join('\n- ')); process.exit(1); }
+
+// Serveur neuf (disque vide) : on repart automatiquement de la dernière sauvegarde.
+if (config.restoreOnBoot && !fs.existsSync(config.dbPath)) {
+  try { const r = await restore(config.dbPath); console.log(`Base restaurée depuis ${r.restored}`); } catch (e) { console.log(`Pas de restauration : ${e.message}`); }
+}
+const db = openDb(config.dbPath, { appEnv: config.appEnv });
+// Premier démarrage sans accès console (hébergement sans terminal) : création du compte administrateur depuis les variables
+// ADMIN_LOGIN, ADMIN_PASSWORD et ADMIN_TOTP_SECRET, uniquement s'il n'existe encore aucun administrateur.
+if (process.env.ADMIN_LOGIN && process.env.ADMIN_PASSWORD && process.env.ADMIN_TOTP_SECRET && !db.one("SELECT 1 FROM users WHERE role='superadmin'")) {
+  const { hashPassword } = await import('./security.js');
+  db.run("INSERT INTO users(email,pass_hash,name,role,email_verified,totp_secret,created_at) VALUES(?,?,'Administrateur','superadmin',1,?,?)", process.env.ADMIN_LOGIN.trim().toLowerCase(), hashPassword(process.env.ADMIN_PASSWORD), process.env.ADMIN_TOTP_SECRET.trim().toUpperCase(), Date.now());
+  console.log('Compte administrateur créé à partir des variables d’environnement.');
+}
+const server = http.createServer(createApp(db));
+server.headersTimeout = 20_000; server.requestTimeout = 30_000;
+const stopJobs = config.disableJobs ? () => {} : startScheduler(db);
+server.listen(config.port, () => console.log(`ClientDirect Pro sur ${config.baseUrl} (port ${config.port})`));
+
+// Arrêt (mise à jour, redémarrage) : dernière sauvegarde avant de fermer.
+const shutdown = async () => {
+  stopJobs(); setTimeout(() => process.exit(0), 25000).unref();
+  if (remoteConfigured()) { try { await createBackup(db); } catch { /* incident enregistré */ } }
+  server.close(() => { db.close(); process.exit(0); });
+};
+process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);

@@ -1,0 +1,63 @@
+// RGPD : pages légales, export et suppression des données, durées de conservation, opposition à la prospection.
+import { config } from './config.js';
+import { sha256, randomId } from './util.js';
+import { audit } from './security.js';
+
+/** Supprime ou anonymise ce qui dépasse les durées de conservation annoncées. */
+export function retentionJob(db, now = Date.now()) {
+  const custCut = now - config.retentionCustomerMonths * 30.44 * 864e5;
+  const r = {
+    appointments: Number(db.run("UPDATE appointments SET customer_name='(anonymisé)', customer_phone='', customer_email='', cancel_token_hash=NULL WHERE created_at < ? AND customer_name != '(anonymisé)'", custCut).changes),
+    quotes: Number(db.run("UPDATE quotes SET customer_name='(anonymisé)', customer_phone='', customer_email='', message='' WHERE created_at < ? AND customer_name != '(anonymisé)'", custCut).changes),
+    chats: Number(db.run('DELETE FROM chat_logs WHERE created_at < ?', now - config.retentionChatDays * 864e5).changes),
+    // Prospects sans réponse : supprimés 3 ans après le dernier contact (ou l'import). Les oppositions sont conservées
+    // sous forme minimale (SIREN) pour ne plus jamais les recontacter.
+    prospects: Number(db.run("DELETE FROM prospects WHERE status NOT IN ('converted','optout') AND COALESCE(last_contact_at, created_at) < ?", now - config.retentionProspectMonths * 30.44 * 864e5).changes),
+    sessions: Number(db.run('DELETE FROM sessions WHERE expires_at < ?', now).changes),
+    tokens: Number(db.run('DELETE FROM tokens WHERE expires_at < ?', now - 30 * 864e5).changes),
+    outbox: Number(db.run("UPDATE outbox SET payload='{}' WHERE status IN ('sent','skipped','failed') AND created_at < ?", now - 90 * 864e5).changes),
+    audit: Number(db.run('DELETE FROM audit WHERE created_at < ?', now - 365 * 864e5).changes)
+  };
+  return r;
+}
+/** Lien « ne plus être contacté » à placer dans chaque message de prospection. */
+export function optoutLink(db, prospectId) {
+  const tok = randomId(18); db.run('UPDATE prospects SET optout_token_hash=? WHERE id=?', sha256(tok), prospectId);
+  return `${config.baseUrl}/stop/${tok}`;
+}
+export function optout(db, token) {
+  const p = db.one('SELECT id, name, demo_tenant_id FROM prospects WHERE optout_token_hash=?', sha256(token || ''));
+  if (!p) return null;
+  db.tx(() => {
+    // On ne garde que le strict nécessaire pour respecter l'opposition : SIREN + statut.
+    db.run("UPDATE prospects SET status='optout', name='(opposition)', address='', notes='', siret='', optout_token_hash=NULL, last_contact_at=? WHERE id=?", Date.now(), p.id);
+    if (p.demo_tenant_id) db.run("DELETE FROM tenants WHERE id=? AND status='demo'", p.demo_tenant_id);
+  });
+  return p;
+}
+/** Toutes les données d'un professionnel et de son entreprise (droit d'accès et de portabilité). */
+export function exportTenant(db, tenantId, userId) {
+  const t = db.one('SELECT * FROM tenants WHERE id=?', tenantId);
+  for (const k of ['demo_token_hash', 'stripe_sub']) delete t[k];
+  const u = db.one('SELECT id, email, name, role, email_verified, created_at FROM users WHERE id=?', userId);
+  const q = (sql) => db.all(sql, tenantId);
+  return {
+    exporte_le: new Date().toISOString(), compte: u, entreprise: t,
+    prestations: q('SELECT name, price, dur, descr, active FROM services WHERE tenant_id=?'), postes: q('SELECT name, active FROM staff WHERE tenant_id=?'), horaires: q('SELECT dow, open, close FROM hours WHERE tenant_id=?'),
+    rendez_vous: q('SELECT service_name, price, date, time, staff_name, customer_name, customer_phone, customer_email, status, source, created_at FROM appointments WHERE tenant_id=? ORDER BY id'),
+    devis: q('SELECT customer_name, customer_phone, customer_email, obj, service, message, status, created_at FROM quotes WHERE tenant_id=? ORDER BY id'),
+    factures: q('SELECT stripe_invoice, amount_cents, currency, status, paid_at FROM invoices WHERE tenant_id=?'),
+    statistiques: q('SELECT day, views, bookings, quotes, chats, wa_clicks FROM stats_daily WHERE tenant_id=? ORDER BY day')
+  };
+}
+/** Suppression définitive du compte et de l'entreprise (les factures sont conservées 10 ans, obligation comptable). */
+export function deleteTenant(db, tenantId, userId, ip = '') {
+  db.tx(() => {
+    for (const tbl of ['appointments', 'quotes', 'services', 'staff', 'hours', 'stats_daily', 'chat_logs', 'ai_usage', 'memberships']) db.run(`DELETE FROM ${tbl} WHERE tenant_id=?`, tenantId);
+    db.run('DELETE FROM outbox WHERE tenant_id=?', tenantId);
+    db.run("UPDATE tenants SET status='canceled', name='(supprimé)', slug=?, phone='', email='', address='', lead='', faq='', custom_domain=NULL, domain_status='none', owner_user_id=NULL WHERE id=?", `supprime-${tenantId}-${randomId(4).toLowerCase()}`, tenantId);
+    db.run('DELETE FROM sessions WHERE user_id=?', userId);
+    db.run("UPDATE users SET email=?, name='', pass_hash='x', totp_secret=NULL, deleted_at=? WHERE id=?", `supprime-${userId}@invalid`, Date.now(), userId);
+  });
+  audit(db, { tenantId, action: 'compte.supprime', ip });
+}

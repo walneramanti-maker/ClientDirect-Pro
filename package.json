@@ -1,0 +1,22 @@
+{
+  "name": "clientdirect-pro",
+  "version": "1.0.0",
+  "description": "Plateforme multi-entreprises : sites, rendez-vous, devis, assistant IA, abonnements, prospection.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node --no-warnings src/server.js",
+    "dev": "NODE_ENV=development node --no-warnings --watch src/server.js",
+    "test": "node --no-warnings --test test/unit.test.js test/app.test.js test/features.test.js",
+    "seed": "node --no-warnings scripts/seed.js",
+    "create-admin": "node --no-warnings scripts/create-admin.js",
+    "restore": "node --no-warnings scripts/restore.js",
+    "backup": "node --no-warnings scripts/backup.js",
+    "test:mobile": "node --no-warnings --test test/mobile.e2e.js",
+    "test:all": "node --no-warnings --test test/unit.test.js test/app.test.js test/features.test.js test/mobile.e2e.js"
+  },
+  "dependencies": {}
+}
