@@ -35,11 +35,10 @@ test('potentiel : pas de site > plateforme > site vieillissant > site récent', 
   assert.ok(POT.potentialOf({ score: 3, site_status: 'aucun' }).potential < none, 'pas encore joignable : un peu moins prioritaire');
 });
 
-test('requête OpenStreetMap : code postal nettoyé, téléphone exigé', () => {
-  const q = OSM.overpassQuery('97300"];out;');
-  assert.ok(q.includes('"postal_code"="97300out"') || q.includes('"97300'), q);
-  assert.ok(!q.includes('"];out;"]'), 'pas d’injection dans la requête');
-  assert.ok(q.includes('phone'));
+test('requête OpenStreetMap : zone autour du centre de la commune, téléphone exigé', () => {
+  const q = OSM.overpassQuery({ lat: 4.9372, lon: -52.326 });
+  assert.match(q, /\(4\.89720,-52\.36600,4\.97720,-52\.28600\)/);
+  assert.ok(q.includes('nwr["phone"]["name"]') && q.includes('contact:mobile'));
 });
 
 test('OpenStreetMap d’abord (gratuit) : entreprises sans site gardées et prioritaires, Firecrawl seulement pour le reste', async () => {
@@ -49,8 +48,9 @@ test('OpenStreetMap d’abord (gratuit) : entreprises sans site gardées et prio
   db.run("INSERT INTO meta(k,v) VALUES('enrich_monthly_credits','100') ON CONFLICT(k) DO UPDATE SET v=excluded.v");
   const firecrawl = [];
   app.net.setFetch(async (url, opt) => {
+    if (String(url).includes('geo.api.gouv.fr')) return jsonResponse([{ nom: 'Cayenne', centre: { type: 'Point', coordinates: [-52.326, 4.9372] } }]);
     if (String(url).includes('overpass')) {
-      assert.match(decodeURIComponent(opt.body), /97300/);
+      assert.match(decodeURIComponent(opt.body), /4\.89720/);
       return jsonResponse({ elements: [
         { tags: { name: 'Salon Lucie Coiffure', phone: '+594 594 11 22 33', 'addr:city': 'Cayenne' } },
         { tags: { name: 'Bel Hair', 'contact:phone': '0594 44 55 66;0694 00 00 00', website: 'http://belhair-cayenne.fr', 'addr:postcode': '97300' } }
@@ -82,7 +82,7 @@ test('OpenStreetMap d’abord (gratuit) : entreprises sans site gardées et prio
 
 test('OpenStreetMap saturé : arrêt propre sans bloquer la suite', async () => {
   add('600000010', 'GARAGE TEST OSM', '75011', 'PARIS', 'garage');
-  app.net.setFetch(async (url) => String(url).includes('overpass') ? new Response('busy', { status: 429 }) : jsonResponse({ success: true, data: { alexandria: [{ data: { results: [] } }] } }));
+  OSM.resetOsmHealth(); app.net.setFetch(async (url) => String(url).includes('geo.api.gouv.fr') ? jsonResponse([{ nom: 'Paris', centre: { coordinates: [2.38, 48.86] } }]) : String(url).includes('overpass') ? new Response('busy', { status: 429 }) : jsonResponse({ success: true, data: { alexandria: [{ data: { results: [] } }] } }));
   const r = await E.osmPass(db, {});
   assert.match(r.stopped, /429/);
   assert.equal(row('600000010').osm_checked_at, null, 'sera retenté au prochain passage');
@@ -101,7 +101,7 @@ test('appel : accroche adaptée au site, campagne filtrée par potentiel', async
 
 test('OpenStreetMap : serveur saturé (502), bascule automatique sur un autre serveur', async () => {
   OSM.resetOsmHealth(); const seen = [];
-  app.net.setFetch(async (url) => { seen.push(String(url)); return seen.length === 1 ? new Response('busy', { status: 502 }) : jsonResponse({ elements: [{ tags: { name: 'Test', phone: '+33100000000' } }] }); });
+  app.net.setFetch(async (url) => { if (String(url).includes('geo.api.gouv.fr')) return jsonResponse([{ nom: 'Paris', centre: { coordinates: [2.38, 48.86] } }]); seen.push(String(url)); return seen.length === 1 ? new Response('busy', { status: 502 }) : jsonResponse({ elements: [{ tags: { name: 'Test', phone: '+33100000000' } }] }); });
   const list = await OSM.osmPlaces('75011', 'PARIS');
   assert.equal(list.length, 1); assert.equal(seen.length, 2); assert.notEqual(seen[0], seen[1]);
 });
@@ -148,4 +148,25 @@ test('contrôle qualité : doublons de téléphone retirés, meilleure fiche gar
   assert.ok(r.duplicates >= 1);
   assert.equal(row('600000030').phone, '+33478000009'); assert.equal(row('600000031').phone, null);
   assert.match(row('600000031').contact_source, /doublon/);
+});
+
+test('OpenStreetMap : découverte gratuite par SIRET (métier ciblé, vérifié au registre), le reste ignoré', async () => {
+  OSM.resetOsmHealth();
+  add('600000040', 'PRESENT DEJA', '97310', 'KOUROU', 'coiffeur');
+  let sirene = 0;
+  app.net.setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('geo.api.gouv.fr')) return jsonResponse([{ nom: 'Kourou', centre: { coordinates: [-52.65, 5.16] } }]);
+    if (u.includes('overpass')) return jsonResponse({ elements: [
+      { tags: { name: 'Salon Belle Kourou', shop: 'hairdresser', phone: '0594 32 00 00', 'ref:FR:SIRET': '70000005000011' } },
+      { tags: { name: 'Pharmacie X', amenity: 'pharmacy', phone: '0594 32 00 01', 'ref:FR:SIRET': '70000006000011' } }
+    ] });
+    if (u.includes('/search?q=700000050')) { sirene++; return jsonResponse({ results: [{ siren: '700000050', nom_complet: 'SALON BELLE KOUROU', activite_principale: '96.02A', date_creation: '2022-01-01', tranche_effectif_salarie: 'NN', siege: { siret: '70000005000011', code_postal: '97310', libelle_commune: 'KOUROU', adresse: '1 RUE A 97310 KOUROU' } }] }); }
+    if (u.includes('/search?q=')) { sirene++; return jsonResponse({ results: [] }); }
+    return jsonResponse({ success: true, data: { alexandria: [{ data: { results: [] } }] } });
+  });
+  const r = await E.osmPass(db, {});
+  assert.equal(r.discovered, 1); assert.equal(sirene, 1, 'la pharmacie (hors cible) n’est même pas vérifiée');
+  const d = row('700000050');
+  assert.equal(d.phone, '0594 32 00 00'); assert.match(d.contact_source, /SIRET vérifié/); assert.equal(d.tpl, 'coiffeur');
 });

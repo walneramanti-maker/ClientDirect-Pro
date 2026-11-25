@@ -5,7 +5,11 @@ import { config } from './config.js';
 import { net } from './net.js';
 import { recordIncident } from './incidents.js';
 import { TEMPLATES } from './templates.js';
-import { displayName, fromSirene, importProspects } from './prospect.js';
+import { displayName, fromSirene, importProspects, sireneBySiren } from './prospect.js';
+import { tplFromNaf } from './templates.js';
+import { isSuppressed } from './suppression.js';
+// Types d'établissements OpenStreetMap correspondant aux métiers ciblés
+const OSM_KIND_TPL = (k) => /^(hairdresser|beauty|massage|cosmetics|restaurant|fast_food|cafe|car_repair|car|tyres|motorcycle|car_rental|electrician|plumber|carpenter|builder|painter|roofer|hvac|locksmith|tiler|plasterer|glaziery|stonemason|metal_construction|gardener|security)$/.test(String(k || ''));
 import { deptOf } from './france.js';
 import { analyzeSite, isPlatform, refreshPotentials } from './potential.js';
 import { osmPlaces, OSM_SOURCE } from './osm.js';
@@ -143,13 +147,30 @@ export async function osmPass(db, { maxGroups = 25, now = Date.now(), pause = co
     catch (e) { r.groups++; if (e.stop) { r.stopped = e.message; break; } recordIncident(db, { kind: 'enrichissement', severity: 'info', message: String(e.message).slice(0, 160) }); continue; }
     const used = new Set();
     for (const p of db.all("SELECT * FROM prospects WHERE status='new' AND enriched_at IS NULL AND postal=?", g.postal)) {
-      const i = places.findIndex((x, j) => !used.has(j) && matches(x, p));
+      // Correspondance exacte par numéro SIRET quand la fiche OpenStreetMap l'indique, sinon par nom et adresse
+      let i = places.findIndex((x, j) => !used.has(j) && x.siren && x.siren === p.siren);
+      if (i < 0) i = places.findIndex((x, j) => !used.has(j) && !x.siren && matches(x, p));
       if (i < 0) { db.run('UPDATE prospects SET osm_checked_at=? WHERE id=?', now, p.id); continue; }
       used.add(i); const pl = places[i];
       const phone = phoneOk(pl.phone) ? pl.phone : null;
       db.run('UPDATE prospects SET phone=?, website=?, email=?, contact_source=?, enriched_at=?, osm_checked_at=?, site_status=COALESCE(?, site_status) WHERE id=?',
         phone, pl.website || null, pl.email || null, OSM_SOURCE, phone || pl.email ? now : null, now, siteFromListing(pl.website, false), p.id);
       if (phone || pl.email) r.found++;
+    }
+    // Découverte gratuite : établissements des métiers ciblés présents sur OpenStreetMap avec leur SIRET,
+    // vérifiés au registre public (actif, sans opposition, 20 salariés au plus) avant import
+    let checked = 0;
+    for (const [j, pl] of places.entries()) {
+      if (used.has(j) || !pl.siren || !OSM_KIND_TPL(pl.kind) || checked >= 15) continue;
+      if (db.one('SELECT 1 FROM prospects WHERE siren=?', pl.siren) || isSuppressed(db, { siren: pl.siren, phone: pl.phone, email: pl.email })) continue;
+      checked++;
+      let p = null; try { p = await sireneBySiren(pl.siren); } catch { p = null; }
+      if (pause) await new Promise((ok) => setTimeout(ok, pause));
+      if (!p || !['NN', '00', '01', '02', '03', '11'].includes(p.staff) || !tplFromNaf(p.naf)) continue;
+      importProspects(db, [p]);
+      const phone = phoneOk(pl.phone) ? pl.phone : null;
+      db.run('UPDATE prospects SET phone=?, website=?, email=?, contact_source=?, enriched_at=?, osm_checked_at=?, site_status=? WHERE siren=?', phone, pl.website || null, pl.email || null, OSM_SOURCE + ', SIRET vérifié au registre', phone || pl.email ? now : null, now, siteFromListing(pl.website, false), pl.siren);
+      r.discovered = (r.discovered || 0) + 1; if (phone || pl.email) r.found++;
     }
     if (r.groups % 5 === 0 && config.appEnv !== 'test') console.log(`Coordonnées (OpenStreetMap) : ${r.groups}/${groups.length} codes postaux, ${r.found} trouvées`);
     if (pause) await new Promise((ok) => setTimeout(ok, Math.max(pause, 1000))); // usage raisonnable du service public
