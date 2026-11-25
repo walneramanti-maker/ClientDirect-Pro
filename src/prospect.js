@@ -144,7 +144,9 @@ export const CAMPAIGN_UNITS = DEPT_CODES.flatMap((d) => Object.keys(TEMPLATES).m
  * Premier passage : la 1re page de chaque métier dans chaque département, puis la 2e page, etc.
  * N'envoie AUCUN message : les entreprises arrivent au statut « À contacter », avec démo et lien d'opposition prêts.
  */
-export async function runNationalCampaign(db, { quota = config.prospectDaily, pause = config.prospectPauseMs, maxCalls = null, now = Date.now() } = {}) {
+/** Cadence quotidienne : réglée dans l'administration (prioritaire) ou par PROSPECT_DAILY. Ce n'est pas une limite définitive. */
+export function prospectDaily(db) { const v = db.one("SELECT v FROM meta WHERE k='prospect_daily'")?.v; return v != null ? Number(v) : config.prospectDaily; }
+export async function runNationalCampaign(db, { quota = prospectDaily(db), pause = config.prospectPauseMs, maxCalls = null, now = Date.now() } = {}) {
   const U = CAMPAIGN_UNITS.length;
   let cursor = Number(db.one("SELECT v FROM meta WHERE k='prospect_cursor'")?.v || 0);
   const r = { added: 0, calls: 0, cursorStart: cursor, stopped: '' };
@@ -172,5 +174,5 @@ export function campaignStatus(db) {
   const cursor = Number(db.one("SELECT v FROM meta WHERE k='prospect_cursor'")?.v || 0);
   const last = db.one("SELECT detail, created_at FROM audit WHERE action='job.prospect' ORDER BY id DESC LIMIT 1");
   const depts = db.one("SELECT COUNT(DISTINCT dept) n FROM prospects WHERE dept!=''").n;
-  return { cursor, units: CAMPAIGN_UNITS.length, pass: Math.floor(cursor / CAMPAIGN_UNITS.length) + 1, depts, daily: config.prospectDaily, last: last ? { ...JSON.parse(last.detail || '{}'), at: last.created_at } : null };
+  return { cursor, units: CAMPAIGN_UNITS.length, pass: Math.floor(cursor / CAMPAIGN_UNITS.length) + 1, depts, daily: prospectDaily(db), last: last ? { ...JSON.parse(last.detail || '{}'), at: last.created_at } : null };
 }

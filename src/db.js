@@ -70,7 +70,19 @@ const MIGRATIONS = [
   `CREATE INDEX IF NOT EXISTS prospect_dept ON prospects(dept, status)`,
   `ALTER TABLE tenants ADD COLUMN source TEXT NOT NULL DEFAULT ''`,
   `CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, tenant_id INTEGER, user_id INTEGER, score INTEGER NOT NULL CHECK(score BETWEEN 1 AND 5), comment TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS visits_source(day TEXT NOT NULL, source TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(day, source))`
+  `CREATE TABLE IF NOT EXISTS visits_source(day TEXT NOT NULL, source TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(day, source))`,
+  `ALTER TABLE prospects ADD COLUMN phone TEXT`,
+  `ALTER TABLE prospects ADD COLUMN email TEXT`,
+  `ALTER TABLE prospects ADD COLUMN website TEXT`,
+  `ALTER TABLE prospects ADD COLUMN contact_source TEXT`,
+  `ALTER TABLE prospects ADD COLUMN enriched_at INTEGER`,
+  `ALTER TABLE prospects ADD COLUMN maps_closed INTEGER NOT NULL DEFAULT 0`,
+  `CREATE INDEX IF NOT EXISTS prospect_enrich ON prospects(status, enriched_at, tpl, postal)`,
+  `ALTER TABLE tenants ADD COLUMN referred_by_tenant_id INTEGER`,
+  `ALTER TABLE tenants ADD COLUMN partner_id INTEGER`,
+  `CREATE TABLE IF NOT EXISTS partners(id INTEGER PRIMARY KEY, name TEXT NOT NULL, company TEXT NOT NULL DEFAULT '', email TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', siret TEXT NOT NULL DEFAULT '', activity TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','active','stopped')), code TEXT UNIQUE, token_hash TEXT, rate_pct INTEGER NOT NULL DEFAULT 20, created_at INTEGER NOT NULL, approved_at INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS rewards(id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('credit','credit_referee','commission')), beneficiary_tenant_id INTEGER, partner_id INTEGER, source_tenant_id INTEGER NOT NULL, invoice TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'eur', status TEXT NOT NULL CHECK(status IN ('pending','approved','paid','canceled')), available_at INTEGER NOT NULL, applied_ref TEXT, created_at INTEGER NOT NULL, updated_at INTEGER)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS reward_once ON rewards(kind, invoice, COALESCE(beneficiary_tenant_id,0), COALESCE(partner_id,0))`
 ];
 
 export function openDb(file, { appEnv = null } = {}) {

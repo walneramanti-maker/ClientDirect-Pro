@@ -22,7 +22,7 @@ const loc = (c = null) => locale(currentLang(), c);
 /** Prix d'une formule dans une devise, formaté. */
 const price = (plan, cur) => { const p = priceOf(plan, cur); return { m: money(p.monthly, p.currency, loc()), s: money(p.setup, p.currency, loc()) }; };
 const langSwitch = (path = '/') => `<span class="langs">${Object.keys(LANGS).map((l) => (l === currentLang() ? `<b>${l.toUpperCase()}</b>` : `<a href="${esc(path)}?lang=${l}" hreflang="${l}" lang="${l}">${l.toUpperCase()}</a>`)).join(' ')}</span>`;
-const FOOT = () => `<footer class="foot"><div class="wrap row"><span>ClientDirect Pro · ${t('Un service de {n}', { n: esc(config.legal.name) })}</span><span><a href="/exemples">${t('Exemples')}</a> · <a href="/metiers">${t('Métiers')}</a> · <a href="/annuaire">${t('Annuaire des sites')}</a> · <a href="/cgu">${t('Conditions')}</a> · <a href="/confidentialite">${t('Confidentialité')}</a> · <a href="/mentions-legales">${t('Mentions légales')}</a> · <a href="/connexion">${t('Espace pro')}</a></span></div></footer>`;
+const FOOT = () => `<footer class="foot"><div class="wrap row"><span>ClientDirect Pro · ${t('Un service de {n}', { n: esc(config.legal.name) })}</span><span><a href="/exemples">${t('Exemples')}</a> · <a href="/metiers">${t('Métiers')}</a> · <a href="/partenaires">${t('Partenaires')}</a> · <a href="/annuaire">${t('Annuaire des sites')}</a> · <a href="/cgu">${t('Conditions')}</a> · <a href="/confidentialite">${t('Confidentialité')}</a> · <a href="/mentions-legales">${t('Mentions légales')}</a> · <a href="/connexion">${t('Espace pro')}</a></span></div></footer>`;
 const ICON = {
   check: '<svg viewBox="0 0 24 24" aria-hidden="true" class="ic"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   no: '<svg viewBox="0 0 24 24" aria-hidden="true" class="ic no"><path d="M7 12h10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>'
@@ -153,7 +153,7 @@ export function proShell(tn, user, csrf, active, body, { example = false } = {})
   <main class="band app"><div class="wrap"><div class="row top"><div><h1>${esc(tn.name)}</h1><p class="muted">${t('Votre site :')} <a href="${esc(siteUrl)}" target="_blank" rel="noopener">${esc(siteUrl)}</a> · <span class="pill st-${tn.status}">${st(tn.status)}</span>${tn.status === 'trial' && tn.trial_ends_at ? ` ${t('jusqu’au {d}', { d: fmtDate(tn.trial_ends_at) })}` : ''}</p></div></div>${!example && !user.email_verified ? `<div class="flash warn">${t('Confirmez votre adresse e-mail grâce au lien reçu pour sécuriser votre compte.')}</div>` : ''}${body}</div></main>`, { bodyClass: 'appbody' });
 }
 const A_LABEL = { pending: 'À confirmer', confirmed: 'Confirmé', done: 'Terminé', refused: 'Refusé', canceled: 'Annulé' };
-export function proDashboard(tn, user, csrf, { appts, quotes, stats, msg, perf = null, curve = [], example = false, askFeedback = false }) {
+export function proDashboard(tn, user, csrf, { appts, quotes, stats, msg, perf = null, curve = [], example = false, askFeedback = false, referral = null }) {
   const m2 = (v) => money(v, tn.currency || 'EUR', locale(currentLang(), tn.country));
   const act = (a) => {
     const f = (s, label, cls = '') => `<form method="post" action="/pro/rdv/${a.id}/statut" class="inline">${csrfField(csrf)}<input type="hidden" name="status" value="${s}"><button class="btn sm ${cls}" type="submit" ${example ? 'disabled' : ''}>${t(label)}</button></form>`;
@@ -164,7 +164,13 @@ export function proDashboard(tn, user, csrf, { appts, quotes, stats, msg, perf =
   const rows = appts.length ? appts.map((a) => `<div class="req"><div class="rh"><span class="pill st-${a.status}">${t(A_LABEL[a.status])}</span><b>${esc(a.customer_name)}</b><span>${esc(fmtDay(a.date))} · ${esc(fmtTime(a.time))}</span><span class="muted">${esc(a.service_name)} · ${esc(a.staff_name)}${a.source === 'assistant' ? ` · ${t('via l’assistant')}` : ''}</span></div><div class="muted">${esc(phoneFmt(a.customer_phone))}${a.customer_email ? ' · ' + esc(a.customer_email) : ''}</div><div class="acts">${act(a)}<a class="btn sm wa" href="${example ? '#' : `https://wa.me/${esc(a.customer_phone)}`}" rel="noopener">WhatsApp</a></div></div>`).join('') : `<p class="muted">${t('Aucun rendez-vous à venir.')}</p>`;
   const qrows = quotes.length ? quotes.map((q) => `<div class="req"><div class="rh"><span class="pill ${q.status === 'new' ? 'st-pending' : 'st-done'}">${q.status === 'new' ? t('À traiter') : q.status === 'handled' ? t('Traité') : t('Refusé')}</span><b>${esc(q.customer_name)}</b><span class="muted">${esc(q.service)}${q.obj ? ' · ' + esc(q.obj) : ''}</span></div>${q.message ? `<p>« ${esc(q.message)} »</p>` : ''}<div class="muted">${esc(phoneFmt(q.customer_phone))}${q.customer_email ? ' · ' + esc(q.customer_email) : ''}</div><div class="acts">${q.status === 'new' ? `<form method="post" action="/pro/devis/${q.id}/statut" class="inline">${csrfField(csrf)}<input type="hidden" name="status" value="handled"><button class="btn sm" type="submit" ${example ? 'disabled' : ''}>${t('Marquer traité')}</button></form>` : ''}<a class="btn sm wa" href="${example ? '#' : `https://wa.me/${esc(q.customer_phone)}`}" rel="noopener">WhatsApp</a></div></div>`).join('') : `<p class="muted">${t('Aucune demande de devis.')}</p>`;
   return proShell(tn, user, csrf, 'home', `${flash(msg)}<div class="kpis"><div class="k"><strong>${stats.pending}</strong><span>${t('rendez-vous à confirmer')}</span></div><div class="k"><strong>${stats.upcoming}</strong><span>${t('rendez-vous à venir')}</span></div><div class="k"><strong>${stats.quotes}</strong><span>${t('devis à traiter')}</span></div><div class="k"><strong>${m2(stats.revenue)}</strong><span>${t('prévu (rendez-vous confirmés)')}</span></div></div>
-  ${perf ? perfCard(perf, curve, m2) : ''}<div class="two"><section class="card"><h2>${t('Rendez-vous')}</h2>${rows}</section><section class="card"><h2>${t('Demandes de devis')}</h2>${qrows}</section></div>${askFeedback && !example ? feedbackCard(csrf) : ''}`, { example });
+  ${perf ? perfCard(perf, curve, m2) : ''}<div class="two"><section class="card"><h2>${t('Rendez-vous')}</h2>${rows}</section><section class="card"><h2>${t('Demandes de devis')}</h2>${qrows}</section></div>${referral && !example ? referralCard(tn, referral) : ''}${askFeedback && !example ? feedbackCard(csrf) : ''}`, { example });
+}
+function referralCard(tn, r) {
+  const link = `${config.baseUrl}/?ref=${encodeURIComponent(tn.slug)}`;
+  return `<section class="card" id="parrainage"><h2>${t('Parrainez un professionnel, gagnez un mois')}</h2><p>${t('Quand un professionnel inscrit avec votre lien paie son abonnement, vous recevez chacun un mois offert, déduit automatiquement de votre prochaine facture.')}</p>
+  <label for="ref-link">${t('Votre lien de parrainage')}</label><input id="ref-link" readonly value="${esc(link)}">
+  <p class="muted small">${t('{a} inscrit(s) avec votre lien · {b} abonné(s) · {c} mois offert(s).', { a: r.referred, b: r.paying, c: r.months })} ${t('Le mois offert est validé 30 jours après le premier paiement de votre filleul, sans remboursement entre-temps. 12 mois offerts au maximum par an.')}</p></section>`;
 }
 function feedbackCard(csrf) {
   const opts = [1, 2, 3, 4, 5].map((n) => `<label class="ck"><input type="radio" name="score" value="${n}" required> ${n}</label>`).join('');
@@ -248,7 +254,7 @@ export function legalPage(kind) {
   const [title, body] = pages[kind];
   return layout(t(title), `<header class="mk"><div class="wrap row"><a class="logo" href="/">ClientDirect Pro</a>${langSwitch('/' + kind)}</div></header><main class="band legal"><div class="wrap"><h1>${t(title)}</h1>${body}<p class="note">${t('Dernière mise à jour : 25 novembre 2026.')}</p></div></main>${FOOT()}`);
 }
-export { adminDashboard, adminTicket, adminProspects, adminProfit, adminReview } from './views-admin.js';
+export { adminDashboard, adminTicket, adminProspects, adminProfit, adminReview, adminPartners } from './views-admin.js';
 
 /** Pages par métier : point d'entrée naturel depuis Google (« site internet garage avec rendez-vous », etc.). */
 export function metiersIndex() {
@@ -273,4 +279,27 @@ export function metierPage(tpl, { cur = 'EUR' } = {}) {
   <section class="band"><div class="wrap"><h2>${t('Questions fréquentes')}</h2>${FAQ.map(([q, a]) => `<details><summary>${t(q)}</summary><p>${t(a)}</p></details>`).join('')}<p class="muted mt">${t('Autres métiers :')} ${others}</p></div></section>
   <section class="band cta-band"><div class="wrap"><h2>${t('ClientDirect Pro, votre partenaire digital.')}</h2><p class="cta-sub">${t('Essayez gratuitement pendant 14 jours, sans carte bancaire.')}</p><a class="btn blue" href="/inscription?tpl=${tpl}">${t('Créer mon site gratuitement')}</a></div></section>${FOOT()}`,
   { bodyClass: 'mkt', head: `<meta name="description" content="${esc(desc)}"><link rel="canonical" href="${esc(config.baseUrl)}/metiers/${tpl}">${Object.keys(LANGS).map((l) => `<link rel="alternate" hreflang="${l}" href="${esc(config.baseUrl)}/metiers/${tpl}?lang=${l}">`).join('')}` });
+}
+
+/** Programme partenaires : candidature publique (experts-comptables, chambres de métiers, réseaux, agences). */
+export function partnersPage({ csrf, sent = false, errors = [], f = {} }) {
+  const v = (k) => esc(f[k] || '');
+  return layout(t('Programme partenaires'), `<header class="mk"><div class="wrap row"><a class="logo" href="/">ClientDirect Pro</a>${langSwitch('/partenaires')}</div></header><main class="band"><div class="wrap two">
+  <div><h1>${t('Programme partenaires')}</h1><p class="lead">${t('Vous conseillez des artisans, commerçants ou indépendants ? Recommandez ClientDirect Pro et touchez 20 % des sommes hors taxes que vos clients nous paient pendant leurs 12 premiers mois.')}</p>
+  <ul class="feat big"><li>${ICON.check}<span>${t('Commission versée uniquement sur des paiements réellement encaissés.')}</span></li><li>${ICON.check}<span>${t('Validation 30 jours après chaque paiement, sans remboursement entre-temps ; versement par virement dès 50 € dus.')}</span></li><li>${ICON.check}<span>${t('Un lien personnel et un tableau de bord privé : visites, inscriptions, abonnés, commissions.')}</span></li><li>${ICON.check}<span>${t('Aucun coût, aucun engagement, arrêt à tout moment.')}</span></li></ul>
+  <p class="muted small">${t('Exemple : un client Pro paie 399 € HT de mise en service puis 149 € HT par mois ; votre commission sur sa première année est de 437,40 €.')}</p></div>
+  <div class="card">${sent ? `<h2>${t('Merci !')}</h2><p>${t('Votre candidature est enregistrée. Vous recevrez votre lien personnel après validation.')}</p>` : `<h2>${t('Devenir partenaire')}</h2>${errors.length ? `<div class="flash err">${errors.map(esc).join('<br>')}</div>` : ''}<form method="post" action="/partenaires">${csrfField(csrf)}
+  <label for="pa-n">${t('Votre nom')}</label><input id="pa-n" name="name" required maxlength="80" value="${v('name')}"><label for="pa-c">${t("Nom de l'entreprise")}</label><input id="pa-c" name="company" required maxlength="120" value="${v('company')}">
+  <label for="pa-a">${t('Activité')}</label><select id="pa-a" name="activity">${['Expert-comptable', 'Chambre de métiers ou CCI', 'Réseau ou association d’entrepreneurs', 'Agence ou consultant', 'Autre'].map((a) => `<option ${f.activity === a ? 'selected' : ''}>${t(a)}</option>`).join('')}</select>
+  <label for="pa-e">${t('E-mail')}</label><input id="pa-e" name="email" type="email" required maxlength="190" value="${v('email')}"><label for="pa-p">${t('Téléphone')}</label><input id="pa-p" name="phone" type="tel" maxlength="30" value="${v('phone')}">
+  <label for="pa-s">${t('SIRET (pour le versement des commissions)')}</label><input id="pa-s" name="siret" inputmode="numeric" maxlength="14" value="${v('siret')}">
+  <label class="ck"><input type="checkbox" name="cgu" required> ${t('J’accepte les conditions du programme partenaires.')}</label><button class="btn blue" type="submit">${t('Envoyer ma candidature')}</button></form>`}</div></div></main>${FOOT()}`, { head: `<link rel="canonical" href="${esc(config.baseUrl)}/partenaires">` });
+}
+export function partnerDashboard(p, st, link) {
+  const e = (v) => money(v, 'EUR', locale(currentLang(), 'FR'));
+  const k = (v, l) => `<div class="k"><strong>${esc(String(v))}</strong><span>${esc(l)}</span></div>`;
+  return layout(t('Espace partenaire'), `<header class="mk"><div class="wrap row"><a class="logo" href="/">ClientDirect Pro</a></div></header><main class="band"><div class="wrap"><h1>${t('Espace partenaire')} · ${esc(p.company || p.name)}</h1>
+  <label for="pl">${t('Votre lien à partager')}</label><input id="pl" readonly value="${esc(link)}">
+  <div class="kpis">${k(st.clicks, t('visites'))}${k(st.signups, t('inscriptions'))}${k(st.paying, t('abonnés payants'))}${k(e(st.pending), t('commissions en attente (30 jours)'))}${k(e(st.toPay), t('à vous verser'))}${k(e(st.paid), t('déjà versé'))}</div>
+  <p class="muted">${t('Commission de {r} % des sommes hors taxes encaissées pendant les 12 premiers mois de chaque client. Versement par virement dès 50 € dus, sur facture de votre part.', { r: p.rate_pct })}</p></div></main>${FOOT()}`, { head: '<meta name="robots" content="noindex">' });
 }

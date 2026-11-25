@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { onInvoicePaid, onRefund } from './rewards.js';
 import { config, PLANS } from './config.js';
 import { net } from './net.js';
 import { safeEq } from './util.js';
@@ -16,7 +17,8 @@ function form(obj, prefix = '', out = []) {
   }
   return out.join('&');
 }
-async function stripe(path, params, method = 'POST') {
+/** Appel à l'API Stripe (utilisé aussi pour appliquer les mois offerts). */
+export async function stripe(path, params, method = 'POST') {
   const q = method === 'GET' && params ? `?${form(params)}` : '';
   const res = await net.fetch(`https://api.stripe.com/v1/${path}${q}`, { method, headers: { authorization: `Bearer ${config.stripeKey}`, ...(method === 'POST' ? { 'content-type': 'application/x-www-form-urlencoded' } : {}), 'stripe-version': '2024-06-20' }, body: method === 'POST' ? form(params) : undefined });
   const j = await res.json().catch(() => ({}));
@@ -29,7 +31,7 @@ let metaDb = null; // base utilisée pour retrouver les identifiants créés aut
 const meta = (k) => metaDb?.one('SELECT v FROM meta WHERE k=?', k)?.v || null;
 const setMeta = (db, k, v) => db.run('INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v', k, v);
 export const isTestKey = (k = config.stripeKey) => /^(sk|rk)_test_/.test(k);
-const WEBHOOK_EVENTS = ['checkout.session.completed', 'invoice.paid', 'invoice.payment_succeeded', 'invoice.payment_failed', 'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'];
+const WEBHOOK_EVENTS = ['checkout.session.completed', 'invoice.paid', 'invoice.payment_succeeded', 'invoice.payment_failed', 'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted', 'charge.refunded'];
 /**
  * Crée dans Stripe, s'ils n'existent pas, les produits et les prix de chaque formule dans chaque devise,
  * et le point de réception des notifications (webhook). Idempotent : relancé à chaque démarrage.
@@ -136,7 +138,12 @@ export function handleStripeEvent(db, ev) {
         db.run(`INSERT INTO invoices(tenant_id,stripe_invoice,amount_cents,currency,status,paid_at,created_at) VALUES(?,?,?,?,?,?,?)
           ON CONFLICT(stripe_invoice) DO UPDATE SET status=excluded.status, paid_at=excluded.paid_at`, t.id, o.id, Number(o.amount_paid || 0), o.currency || 'eur', 'paid', now, now);
         db.run("UPDATE tenants SET status='active', current_period_end=COALESCE(?,current_period_end) WHERE id=?", end, t.id);
-        emit(db, 'paiement_recu', { entreprise: t.name, montant_eur: Number(o.amount_paid || 0) / 100, facture: o.id }, t.id); break;
+        emit(db, 'paiement_recu', { entreprise: t.name, montant_eur: Number(o.amount_paid || 0) / 100, facture: o.id }, t.id);
+        onInvoicePaid(db, db.one('SELECT * FROM tenants WHERE id=?', t.id), o, now); break;
+      }
+      case 'charge.refunded': {
+        const n = onRefund(db, o.invoice, now);
+        audit(db, { tenantId: t.id, action: 'paiement.rembourse', detail: `${o.invoice || o.id} (${n} récompense(s) annulée(s))` }); break;
       }
       case 'invoice.payment_failed': {
         db.run("UPDATE tenants SET status='past_due' WHERE id=?", t.id);

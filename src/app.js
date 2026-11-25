@@ -12,6 +12,8 @@ import { answer, aiAvailable, ruleAnswer, aiCostEur } from './ai.js';
 import { billingConfigured, createCheckout, createPortal, verifyStripeSignature, handleStripeEvent, useDb } from './billing.js';
 import { safeSearch, importProspects, prepareDemo, outreachMessage, demoTenantByToken, recordDemoView, prospectStats, PIPELINE, runNationalCampaign, campaignStatus, demoTokenFor, displayName } from './prospect.js';
 import { DEPARTEMENTS } from './france.js';
+import { enrichBatch, enrichStatus } from './enrich.js';
+import { applyPartner, approvePartner, partnerByToken, partnerStats, referralStats, PROGRAM } from './rewards.js';
 import { supportAnswer, openTicket, replyTicket } from './support.js';
 import { recordIncident, openIncidents, resolveIncident } from './incidents.js';
 import { t as tr, withLang, detectLang, regionFromAccept, LANGS, setLang, currentLang } from './i18n.js';
@@ -42,7 +44,7 @@ const method0 = (req) => (req.method === 'HEAD' ? 'GET' : req.method);
 /** Canal d'acquisition d'une visite : lien de recommandation, campagne, page métier, sinon rien. */
 export function sourceFrom(url, path) {
   const clean = (v) => String(v || '').toLowerCase().replace(/[^\w.-]/g, '').slice(0, 40);
-  const ref = clean(url.searchParams.get('ref')); if (ref) return `site:${ref}`;
+  const ref = clean(url.searchParams.get('ref')); if (ref) return ref.startsWith('p-') ? `partner:${ref.slice(2)}` : `site:${ref}`;
   const utm = clean(url.searchParams.get('utm_source')); if (utm) return `utm:${utm}`;
   if (path.startsWith('/metiers/')) return `metier:${clean(path.split('/')[2])}`;
   if (path === '/' || path === '/exemples' || path.startsWith('/exemple/')) return 'direct';
@@ -86,6 +88,23 @@ export function createApp(db) {
   /** Pays probable du visiteur : choix explicite, région du navigateur, sinon France. */
   const guessCountry = (c) => { const q = c.url.searchParams.get('pays'); if (COUNTRIES[q]) return q; const r = regionFromAccept(c.req.headers['accept-language']); return COUNTRIES[r] ? r : (c.lang === 'en' ? 'US' : 'FR'); };
   on('GET', '/', (c) => { const ctry = guessCountry(c); const cur = PRICES[c.url.searchParams.get('devise')] ? c.url.searchParams.get('devise') : countryOf(ctry).cur; html(c.res, V.marketing({ csrf: csrfToken(c), cur: PRICES[cur] ? cur : 'EUR', country: ctry })); });
+  // ---------- programme partenaires ----------
+  on('GET', '/partenaires', (c) => html(c.res, V.partnersPage({ csrf: csrfToken(c) })));
+  on('POST', '/partenaires', (c) => {
+    checkCsrf(c); limit(c, 'partner', 5, 3600e3);
+    const f = { name: clampStr(c.form.name, 80), company: clampStr(c.form.company, 120), email: clampStr(c.form.email, 190).toLowerCase(), phone: clampStr(c.form.phone, 30), siret: String(c.form.siret || '').replace(/\D/g, '').slice(0, 14), activity: clampStr(c.form.activity, 80) };
+    const errors = [];
+    if (!f.name) errors.push(tr('Indiquez votre nom.')); if (!f.company) errors.push(tr('Indiquez le nom de l’entreprise.')); if (!emailOk(f.email)) errors.push(tr('Adresse e-mail invalide.')); if (c.form.cgu !== 'on') errors.push(tr('Vous devez accepter les conditions du programme.'));
+    if (errors.length) return html(c.res, V.partnersPage({ csrf: csrfToken(c), errors, f }), 400);
+    const id = applyPartner(db, f);
+    if (config.adminEmail) enqueue(db, { channel: 'email', to: config.adminEmail, template: 'pro_new_request', payload: { kind: 'candidature partenaire', tenant: f.company, summary: `${f.name} · ${f.activity} · ${f.email} ${f.phone}`, dashUrl: `${config.baseUrl}/admin/partenaires` } });
+    emit(db, 'partenaire', { entreprise: f.company, nom: f.name, activite: f.activity, id });
+    html(c.res, V.partnersPage({ csrf: csrfToken(c), sent: true }));
+  });
+  on('GET', '/partenaire/:token', (c) => {
+    const p = partnerByToken(db, c.params.token); if (!p) throw HttpError(404, 'Page introuvable');
+    html(c.res, V.partnerDashboard(p, partnerStats(db, p), `${config.baseUrl}/?ref=p-${p.code}`));
+  });
   // ---------- pages par métier (référencement naturel) ----------
   on('GET', '/metiers', (c) => html(c.res, V.metiersIndex()));
   on('GET', '/metiers/:tpl', (c) => {
@@ -160,6 +179,9 @@ export function createApp(db) {
       const ctry = COUNTRIES[f.country] ? f.country : (countryByTz(f.tz) || guessCountry(c));
       tenantId = createTenant(db, { name: f.business, tpl: f.tpl, city: f.city, phone: f.phone, email, country: ctry, tz: validTz(f.tz) ? f.tz : null, lang: ulang, plan: f.plan, status: 'trial', ownerId: userId }).id;
       db.run('UPDATE tenants SET source=? WHERE id=?', c.source || 'direct', tenantId);
+      // Parrainage et partenariat : rattachement à l'inscription, récompense seulement après paiement
+      if (c.source.startsWith('site:')) { const r = db.one("SELECT t.id, u.email FROM tenants t JOIN users u ON u.id=t.owner_user_id WHERE t.slug=? AND t.status IN ('trial','active','past_due')", c.source.slice(5)); if (r && r.email !== email) db.run('UPDATE tenants SET referred_by_tenant_id=? WHERE id=?', r.id, tenantId); }
+      if (c.source.startsWith('partner:')) { const pa = db.one("SELECT id, email FROM partners WHERE code=? AND status='active'", c.source.slice(8)); if (pa && pa.email !== email) db.run('UPDATE tenants SET partner_id=? WHERE id=?', pa.id, tenantId); }
     }
     const t = loadTenant(db, 'id', tenantId);
     const vt = issueToken(db, 'verify', { userId, hours: 48 });
@@ -339,7 +361,7 @@ export function createApp(db) {
     const stats = { pending: appts.filter((a) => a.status === 'pending').length, upcoming: appts.length, quotes: quotes.filter((q) => q.status === 'new').length, revenue: appts.filter((a) => a.status === 'confirmed').reduce((s, a) => s + a.price, 0) };
     // Avis demandé après 7 jours d'utilisation, puis au plus une fois par mois
     const askFeedback = Date.now() - t.created_at > 7 * 864e5 && !db.one('SELECT 1 FROM feedback WHERE tenant_id=? AND created_at>?', t.id, Date.now() - 30 * 864e5);
-    html(c.res, V.proDashboard(t, c.user, csrfToken(c), { appts, quotes, stats, msg: msgFrom(c), perf: last30(db, t), curve: daily(db, t, 30), askFeedback }));
+    html(c.res, V.proDashboard(t, c.user, csrfToken(c), { appts, quotes, stats, msg: msgFrom(c), perf: last30(db, t), curve: daily(db, t, 30), askFeedback, referral: ['trial', 'active', 'past_due'].includes(t.status) ? referralStats(db, t) : null }));
   });
   on('POST', '/pro/rdv/:id/statut', (c) => {
     requirePro(c); checkCsrf(c); const t = c.tenant;
@@ -448,7 +470,7 @@ export function createApp(db) {
     const months = []; for (let d = new Date(fromIso + 'T00:00:00Z'); d <= new Date(to); d.setUTCMonth(d.getUTCMonth() + 1, 1)) months.push(d.toISOString().slice(0, 7));
     const exp = months.reduce((sum, m) => sum + db.all('SELECT amount_cents FROM expenses WHERE month=? OR (recurring=1 AND month<=?)', m, m).reduce((a, e) => a + e.amount_cents, 0) / 100, 0);
     const ai = months.reduce((sum, m) => { const r = db.one('SELECT COALESCE(SUM(in_tokens),0) i, COALESCE(SUM(out_tokens),0) o FROM ai_usage WHERE month=?', m); return sum + aiCostEur(r.i, r.o); }, 0);
-    const label = (src) => !src || src === 'direct' ? 'Accès direct' : src === 'prospection' ? 'Prospection (démo activée)' : src === 'site' || src.startsWith('site:') ? 'Recommandation (site client)' : src.startsWith('metier:') ? 'Pages métiers (Google)' : src.startsWith('utm:') ? `Campagne ${src.slice(4)}` : src;
+    const label = (src) => !src || src === 'direct' ? 'Accès direct' : src === 'prospection' ? 'Prospection (démo activée)' : src === 'site' || src.startsWith('site:') ? 'Recommandation (site client)' : src.startsWith('partner:') ? 'Partenaires prescripteurs' : src.startsWith('metier:') ? 'Pages métiers (Google)' : src.startsWith('utm:') ? `Campagne ${src.slice(4)}` : src;
     const groups = new Map();
     const add = (key, lab) => { if (!groups.has(key)) groups.set(key, { label: lab, visits: 0, signups: 0, paying: 0, revenue: 0 }); return groups.get(key); };
     for (const v of db.all('SELECT source, SUM(n) n FROM visits_source WHERE day BETWEEN ? AND ? GROUP BY source', fromIso, toIso)) add(label(v.source), label(v.source)).visits += v.n;
@@ -469,12 +491,39 @@ export function createApp(db) {
       prospects: { found: pr.found || 0, viewed: pr.viewed || 0, converted: pr.converted || 0, optout: pr.optout || 0, depts: pr.depts || 0 }
     };
   }
+  on('GET', '/admin/partenaires', (c) => {
+    requireAdmin(c);
+    const partners = db.all('SELECT * FROM partners ORDER BY status, id DESC').map((p) => ({ ...p, st: p.code ? partnerStats(db, p) : null }));
+    const rewards = db.all(`SELECT r.*, s.name source_name, b.name beneficiary_name, p.company partner_name FROM rewards r LEFT JOIN tenants s ON s.id=r.source_tenant_id LEFT JOIN tenants b ON b.id=r.beneficiary_tenant_id LEFT JOIN partners p ON p.id=r.partner_id ORDER BY r.id DESC LIMIT 300`);
+    html(c.res, V.adminPartners(csrfToken(c), { partners, rewards, program: PROGRAM, created: c.url.searchParams.get('lien') ? { link: c.url.searchParams.get('lien'), dashboard: c.url.searchParams.get('espace') } : null }));
+  });
+  on('POST', '/admin/partenaires/:id/valider', (c) => {
+    requireAdmin(c); checkCsrf(c); const r = approvePartner(db, Number(c.params.id));
+    audit(db, { action: 'partenaire.valide', detail: String(c.params.id), ip: c.ip });
+    redirect(c.res, `/admin/partenaires?lien=${encodeURIComponent(r.link)}&espace=${encodeURIComponent(r.dashboard)}`);
+  });
+  on('POST', '/admin/partenaires/:id/arreter', (c) => { requireAdmin(c); checkCsrf(c); db.run("UPDATE partners SET status='stopped' WHERE id=?", Number(c.params.id)); redirect(c.res, '/admin/partenaires'); });
+  on('POST', '/admin/recompenses/:id/verse', (c) => {
+    requireAdmin(c); checkCsrf(c);
+    db.run("UPDATE rewards SET status='paid', updated_at=? WHERE id=? AND kind='commission' AND status='approved'", Date.now(), Number(c.params.id));
+    audit(db, { action: 'commission.versee', detail: String(c.params.id), ip: c.ip }); redirect(c.res, '/admin/partenaires');
+  });
   on('GET', '/admin/bilan', (c) => {
     requireAdmin(c);
     const iso = (d) => d.toISOString().slice(0, 10); const ok = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') && !Number.isNaN(Date.parse(v));
-    const to = ok(c.url.searchParams.get('au')) ? c.url.searchParams.get('au') : iso(new Date());
-    const from = ok(c.url.searchParams.get('du')) ? c.url.searchParams.get('du') : iso(new Date(Date.parse(to) - 29 * 864e5));
-    html(c.res, V.adminReview(csrfToken(c), reviewData(from, to)));
+    // Le bilan du mois 1 couvre les 30 jours qui suivent le lancement commercial officiel
+    const launch = db.one("SELECT v FROM meta WHERE k='launch_date'")?.v || null;
+    const defTo = launch ? iso(new Date(Date.parse(launch) + 29 * 864e5)) : iso(new Date());
+    const to = ok(c.url.searchParams.get('au')) ? c.url.searchParams.get('au') : defTo;
+    const from = ok(c.url.searchParams.get('du')) ? c.url.searchParams.get('du') : (launch || iso(new Date(Date.parse(to) - 29 * 864e5)));
+    html(c.res, V.adminReview(csrfToken(c), { ...reviewData(from, to), launch, reviewDay: launch ? iso(new Date(Date.parse(launch) + 30 * 864e5)) : null }));
+  });
+  on('POST', '/admin/lancement', (c) => {
+    requireAdmin(c); checkCsrf(c);
+    const d = String(c.form.date || '');
+    if (d && !(/^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)))) throw HttpError(400, 'Date invalide');
+    if (d) db.run("INSERT INTO meta(k,v) VALUES('launch_date',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", d); else db.run("DELETE FROM meta WHERE k='launch_date'");
+    audit(db, { action: 'lancement.date', detail: d || 'effacée', ip: c.ip }); redirect(c.res, '/admin/bilan');
   });
   on('GET', '/admin/rentabilite', (c) => { requireAdmin(c); const m = /^\d{4}-\d{2}$/.test(c.url.searchParams.get('mois') || '') ? c.url.searchParams.get('mois') : undefined; html(c.res, V.adminProfit(csrfToken(c), tenantCosts(db, m))); });
   on('POST', '/admin/depenses', (c) => {
@@ -510,7 +559,7 @@ export function createApp(db) {
     if (dept) { where.push('dept=?'); args.push(dept); }
     const list = db.all(`SELECT * FROM prospects WHERE ${where.join(' AND ')} ORDER BY score DESC, id DESC LIMIT 300`, ...args);
     const byDept = db.all("SELECT dept, COUNT(*) n, COALESCE(SUM(demo_views),0) v, SUM(status='converted') c FROM prospects WHERE dept!='' AND status!='optout' GROUP BY dept ORDER BY n DESC");
-    html(c.res, V.adminProspects(csrfToken(c), { list, stats: prospectStats(db), filter, msg, demo, campaign: campaignStatus(db), byDept, dept }), status);
+    html(c.res, V.adminProspects(csrfToken(c), { list, stats: prospectStats(db), filter, msg, demo, campaign: campaignStatus(db), byDept, dept, enrich: enrichStatus(db) }), status);
   }
   on('GET', '/admin/prospection', (c) => { requireAdmin(c); prospectPage(c); });
   on('POST', '/admin/prospection/recherche', async (c) => {
@@ -523,15 +572,29 @@ export function createApp(db) {
     const r = await runNationalCampaign(db, { quota: 50, maxCalls: 25 });
     prospectPage(c, { msg: `Campagne nationale : ${r.added} nouvelle(s) entreprise(s) repérée(s) en ${r.calls} recherche(s)${r.stopped ? ` (${r.stopped})` : ''}. Aucun message envoyé.` });
   });
+  on('POST', '/admin/prospection/reglages', (c) => {
+    requireAdmin(c); checkCsrf(c);
+    const daily = Math.max(0, Math.min(20000, Math.floor(Number(c.form.daily) || 0)));
+    const cap = Math.max(0, Math.min(1000000, Math.floor(Number(c.form.cap) || 0)));
+    db.run("INSERT INTO meta(k,v) VALUES('prospect_daily',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(daily));
+    db.run("INSERT INTO meta(k,v) VALUES('enrich_monthly_credits',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(cap));
+    audit(db, { action: 'prospect.reglages', detail: JSON.stringify({ daily, cap }), ip: c.ip });
+    prospectPage(c, { msg: `Enregistré : ${daily} entreprises par jour, plafond de ${cap} crédits par mois pour les coordonnées.` });
+  });
+  on('POST', '/admin/prospection/enrichir', async (c) => {
+    requireAdmin(c); checkCsrf(c);
+    const r = await enrichBatch(db, { maxSearches: 5 });
+    prospectPage(c, { msg: r.stopped === 'désactivé' ? 'Recherche de coordonnées arrêtée : ajoutez la clé Firecrawl et un plafond mensuel.' : `Coordonnées : ${r.matched} entreprise(s) complétée(s), ${r.emails} e-mail(s), ${r.credits} crédit(s) utilisés${r.stopped ? ` (${r.stopped})` : ''}. Aucun message envoyé.` });
+  });
   // Export des messages à valider : rien n'est envoyé, le fichier sert à relire et à contacter à la main
   on('GET', '/admin/prospection/export.csv', (c) => {
     requireAdmin(c);
     const st = PIPELINE[c.url.searchParams.get('statut')] ? c.url.searchParams.get('statut') : 'new';
     const dept = DEPARTEMENTS[c.url.searchParams.get('dept')] ? c.url.searchParams.get('dept') : '';
-    const rows = db.all(`SELECT * FROM prospects WHERE status=?${dept ? ' AND dept=?' : ''} ORDER BY score DESC, id LIMIT 5000`, ...(dept ? [st, dept] : [st]));
+    const rows = db.all(`SELECT * FROM prospects WHERE status=?${dept ? ' AND dept=?' : ''} ORDER BY (phone IS NOT NULL OR email IS NOT NULL) DESC, score DESC, id LIMIT 5000`, ...(dept ? [st, dept] : [st]));
     const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const head = ['Entreprise', 'Métier', 'Ville', 'Département', 'Priorité', 'SIREN', 'Démo (non officielle)', "Lien d'opposition", 'Message proposé (NON ENVOYÉ)'];
-    const lines = rows.map((p) => { const demoUrl = `${config.baseUrl}/demo/${demoTokenFor(p.siren)}`; const stop = optoutLink(db, p.id); return [displayName(p.name), TEMPLATES[p.tpl]?.label || p.naf, displayName(p.city), p.dept, p.score, p.siren, demoUrl, stop, outreachMessage(p, demoUrl, stop)].map(q).join(';'); });
+    const head = ['Entreprise', 'Métier', 'Ville', 'Département', 'Priorité', 'SIREN', 'Téléphone', 'E-mail', 'Site', 'Source des coordonnées', 'Démo (non officielle)', "Lien d'opposition", 'Message proposé (NON ENVOYÉ)'];
+    const lines = rows.map((p) => { const demoUrl = `${config.baseUrl}/demo/${demoTokenFor(p.siren)}`; const stop = optoutLink(db, p.id); return [displayName(p.name), TEMPLATES[p.tpl]?.label || p.naf, displayName(p.city), p.dept, p.score, p.siren, p.phone, p.email, p.website, p.contact_source, demoUrl, stop, outreachMessage(p, demoUrl, stop)].map(q).join(';'); });
     send(c.res, 200, '\ufeff' + [head.map(q).join(';'), ...lines].join('\r\n'), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="prospects-${st}${dept ? '-' + dept : ''}.csv"` });
   });
   on('POST', '/admin/prospection/:id/demo', (c) => {

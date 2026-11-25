@@ -124,4 +124,7 @@ test('avis des professionnels et page Bilan', async () => {
   assert.match(b.text, /inscriptions/); assert.match(b.text, /Recommandation \(site client\)/); assert.match(b.text, /Pages métiers \(Google\)/); assert.match(b.text, /Prospection \(démo activée\)/);
   assert.match(b.text, /France métropolitaine/); assert.match(b.text, /il manque le paiement en ligne/); assert.match(b.text, /moyenne 4\/5/);
   assert.equal((await app.client().get('/admin/bilan')).status === 200, false);
+  // date de lancement : le bilan couvre les 30 jours suivants
+  const r2 = await admin.post('/admin/lancement', { csrf: admin.csrf(b.text), date: '2026-12-01' }); assert.equal(r2.status, 303);
+  const b2 = await admin.get('/admin/bilan'); assert.match(b2.text, /Bilan du 01\/12\/2026 au 30\/12\/2026/); assert.match(b2.text, /se lit le <b>31\/12\/2026/);
 });

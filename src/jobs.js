@@ -65,11 +65,19 @@ export async function runJobs(db, now = Date.now()) {
     db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.monthly',?,?)", ym, now); r.monthly = sent;
   }
   // 12. Prospection nationale automatique (une fois par jour, aucun envoi)
-  if (config.prospectDaily > 0 && now - lastRun(db, 'job.prospect') > 20 * 36e5) {
-    const { runNationalCampaign } = await import('./prospect.js');
-    r.prospect = await runNationalCampaign(db, { now }).catch((e) => ({ error: e.message }));
+  {
+    const { runNationalCampaign, prospectDaily } = await import('./prospect.js');
+    if (prospectDaily(db) > 0 && now - lastRun(db, 'job.prospect') > 20 * 36e5) r.prospect = await runNationalCampaign(db, { now }).catch((e) => ({ error: e.message }));
+    // Coordonnées : par petites séries toutes les heures, dans la limite du plafond mensuel autorisé
+    const { enrichEnabled, enrichBatch } = await import('./enrich.js');
+    if (enrichEnabled(db) && now - lastRun(db, 'job.enrich') > 55 * 60e3) r.enrich = await enrichBatch(db, { now }).catch((e) => ({ error: e.message }));
   }
-  // 13. Battement de cœur : prouve que les tâches automatiques tournent
+  // 13. Parrainage et partenariat : validation des récompenses après 30 jours (une fois par jour)
+  if (now - lastRun(db, 'job.rewards') > 20 * 36e5) {
+    const { processRewards } = await import('./rewards.js'); const { stripe } = await import('./billing.js');
+    r.rewards = await processRewards(db, { now, stripeCall: config.stripeKey ? stripe : null }).catch((e) => ({ error: e.message })); mark(db, 'job.rewards', now);
+  }
+  // 14. Battement de cœur : prouve que les tâches automatiques tournent
   db.run("INSERT INTO meta(k,v) VALUES('jobs_heartbeat',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(now));
   return r;
 }

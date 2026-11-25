@@ -53,6 +53,10 @@ export const config = {
   // Prospection nationale automatique : nombre de nouvelles entreprises repérées par jour (0 = arrêtée)
   prospectDaily: num(env.PROSPECT_DAILY, 0),
   prospectPauseMs: num(env.PROSPECT_PAUSE_MS, 300),
+  // Recherche automatique des coordonnées (Firecrawl). Rien ne part sans clé ET sans plafond mensuel autorisé.
+  firecrawlKey: env.FIRECRAWL_API_KEY || '',
+  firecrawlApi: env.FIRECRAWL_API || '',
+  enrichMonthlyCredits: num(env.ENRICH_MONTHLY_CREDITS, 0),
   // Recette : les e-mails/WhatsApp ne partent que vers ces adresses ou domaines (ex. "walner.amanti@gmail.com,@exemple.fr")
   testAllowlist: (env.TEST_ALLOWLIST || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
   // Domaines personnalisés (API Render)
