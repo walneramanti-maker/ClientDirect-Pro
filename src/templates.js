@@ -16,6 +16,13 @@ export const TEMPLATES = {
     faq: "Paiement par carte ou espèces. Merci de prévenir 24 h à l'avance en cas d'annulation.",
     services: [['Coupe homme', 15, 30, 'Coupe et finitions.'], ['Coupe femme et brushing', 35, 60, 'Shampooing, coupe, brushing.'], ['Tresses', 80, 180, 'Selon la longueur, mèches non comprises.'], ['Couleur', 45, 90, 'Couleur complète et soin.']]
   },
+  beaute: {
+    label: 'Institut de beauté', metier: 'Institut de beauté', color: '#c58bd9', obj: 'Précisions (zone, peau sensible…)', verb: 'Réserver',
+    naf: ['96.02B'], staff: ['Esthéticienne 1', 'Esthéticienne 2'], hours: { 1: null, 2: ['09:00', '18:00'], 3: ['09:00', '18:00'], 4: ['09:00', '18:00'], 5: ['09:00', '19:00'], 6: ['08:00', '17:00'], 0: null },
+    lead: 'Soins du visage, ongles, épilation et maquillage. Réservez votre créneau en ligne, sans attendre au téléphone.',
+    faq: "Paiement par carte ou espèces. Merci de prévenir 24 h à l'avance en cas d'annulation.",
+    services: [['Soin du visage', 45, 60, 'Nettoyage, gommage, masque.'], ['Pose de vernis semi-permanent', 30, 45, 'Mains, couleur au choix.'], ['Épilation jambes complètes', 30, 45, 'À la cire.'], ['Maquillage événement', 40, 45, 'Mariage, soirée, photo.']]
+  },
   restaurant: {
     label: 'Restaurant', metier: 'Restaurant', color: '#ff7a3d', obj: 'Nombre de personnes', verb: 'Réserver une table',
     naf: ['56.10A', '56.10C'], staff: ['Table A', 'Table B', 'Table C', 'Table D'], hours: H(['11:30', '14:30'], ['11:30', '22:00']),
@@ -53,6 +60,9 @@ const EN = {
   coiffeur: { label: 'Hair salon', metier: 'Hair salon', obj: 'Hair length', verb: 'Book', staff: ['Stylist 1', 'Stylist 2'],
     lead: 'Cuts, braids, colour and treatments. Book your slot online, no waiting on the phone.', faq: 'Card or cash. Please give 24 hours notice if you cancel.',
     services: [["Men's cut", 'Cut and finish.'], ["Women's cut and blow-dry", 'Wash, cut, blow-dry.'], ['Braids', 'Depending on length, extensions not included.'], ['Colour', 'Full colour and treatment.']] },
+  beaute: { label: 'Beauty salon', metier: 'Beauty salon', obj: 'Details (area, sensitive skin…)', verb: 'Book', staff: ['Beautician 1', 'Beautician 2'],
+    lead: 'Facials, nails, waxing and make-up. Book your slot online, no waiting on the phone.', faq: 'Card or cash. Please give 24 hours notice if you cancel.',
+    services: [['Facial', 'Cleansing, exfoliation, mask.'], ['Gel polish manicure', 'Hands, colour of your choice.'], ['Full leg wax', 'Hot wax.'], ['Event make-up', 'Wedding, party, photo shoot.']] },
   restaurant: { label: 'Restaurant', metier: 'Restaurant', obj: 'Number of guests', verb: 'Book a table', staff: ['Table A', 'Table B', 'Table C', 'Table D'],
     lead: 'Home-made food, lunch and dinner. Book your table or ask for a catering quote.', faq: 'Takeaway available. Card or cash.',
     services: [['Table for 2', 'Free booking.'], ['Table for 4', 'Free booking.'], ['Event catering', 'Price per person, from 20 guests.']] },
@@ -73,4 +83,10 @@ export function templateFor(key, lang = 'fr') {
   return { ...T, ...E, color: T.color, naf: T.naf, hours: T.hours, staff: E.staff, services: T.services.map((s, i) => [E.services[i]?.[0] || s[0], s[1], s[2], E.services[i]?.[1] || s[3]]) };
 }
 export const tplLabel = (key, lang = 'fr') => templateFor(key, lang).label;
-export const tplFromNaf = (naf) => Object.entries(TEMPLATES).find(([, t]) => t.naf.includes(naf))?.[0] || null;
+// Code NAF exact d'abord, puis par famille, pour ne jamais présenter un métier sans rapport.
+const NAF_FAMILY = [['96.02B', 'beaute'], ['96.02', 'coiffeur'], ['45.', 'garage'], ['56.', 'restaurant'], ['77.1', 'location'], ['80.', 'securite'], ['43.', 'artisan']];
+export const tplFromNaf = (naf) => {
+  if (!naf) return null;
+  const exact = Object.entries(TEMPLATES).find(([, t]) => t.naf.includes(naf))?.[0];
+  return exact || NAF_FAMILY.find(([pre]) => naf.startsWith(pre))?.[1] || null;
+};

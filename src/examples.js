@@ -6,8 +6,8 @@ import { nowIn, addDays } from './util.js';
 
 export const EXAMPLE_TPLS = Object.keys(TEMPLATES);
 const NAMES = {
-  fr: { garage: 'Garage du Fleuve', coiffeur: 'Studio Coiffure Belle Allure', restaurant: 'Le Petit Carbet', securite: 'Vigilance Sécurité', location: 'Évasion Location', artisan: 'Pro Dépannage Habitat' },
-  en: { garage: 'Riverside Auto Care', coiffeur: 'Bella Hair Studio', restaurant: 'The Corner Bistro', securite: 'Shield Security Services', location: 'Easy Drive Rentals', artisan: 'Handy Home Repairs' }
+  fr: { garage: 'Garage du Fleuve', coiffeur: 'Studio Coiffure Belle Allure', beaute: 'Institut Douceur Tropicale', restaurant: 'Le Petit Carbet', securite: 'Vigilance Sécurité', location: 'Évasion Location', artisan: 'Pro Dépannage Habitat' },
+  en: { garage: 'Riverside Auto Care', coiffeur: 'Bella Hair Studio', beaute: 'Glow Beauty Lounge', restaurant: 'The Corner Bistro', securite: 'Shield Security Services', location: 'Easy Drive Rentals', artisan: 'Handy Home Repairs' }
 };
 const CITY = { fr: 'Votre ville', en: 'Your town' };
 

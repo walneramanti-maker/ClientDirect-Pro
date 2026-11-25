@@ -46,7 +46,7 @@ export function scoreProspect(p, today = new Date()) {
   let s = 1;
   const y = p.created_on ? (today - new Date(p.created_on)) / (365.25 * 864e5) : null;
   if (y !== null && y < 1) s += 3; else if (y !== null && y < 5) s += 2;
-  if (['garage', 'coiffeur', 'location'].includes(p.tpl)) s += 2; else if (['artisan', 'restaurant'].includes(p.tpl)) s += 1;
+  if (['garage', 'coiffeur', 'beaute', 'location'].includes(p.tpl)) s += 2; else if (['artisan', 'restaurant'].includes(p.tpl)) s += 1;
   return s;
 }
 

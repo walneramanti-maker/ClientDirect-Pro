@@ -2,7 +2,7 @@
 import { config } from './config.js';
 import { esc, DAYS } from './util.js';
 
-const SCHEMA_TYPE = { garage: 'AutoRepair', coiffeur: 'HairSalon', restaurant: 'Restaurant', securite: 'ProfessionalService', location: 'AutoRental', artisan: 'HomeAndConstructionBusiness' };
+const SCHEMA_TYPE = { garage: 'AutoRepair', coiffeur: 'HairSalon', beaute: 'BeautySalon', restaurant: 'Restaurant', securite: 'ProfessionalService', location: 'AutoRental', artisan: 'HomeAndConstructionBusiness' };
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /** Adresse publique de référence d'un site : domaine propre vérifié, sinon sous-domaine, sinon /s/slug. */
