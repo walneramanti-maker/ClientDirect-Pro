@@ -42,6 +42,12 @@ services:
         value: Walner Amantie
       - key: LEGAL_SIRET
         value: 944 602 226 00010
+      # Coordonnées gratuites (OpenStreetMap) puis Firecrawl : 300 crédits par mois, répartis sur les jours restants
+      - key: ENRICH_MONTHLY_CREDITS
+        value: "300"
+      # Serveur payant : jamais en veille, pas de maintien en éveil
+      - key: KEEP_AWAKE
+        value: "0"
       # Secrets : à saisir dans Render, jamais dans ce fichier
       - key: APP_SECRET
         generateValue: true
@@ -66,6 +72,16 @@ services:
       - key: LEGAL_ADDRESS
         sync: false
       - key: LEGAL_EMAIL
+        sync: false
+      - key: LEGAL_PHONE
+        sync: false
+      # Ex. « TVA non applicable, article 293 B du CGI » (franchise en base) ou le numéro de TVA : à confirmer avec votre comptable
+      - key: LEGAL_VAT
+        sync: false
+      # Alertes techniques et e-mails transactionnels (Brevo, offre gratuite)
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
         sync: false
       # Envoi des campagnes validées depuis la boîte du domaine (désactivé tant que CAMPAIGN_SENDING n'est pas « on »)
       - key: SMTP_HOST

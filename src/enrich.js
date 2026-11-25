@@ -18,7 +18,16 @@ const setMeta = (db, k, v) => db.run('INSERT INTO meta(k,v) VALUES(?,?) ON CONFL
 /** Plafond mensuel : réglé dans l'administration (prioritaire) ou par ENRICH_MONTHLY_CREDITS. 0 = arrêté. */
 export function enrichCap(db) { const v = meta(db, 'enrich_monthly_credits'); return v != null ? Number(v) : config.enrichMonthlyCredits; }
 export function creditsUsed(db, now = Date.now()) { return Number(meta(db, `enrich_credits_${month(now)}`) || 0); }
-function spend(db, n, now) { setMeta(db, `enrich_credits_${month(now)}`, creditsUsed(db, now) + n); }
+const day = (now = Date.now()) => new Date(now).toISOString().slice(0, 10);
+function spend(db, n, now) { setMeta(db, `enrich_credits_${month(now)}`, creditsUsed(db, now) + n); setMeta(db, `enrich_credits_day_${day(now)}`, usedToday(db, now) + n); }
+export function usedToday(db, now = Date.now()) { return Number(meta(db, `enrich_credits_day_${day(now)}`) || 0); }
+/** Plafond effectif du jour : le reste du mois réparti sur les jours restants (aujourd'hui compris). */
+export function effectiveCap(db, now = Date.now()) {
+  const cap = enrichCap(db); if (!config.enrichPacing) return cap;
+  const d = new Date(now); const daysLeft = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate() - d.getUTCDate() + 1;
+  const before = creditsUsed(db, now) - usedToday(db, now);
+  return Math.min(cap, before + Math.ceil(Math.max(0, cap - before) / daysLeft));
+}
 export function enrichEnabled(db) { return !!config.firecrawlKey && enrichCap(db) > 0; }
 
 /** Mots significatifs d'un nom d'entreprise, sans formes juridiques ni mots vides. */
@@ -123,7 +132,7 @@ export async function verifyInSirene(place, { postal, city, tpl }) {
  * Coordonnées gratuites d'abord : OpenStreetMap, une requête par code postal et métier.
  * Les entreprises trouvées n'ont plus besoin de Firecrawl ; les autres restent pour la recherche Maps.
  */
-export async function osmPass(db, { maxGroups = 30, now = Date.now(), pause = config.prospectPauseMs } = {}) {
+export async function osmPass(db, { maxGroups = 60, now = Date.now(), pause = config.prospectPauseMs } = {}) {
   const r = { groups: 0, found: 0, stopped: '' };
   if (!config.osmEnrich) { r.stopped = 'désactivé'; return r; }
   const groups = db.all(`SELECT postal, MIN(city) city FROM prospects WHERE status='new' AND enriched_at IS NULL AND osm_checked_at IS NULL AND postal!='' GROUP BY postal ORDER BY MAX(score) DESC, COUNT(*) DESC LIMIT ?`, maxGroups);
@@ -156,7 +165,7 @@ export async function enrichBatch(db, { maxSearches = 20, now = Date.now(), emai
   const r = { osm: null, searches: 0, matched: 0, discovered: 0, unverified: 0, emails: 0, sites: 0, reachable: 0, credits: 0, stopped: '' };
   if (osm) { r.osm = await osmPass(db, { now, pause }).catch((e) => ({ error: e.message })); r.reachable += r.osm.found || 0; }
   if (!enrichEnabled(db)) { r.stopped = 'désactivé'; finish(db, r, now); return r; }
-  const start = creditsUsed(db, now); const cap = enrichCap(db);
+  const start = creditsUsed(db, now); const cap = effectiveCap(db, now);
   const siteFor = async (id, website, needEmail = true) => {
     if (!website || creditsUsed(db, now) + 1 > cap || isPlatform(website)) return null;
     try { const { email, site } = await inspectSite(db, website, now, cap, { needEmail: emails && needEmail }); saveSite(db, id, site, now); if (site) r.sites++; if (email) r.emails++; return email; } catch { return null; }
@@ -170,7 +179,7 @@ export async function enrichBatch(db, { maxSearches = 20, now = Date.now(), emai
   }
   const groups = db.all(`SELECT tpl, postal, MIN(city) city, COUNT(*) n FROM prospects WHERE status='new' AND enriched_at IS NULL AND postal!='' GROUP BY tpl, postal ORDER BY MAX(score) DESC, n DESC LIMIT ?`, maxSearches);
   for (const g of groups) {
-    if (creditsUsed(db, now) + 10 > cap) { r.stopped = 'plafond mensuel atteint'; break; }
+    if (creditsUsed(db, now) + 10 > cap) { r.stopped = cap < enrichCap(db) ? 'quota du jour atteint (crédits répartis sur le mois)' : 'plafond mensuel atteint'; break; }
     const pending = db.all("SELECT * FROM prospects WHERE status='new' AND enriched_at IS NULL AND tpl=? AND postal=?", g.tpl, g.postal);
     const label = (TEMPLATES[g.tpl]?.metier || g.tpl).toLowerCase();
     let places = [];
@@ -218,5 +227,5 @@ export function enrichStatus(db, now = Date.now()) {
   const reach = Number(meta(db, `enrich_reachable_${month(now)}`) || 0); const used = creditsUsed(db, now);
   // Coût par prospect réellement joignable (téléphone ou e-mail trouvé), en crédits et en euros selon le prix du crédit
   const perReach = reach ? used / reach : null;
-  return { enabled: enrichEnabled(db), keySet: !!config.firecrawlKey, cap: enrichCap(db), used, reachableMonth: reach, creditsPerReachable: perReach, eurPerReachable: perReach != null ? perReach * config.enrichEurPerCredit : null, ...c };
+  return { enabled: enrichEnabled(db), keySet: !!config.firecrawlKey, cap: enrichCap(db), used, today: usedToday(db, now), todayCap: effectiveCap(db, now) - (used - usedToday(db, now)), reachableMonth: reach, creditsPerReachable: perReach, eurPerReachable: perReach != null ? perReach * config.enrichEurPerCredit : null, ...c };
 }

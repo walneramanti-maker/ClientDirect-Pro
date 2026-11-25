@@ -51,6 +51,10 @@ export function notifyAppointment(db, t, a, template, cancelToken) {
   if (WA[template] && WA[template](p)) enqueue(db, { tenantId: t.id, channel: 'whatsapp', to: a.customer_phone, template, payload: p });
 }
 
+/** E-mail de test (administration) : vérifie Brevo ou le SMTP sans attendre une vraie alerte. */
+export async function sendTestEmail(to) {
+  return sendEmail(to, { subject: 'ClientDirect Pro : test des alertes', text: `Ceci est un e-mail de test envoyé le ${new Date().toLocaleString('fr-FR', { timeZone: 'America/Cayenne' })} (heure de Guyane).\n\nSi vous le recevez, les alertes techniques (sauvegarde échouée, panne, paiement) et les e-mails transactionnels fonctionnent.\n\n${config.baseUrl}/admin/pret` });
+}
 async function sendEmail(to, msg) {
   if (!config.brevoKey) {
     // Repli gratuit : la messagerie professionnelle (SMTP) si elle est configurée

@@ -1,4 +1,5 @@
 // Pages publiques, sites des entreprises et espace pro. Tous les textes passent par t() (clé = français).
+import { cgvHtml } from './cgv.js';
 import { esc, phoneFmt } from './util.js';
 import { PLANS, planHas, config } from './config.js';
 import { TEMPLATES, tplLabel, templateFor } from './templates.js';
@@ -22,7 +23,7 @@ const loc = (c = null) => locale(currentLang(), c);
 /** Prix d'une formule dans une devise, formaté. */
 const price = (plan, cur) => { const p = priceOf(plan, cur); return { m: money(p.monthly, p.currency, loc()), s: money(p.setup, p.currency, loc()) }; };
 const langSwitch = (path = '/') => `<span class="langs">${Object.keys(LANGS).map((l) => (l === currentLang() ? `<b>${l.toUpperCase()}</b>` : `<a href="${esc(path)}?lang=${l}" hreflang="${l}" lang="${l}">${l.toUpperCase()}</a>`)).join(' ')}</span>`;
-const FOOT = () => `<footer class="foot"><div class="wrap row"><span>ClientDirect Pro · ${t('Un service de {n}', { n: esc(config.legal.name) })}</span><span><a href="/exemples">${t('Exemples')}</a> · <a href="/metiers">${t('Métiers')}</a> · <a href="/partenaires">${t('Partenaires')}</a> · <a href="/annuaire">${t('Annuaire des sites')}</a> · <a href="/cgu">${t('Conditions')}</a> · <a href="/confidentialite">${t('Confidentialité')}</a> · <a href="/mentions-legales">${t('Mentions légales')}</a> · <a href="/connexion">${t('Espace pro')}</a></span></div></footer>`;
+const FOOT = () => `<footer class="foot"><div class="wrap row"><span>ClientDirect Pro · ${t('Un service de {n}', { n: esc(config.legal.name) })}</span><span><a href="/exemples">${t('Exemples')}</a> · <a href="/metiers">${t('Métiers')}</a> · <a href="/partenaires">${t('Partenaires')}</a> · <a href="/annuaire">${t('Annuaire des sites')}</a> · <a href="/cgu">${t('Conditions')}</a> · <a href="/cgv">${t('CGV')}</a> · <a href="/confidentialite">${t('Confidentialité')}</a> · <a href="/mentions-legales">${t('Mentions légales')}</a> · <a href="/connexion">${t('Espace pro')}</a></span></div></footer>`;
 const ICON = {
   check: '<svg viewBox="0 0 24 24" aria-hidden="true" class="ic"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   no: '<svg viewBox="0 0 24 24" aria-hidden="true" class="ic no"><path d="M7 12h10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>'
@@ -96,7 +97,7 @@ export function signupPage({ csrf, f = {}, errors = [], claim = null, demo = nul
   <label for="name">${t('Votre nom')}</label><input id="name" name="name" autocomplete="name" required maxlength="80" value="${esc(f.name)}">
   <label for="email">${t('E-mail')}</label><input id="email" name="email" type="email" autocomplete="email" required value="${esc(f.email)}">
   <label for="password">${t('Mot de passe (10 caractères minimum, lettres et chiffres)')}</label><input id="password" name="password" type="password" autocomplete="new-password" required minlength="10">
-  <label class="ck"><input type="checkbox" name="cgu" ${f.cgu ? 'checked' : ''}> <span>${t('J’accepte les <a href="/cgu" target="_blank" rel="noopener">conditions d’utilisation</a> (dont l’accord de sous-traitance des données) et la <a href="/confidentialite" target="_blank" rel="noopener">politique de confidentialité</a>')}</span></label>
+  <label class="ck"><input type="checkbox" name="cgu" ${f.cgu ? 'checked' : ''}> <span>${t('J’accepte les <a href="/cgv" target="_blank" rel="noopener">conditions générales de vente</a>, les <a href="/cgu" target="_blank" rel="noopener">conditions d’utilisation</a> (dont l’accord de sous-traitance des données) et la <a href="/confidentialite" target="_blank" rel="noopener">politique de confidentialité</a>')}</span></label>
   <button class="btn blue wide" type="submit">${t('Créer mon site')}</button></form><p class="muted">${t('Déjà inscrit ?')} <a href="/connexion">${t('Connexion')}</a> · ${langSwitch('/inscription')}</p></main><script src="/static/signup.js" defer></script>`);
 }
 export const loginPage = ({ csrf, error = '', email = '', info = '' }) => layout(t('Connexion'), `<main class="auth"><a class="logo" href="/">ClientDirect Pro</a><h1>${t('Connexion')}</h1>${flash(info)}${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
@@ -234,7 +235,7 @@ export function directoryPage(list, urlOf) {
 export function legalPage(kind) {
   const L = config.legal;
   const pages = {
-    'mentions-legales': ['Mentions légales', `<p><b>${t('Éditeur :')}</b> ${esc(L.name)}, ${esc(L.owner)}. SIRET : ${esc(L.siret)}. ${t('Adresse :')} ${esc(L.address)}. ${t('Contact :')} ${esc(L.email)}.</p><p><b>${t('Directeur de la publication :')}</b> ${esc(L.owner)}.</p><p><b>${t('Hébergeur :')}</b> ${esc(L.host)}.</p><p>${t('Chaque site d’entreprise est publié sous la responsabilité du professionnel concerné, dont les coordonnées figurent sur son site.')}</p>`],
+    'mentions-legales': ['Mentions légales', `<p><b>${t('Éditeur :')}</b> ${esc(L.name)}, ${esc(L.owner)}, ${t('entrepreneur individuel (EI)')}. SIRET : ${esc(L.siret)}. ${t('Adresse :')} ${esc(L.address)}. ${t('Contact :')} ${esc(L.email || t('à compléter'))}${L.phone ? ', ' + esc(L.phone) : ''}. ${esc(L.vat)}</p><p><b>${t('Directeur de la publication :')}</b> ${esc(L.owner)}.</p><p><b>${t('Hébergeur :')}</b> ${esc(L.host)}.</p><p>${t('Chaque site d’entreprise est publié sous la responsabilité du professionnel concerné, dont les coordonnées figurent sur son site.')}</p>`],
     confidentialite: ['Politique de confidentialité', `<h2>${t('Qui traite vos données ?')}</h2><p>${t('<b>Clients des professionnels</b> (rendez-vous, devis, questions à l’assistant) : le professionnel est responsable du traitement ; ClientDirect Pro agit comme sous-traitant (article 28 du RGPD) et n’utilise jamais ces données pour son propre compte.')}</p><p>${t('<b>Professionnels inscrits et entreprises prospectées</b> : {n} est responsable du traitement.', { n: esc(L.name) })}</p>
     <h2>${t('Quelles données, pourquoi, combien de temps ?')}</h2><table class="list"><tr><th>${t('Données')}</th><th>${t('Finalité')}</th><th>${t('Base légale')}</th><th>${t('Durée')}</th></tr>
     <tr><td>${t('Nom, téléphone, e-mail, rendez-vous et demandes des clients')}</td><td>${t('Gérer la demande, envoyer confirmation et rappel')}</td><td>${t('Mesures précontractuelles / contrat')}</td><td>${t('{m} mois puis anonymisation', { m: config.retentionCustomerMonths })}</td></tr>
@@ -252,6 +253,7 @@ export function legalPage(kind) {
     <h2>${t('Accord de sous-traitance (article 28 du RGPD)')}</h2><p>${t('Pour les données des clients du professionnel, ClientDirect Pro agit uniquement sur instruction du professionnel : il les héberge, envoie les confirmations et rappels, et ne les utilise à aucune autre fin. Il garantit la confidentialité de son personnel et la sécurité (chiffrement des sauvegardes, accès restreint, double authentification de l’administration). Il n’a recours qu’aux sous-traitants listés dans la politique de confidentialité, aide le professionnel à répondre aux demandes d’exercice des droits et notifie toute violation de données dans les 48 heures. À la fin du contrat, il restitue les données (export) puis les supprime.')}</p>
     <h2>${t('Résiliation')}</h2><p>${t('Depuis l’espace pro (« Gérer mon abonnement »). Les données peuvent être téléchargées avant la suppression du compte.')}</p>`]
   };
+  pages.cgv = ['Conditions générales de vente', cgvHtml()];
   const [title, body] = pages[kind];
   return layout(t(title), `<header class="mk"><div class="wrap row"><a class="logo" href="/">ClientDirect Pro</a>${langSwitch('/' + kind)}</div></header><main class="band legal"><div class="wrap"><h1>${t(title)}</h1>${body}<p class="note">${t('Dernière mise à jour : 25 novembre 2026.')}</p></div></main>${FOOT()}`);
 }

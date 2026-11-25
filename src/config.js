@@ -60,6 +60,11 @@ export const config = {
   // Plusieurs serveurs publics : le principal (overpass-api.de) est souvent saturé
   overpassApis: (env.OVERPASS_API || 'https://overpass.private.coffee/api/interpreter,https://maps.mail.ru/osm/tools/overpass/api/interpreter,https://overpass-api.de/api/interpreter').split(',').map((x) => x.trim()).filter(Boolean),
   // Délai minimal entre deux appels Firecrawl (offre gratuite : nombre de requêtes par minute limité)
+  // Serveur gratuit Render : mise en veille après 15 min sans visite, ce qui arrête les tâches automatiques.
+  // Un appel à /health toutes les 10 min le garde éveillé (inutile en production : l'offre payante ne dort pas).
+  keepAwake: env.KEEP_AWAKE ? env.KEEP_AWAKE === '1' : (appEnv === 'staging' && /onrender\.com/.test(env.BASE_URL || '')),
+  // Crédits Firecrawl répartis sur les jours restants du mois (évite d'épuiser le plafond en quelques heures)
+  enrichPacing: env.ENRICH_PACING !== '0',
   firecrawlPauseMs: num(env.FIRECRAWL_PAUSE_MS, env.NODE_ENV === 'test' ? 0 : 6500),
   enrichMonthlyCredits: num(env.ENRICH_MONTHLY_CREDITS, 0),
   // Prix d'un crédit en euros pour le calcul du coût par prospect joignable (0 = crédits gratuits)
@@ -91,7 +96,7 @@ export const config = {
   retentionChatDays: num(env.RETENTION_CHAT_DAYS, 90),
   retentionProspectMonths: num(env.RETENTION_PROSPECT_MONTHS, 36),
   // Mentions légales de l'éditeur
-  legal: { name: env.LEGAL_NAME || 'Pop Chity High-Tech (entreprise individuelle)', owner: env.LEGAL_OWNER || 'Walner Amantie', siret: env.LEGAL_SIRET || 'à compléter', address: env.LEGAL_ADDRESS || 'à compléter, Guyane', email: env.LEGAL_EMAIL || env.ADMIN_EMAIL || '', host: env.LEGAL_HOST || 'Render Services, Inc., 525 Brannan Street, San Francisco, CA 94107, États-Unis (serveurs à Francfort)' },
+  legal: { name: env.LEGAL_NAME || 'Pop Chity High-Tech (entreprise individuelle)', owner: env.LEGAL_OWNER || 'Walner Amantie', siret: env.LEGAL_SIRET || 'à compléter', address: env.LEGAL_ADDRESS || 'à compléter, Guyane', email: env.LEGAL_EMAIL || env.ADMIN_EMAIL || '', phone: env.LEGAL_PHONE || '', vat: env.LEGAL_VAT || 'Régime de TVA : à compléter.', host: env.LEGAL_HOST || 'Render Services, Inc., 525 Brannan Street, San Francisco, CA 94107, États-Unis (serveurs à Francfort)' },
   // Coûts unitaires pour calculer la rentabilité réelle de chaque client (en euros)
   costs: {
     email: num(env.COST_EMAIL, 0.0015), // Brevo Starter ≈ 7 €/5 000 e-mails ; 0 sur l'offre gratuite

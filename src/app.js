@@ -2,6 +2,8 @@
 import { potentialOf } from './potential.js';
 import { backupHealth } from './backup.js';
 import { readiness } from './readiness.js';
+import { keepAwake } from './jobs.js';
+import { logContact, salesData, OUTCOMES, CHANNELS as CONTACT_CHANNELS } from './sales.js';
 import { config, PLANS, planHas } from './config.js';
 import { parseCookies, cookie, readBody, parseForm, html, json, redirect, serveStatic, send } from './http.js';
 import * as V from './views.js';
@@ -133,7 +135,7 @@ export function createApp(db) {
     send(c.res, 200, sitemap(entries), { 'Content-Type': 'application/xml; charset=utf-8' });
   });
   on('GET', '/annuaire', (c) => html(c.res, V.directoryPage(publicTenants(db), (t) => siteUrl({ ...t, services: [] }))));
-  for (const k of ['cgu', 'confidentialite', 'mentions-legales']) on('GET', `/${k}`, (c) => html(c.res, V.legalPage(k)));
+  for (const k of ['cgu', 'cgv', 'confidentialite', 'mentions-legales']) on('GET', `/${k}`, (c) => html(c.res, V.legalPage(k)));
   on('GET', '/stop/:token', (c) => html(c.res, V.confirmPage('Ne plus être contacté', 'Confirmez-vous ne plus vouloir recevoir de message de ClientDirect Pro ? La démonstration préparée pour votre entreprise sera supprimée.', 'Oui, ne plus me contacter', csrfToken(c))));
   on('POST', '/stop/:token', (c) => {
     // Désinscription « en un clic » depuis la messagerie (RFC 8058) : pas de jeton de formulaire possible
@@ -158,6 +160,7 @@ export function createApp(db) {
     { const b = backupHealth(db); ready.sauvegardes = { ok: b.ok, problemes: b.problems, echecsDepuisDerniereReussite: b.failedSince, testRestauration: b.verified ? { ok: b.verified.ok, at: b.verified.at, fichier: b.verified.name, erreur: b.verified.error || null, contenu: b.verified.backup || null } : null }; }
     { const pot = db.all("SELECT CASE WHEN potential>=75 THEN 'A' WHEN potential>=50 THEN 'B' ELSE 'C' END cl, COUNT(*) n FROM prospects WHERE status='new' AND (phone IS NOT NULL OR email IS NOT NULL) GROUP BY cl"); ready.potentielJoignables = Object.fromEntries(pot.map((r) => [r.cl, r.n])); }
     ready.alertesEmail = !!(config.adminEmail && (config.brevoKey || config.smtp.host));
+    ready.veille = { maintienEveil: config.keepAwake, dernierAppel: keepAwake.last ? { at: new Date(keepAwake.last.at).toISOString(), statut: keepAwake.last.status || keepAwake.last.error } : null };
     { const rd = readiness(db); ready.lancement = { faits: rd.done, total: rd.total, restants: rd.items.filter((i) => !i.ok).map((i) => i.key) }; }
     { const e = enrichStatus(db); ready.prospection = { prospects: db.one("SELECT COUNT(*) n FROM prospects WHERE status!='optout'").n, departements: db.one("SELECT COUNT(DISTINCT dept) n FROM prospects WHERE dept!=''").n, coordonnees: { actif: e.enabled, plafond: e.cap, creditsMois: e.used, joignablesMois: e.reachableMonth, creditsParJoignable: e.creditsPerReachable != null ? Math.round(e.creditsPerReachable * 100) / 100 : null, telephones: e.phones || 0, emails: e.emails || 0 } }; }
     json(c.res, { ok: jobsOk, env: config.appEnv, jobs: hb ? new Date(hb).toISOString() : null, time: new Date().toISOString(), ready }, jobsOk ? 200 : 503);
@@ -549,7 +552,15 @@ export function createApp(db) {
     db.run("UPDATE rewards SET status='paid', updated_at=? WHERE id=? AND kind='commission' AND status='approved'", Date.now(), Number(c.params.id));
     audit(db, { action: 'commission.versee', detail: String(c.params.id), ip: c.ip }); redirect(c.res, '/admin/partenaires');
   });
-  on('GET', '/admin/pret', (c) => { requireAdmin(c); html(c.res, V.adminReadiness(csrfToken(c), readiness(db))); });
+  on('GET', '/admin/pret', (c) => { requireAdmin(c); html(c.res, V.adminReadiness(csrfToken(c), readiness(db), c.url.searchParams.get('msg') || '')); });
+  on('POST', '/admin/test-email', async (c) => {
+    requireAdmin(c);
+    let msg;
+    if (!config.adminEmail) msg = 'ADMIN_EMAIL absent : indiquez votre adresse dans Render.';
+    else { try { const { sendTestEmail } = await import('./notify.js'); const r = await sendTestEmail(config.adminEmail); msg = r.ok ? `E-mail de test envoyé à ${config.adminEmail}${r.via === 'smtp' ? ' (SMTP)' : ' (Brevo)'}. Vérifiez votre boîte (et les indésirables).` : r.skipped; } catch (e) { msg = `Échec : ${String(e.message).slice(0, 200)}`; } }
+    audit(db, { action: 'admin.test_email', detail: msg.slice(0, 200), ip: c.ip });
+    redirect(c.res, '/admin/pret?msg=' + encodeURIComponent(msg));
+  });
   on('GET', '/admin/bilan', (c) => {
     requireAdmin(c);
     const iso = (d) => d.toISOString().slice(0, 10); const ok = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') && !Number.isNaN(Date.parse(v));
@@ -558,7 +569,7 @@ export function createApp(db) {
     const defTo = launch ? iso(new Date(Date.parse(launch) + 29 * 864e5)) : iso(new Date());
     const to = ok(c.url.searchParams.get('au')) ? c.url.searchParams.get('au') : defTo;
     const from = ok(c.url.searchParams.get('du')) ? c.url.searchParams.get('du') : (launch || iso(new Date(Date.parse(to) - 29 * 864e5)));
-    html(c.res, V.adminReview(csrfToken(c), { ...reviewData(from, to), launch, reviewDay: launch ? iso(new Date(Date.parse(launch) + 30 * 864e5)) : null }));
+    html(c.res, V.adminReview(csrfToken(c), { ...reviewData(from, to), sales: salesData(db, from, to), launch, reviewDay: launch ? iso(new Date(Date.parse(launch) + 30 * 864e5)) : null }));
   });
   on('POST', '/admin/lancement', (c) => {
     requireAdmin(c); checkCsrf(c);
@@ -643,6 +654,18 @@ export function createApp(db) {
     requireAdmin(c); checkCsrf(c);
     const r = prepareDemo(db, Number(c.params.id)); const p = db.one('SELECT * FROM prospects WHERE id=?', Number(c.params.id));
     prospectPage(c, { demo: { name: p.name, url: r.demoUrl, message: outreachMessage(p, r.demoUrl, optoutLink(db, p.id)) } });
+  });
+  on('POST', '/admin/prospection/:id/contact', (c) => {
+    requireAdmin(c); checkCsrf(c);
+    try { logContact(db, Number(c.params.id), { outcome: c.form.outcome, channel: c.form.channel, note: c.form.note || '' }); } catch (e) { throw HttpError(400, e.message); }
+    redirect(c.res, '/admin/prospection');
+  });
+  on('GET', '/admin/bilan/contacts.csv', (c) => {
+    requireAdmin(c);
+    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = db.all('SELECT c.created_at, c.channel, c.outcome, c.note, p.name, p.tpl, p.dept, p.potential, p.phone FROM contacts c JOIN prospects p ON p.id=c.prospect_id ORDER BY c.id DESC LIMIT 20000');
+    const lines = rows.map((r) => [new Date(r.created_at).toLocaleString('fr-FR', { timeZone: 'America/Cayenne' }), CONTACT_CHANNELS[r.channel] || r.channel, OUTCOMES[r.outcome]?.label || r.outcome, r.note, displayName(r.name), TEMPLATES[r.tpl]?.label || r.tpl, r.dept, r.potential, r.phone].map(q).join(';'));
+    send(c.res, 200, '\ufeff' + [['Date (heure de Guyane)', 'Canal', 'Résultat', 'Note', 'Entreprise', 'Métier', 'Département', 'Potentiel', 'Téléphone'].map(q).join(';'), ...lines].join('\r\n'), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="contacts.csv"' });
   });
   on('POST', '/admin/prospection/:id/statut', (c) => {
     requireAdmin(c); checkCsrf(c); if (!PIPELINE[c.form.status]) throw HttpError(400, 'Statut inconnu');

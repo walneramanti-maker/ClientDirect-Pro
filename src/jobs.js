@@ -1,3 +1,4 @@
+import { net } from './net.js';
 import { config } from './config.js';
 import { processOutbox, enqueue, apptPayload } from './notify.js';
 import { openIncidents, recordIncident } from './incidents.js';
@@ -88,9 +89,17 @@ export async function runJobs(db, now = Date.now()) {
   return r;
 }
 
+/** Dernier appel de maintien en éveil (serveur gratuit). */
+export const keepAwake = { enabled: () => config.keepAwake, last: null };
+
 export function startScheduler(db) {
   let running = false;
   const tick = async () => { if (running) return; running = true; try { await runJobs(db); } catch (e) { recordIncident(db, { kind: 'jobs', severity: 'critical', message: `Tâches automatiques en erreur : ${String(e.message).slice(0, 160)}` }); } finally { running = false; } };
   const h = setInterval(tick, config.jobsIntervalMs); h.unref?.(); setTimeout(tick, 2000).unref?.();
-  return () => clearInterval(h);
+  let k = null;
+  if (config.keepAwake) {
+    const ping = async () => { try { const r = await net.fetch(`${config.baseUrl}/health?veille=1`, { headers: { 'user-agent': 'ClientDirectPro-veille' } }); keepAwake.last = { at: Date.now(), status: r.status }; } catch (e) { keepAwake.last = { at: Date.now(), error: String(e.message).slice(0, 80) }; } };
+    k = setInterval(ping, 10 * 60e3); k.unref?.(); setTimeout(ping, 60e3).unref?.();
+  }
+  return () => { clearInterval(h); if (k) clearInterval(k); };
 }
