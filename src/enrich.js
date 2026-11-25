@@ -7,6 +7,8 @@ import { recordIncident } from './incidents.js';
 import { TEMPLATES } from './templates.js';
 import { displayName, fromSirene, importProspects } from './prospect.js';
 import { deptOf } from './france.js';
+import { analyzeSite, isPlatform, refreshPotentials } from './potential.js';
+import { osmPlaces, OSM_SOURCE } from './osm.js';
 
 const API = () => (config.firecrawlApi || 'https://api.firecrawl.dev').replace(/\/$/, '');
 const month = (now = Date.now()) => new Date(now).toISOString().slice(0, 7);
@@ -53,29 +55,42 @@ export async function searchPlaces(db, { query, postal }, now = Date.now()) {
   return alexandria(db, 'firecrawl-maps', 'businesses/search', { query, country: 'fr', language: 'fr', locality: postal || undefined, include_opening_hours: false }, 10, now);
 }
 /** Adresse e-mail publique sur la page contact du site (1 crédit). Les adresses génériques (contact@…) sont préférées. */
-// Pages qui ne sont pas le site de l'entreprise : leur adresse e-mail serait celle de la plateforme
-const PLATFORMS = /(^|\.)(facebook|instagram|tiktok|linkedin|twitter|x|youtube|simplybook|planity|treatwell|calendly|doctolib|ubereats|deliveroo|tripadvisor|google|wa|whatsapp|linktr|pagesjaunes)\.[a-z.]+$/i;
-async function emailsOn(db, url, now) {
-  const res = await net.fetch(`${API()}/v2/scrape`, { method: 'POST', headers: { authorization: `Bearer ${config.firecrawlKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown'], onlyMainContent: false }) });
+// Pages qui ne sont pas le site de l'entreprise (leur e-mail serait celui de la plateforme) : voir potential.js
+async function pageOn(db, url, now) {
+  const res = await net.fetch(`${API()}/v2/scrape`, { method: 'POST', headers: { authorization: `Bearer ${config.firecrawlKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown', 'rawHtml'], onlyMainContent: false }) });
   spend(db, 1, now);
-  if (!res.ok) return [];
-  const j = await res.json(); if (Number(j.data?.metadata?.statusCode) >= 400) return [];
-  const md = String(j.data?.markdown || '');
-  return [...new Set((md.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []).map((e) => e.toLowerCase()))].filter((e) => !/\.(png|jpe?g|gif|webp|svg)$/.test(e) && !/(example|sentry|wixpress|domain|godaddy|ovh)\./.test(e));
+  if (!res.ok) return null;
+  const j = await res.json(); if (Number(j.data?.metadata?.statusCode) >= 400) return null;
+  const md = String(j.data?.markdown || ''); const html = String(j.data?.rawHtml || '');
+  const emails = [...new Set((md.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []).map((e) => e.toLowerCase()))].filter((e) => !/\.(png|jpe?g|gif|webp|svg)$/.test(e) && !/(example|sentry|wixpress|domain|godaddy|ovh)\./.test(e));
+  return { md, html, emails };
 }
-/** Adresse e-mail publique du site de l'entreprise (page d'accueil, puis page contact) : 2 crédits au maximum. Adresses génériques préférées. */
-export async function findEmail(db, website, now = Date.now(), cap = Infinity) {
-  let url; try { url = new URL(website); } catch { return null; }
-  if (!/^https?:$/.test(url.protocol) || PLATFORMS.test(url.hostname)) return null;
+/**
+ * Lit le site de l'entreprise : page d'accueil (analyse du site + e-mail), puis page contact si l'e-mail manque.
+ * 2 crédits au maximum. Adresses génériques préférées. Renvoie { email, site }.
+ */
+export async function inspectSite(db, website, now = Date.now(), cap = Infinity, { needEmail = true } = {}) {
+  let url; try { url = new URL(website); } catch { return { email: null, site: null }; }
+  if (!/^https?:$/.test(url.protocol) || isPlatform(website)) return { email: null, site: null };
   const host = url.hostname.replace(/^www\./, '');
   const pick = (list) => list.find((e) => /^(contact|info|bonjour|hello|accueil|devis|rdv|reservation|commande|admin|secretariat)@/.test(e)) || list.find((e) => e.endsWith('@' + host)) || list[0] || null;
-  for (const page of [url.origin + '/', url.origin + '/contact']) {
+  let site = null; let email = null;
+  for (const [i, page] of [url.origin + '/', url.origin + '/contact'].entries()) {
     if (creditsUsed(db, now) + 1 > cap) break;
-    const found = await emailsOn(db, page, now).catch(() => []);
-    const e = pick(found); if (e) return e;
+    if (i > 0 && (!needEmail || email)) break;
+    const got = await pageOn(db, page, now).catch(() => null);
+    if (!got) continue;
+    if (i === 0) site = analyzeSite({ url: website, html: got.html, md: got.md });
+    email = email || pick(got.emails);
   }
-  return null;
+  return { email, site };
 }
+export async function findEmail(db, website, now = Date.now(), cap = Infinity) { return (await inspectSite(db, website, now, cap)).email; }
+function saveSite(db, id, site, now) {
+  if (site) db.run('UPDATE prospects SET site_status=?, site_flags=?, site_checked_at=? WHERE id=?', site.status, JSON.stringify(site), now, id);
+}
+/** Statut du site connu sans lecture : aucun, ou simple page sur une plateforme. */
+function siteFromListing(website, confirmed) { return !website ? (confirmed ? 'aucun' : 'aucun_probable') : isPlatform(website) ? 'plateforme' : null; }
 const phoneOk = (s) => /^\+?[\d\s.()-]{8,20}$/.test(String(s || ''));
 /**
  * Vérifie une fiche Maps dans le registre public (gratuit) : entreprise active, même code postal, nom proche,
@@ -98,21 +113,55 @@ export async function verifyInSirene(place, { postal, city, tpl }) {
 }
 
 /**
- * Complète les prospects « À contacter » sans coordonnées, groupés par ville et métier :
- * une recherche couvre plusieurs entreprises de la même ville. S'arrête au plafond mensuel de crédits.
+ * Coordonnées gratuites d'abord : OpenStreetMap, une requête par code postal et métier.
+ * Les entreprises trouvées n'ont plus besoin de Firecrawl ; les autres restent pour la recherche Maps.
  */
-export async function enrichBatch(db, { maxSearches = 20, now = Date.now(), emails = true, discover = true, pause = config.prospectPauseMs } = {}) {
-  const r = { searches: 0, matched: 0, discovered: 0, unverified: 0, emails: 0, reachable: 0, credits: 0, stopped: '' };
-  if (!enrichEnabled(db)) { r.stopped = 'désactivé'; return r; }
-  const start = creditsUsed(db, now); const cap = enrichCap(db);
-  const groups = db.all(`SELECT tpl, postal, MIN(city) city, COUNT(*) n FROM prospects WHERE status='new' AND enriched_at IS NULL AND postal!='' GROUP BY tpl, postal ORDER BY MAX(score) DESC, n DESC LIMIT ?`, maxSearches);
-  const emailFor = async (website) => { if (!emails || !website || creditsUsed(db, now) + 1 > cap) return null; try { const e = await findEmail(db, website, now, cap); if (e) r.emails++; return e; } catch { return null; } };
-  // Sites déjà connus sans e-mail : une seule nouvelle vérification (page d'accueil puis contact)
-  if (emails) for (const p of db.all("SELECT id, website FROM prospects WHERE website IS NOT NULL AND email IS NULL AND status='new' AND contact_source NOT LIKE '%e-mail vérifié%' LIMIT 10")) {
-    if (creditsUsed(db, now) + 2 > cap) break;
-    const e = await emailFor(p.website);
-    db.run("UPDATE prospects SET email=COALESCE(?,email), contact_source=contact_source || ' + e-mail vérifié' WHERE id=?", e, p.id);
+export async function osmPass(db, { maxGroups = 30, now = Date.now(), pause = config.prospectPauseMs } = {}) {
+  const r = { groups: 0, found: 0, stopped: '' };
+  if (!config.osmEnrich) { r.stopped = 'désactivé'; return r; }
+  const groups = db.all(`SELECT postal, MIN(city) city FROM prospects WHERE status='new' AND enriched_at IS NULL AND osm_checked_at IS NULL AND postal!='' GROUP BY postal ORDER BY MAX(score) DESC, COUNT(*) DESC LIMIT ?`, maxGroups);
+  for (const g of groups) {
+    let places = [];
+    try { places = await osmPlaces(g.postal, g.city); r.groups++; }
+    catch (e) { r.groups++; if (e.stop) { r.stopped = e.message; break; } recordIncident(db, { kind: 'enrichissement', severity: 'info', message: String(e.message).slice(0, 160) }); continue; }
+    const used = new Set();
+    for (const p of db.all("SELECT * FROM prospects WHERE status='new' AND enriched_at IS NULL AND postal=?", g.postal)) {
+      const i = places.findIndex((x, j) => !used.has(j) && matches(x, p));
+      if (i < 0) { db.run('UPDATE prospects SET osm_checked_at=? WHERE id=?', now, p.id); continue; }
+      used.add(i); const pl = places[i];
+      const phone = phoneOk(pl.phone) ? pl.phone : null;
+      db.run('UPDATE prospects SET phone=?, website=?, email=?, contact_source=?, enriched_at=?, osm_checked_at=?, site_status=COALESCE(?, site_status) WHERE id=?',
+        phone, pl.website || null, pl.email || null, OSM_SOURCE, phone || pl.email ? now : null, now, siteFromListing(pl.website, false), p.id);
+      if (phone || pl.email) r.found++;
+    }
+    if (pause) await new Promise((ok) => setTimeout(ok, Math.max(pause, 1000))); // usage raisonnable du service public
   }
+  return r;
+}
+
+/**
+ * Complète les prospects « À contacter » sans coordonnées, groupés par ville et métier :
+ * 1. OpenStreetMap (gratuit) ; 2. fiches Maps via Firecrawl (10 crédits la recherche) pour ce qui manque ;
+ * 3. lecture des sites (1 à 2 crédits) pour l'e-mail et l'analyse du site. Les entreprises SANS site sont gardées :
+ * ce sont les prospects prioritaires, joignables par téléphone. S'arrête au plafond mensuel de crédits.
+ */
+export async function enrichBatch(db, { maxSearches = 20, now = Date.now(), emails = true, discover = true, pause = config.prospectPauseMs, osm = config.osmEnrich } = {}) {
+  const r = { osm: null, searches: 0, matched: 0, discovered: 0, unverified: 0, emails: 0, sites: 0, reachable: 0, credits: 0, stopped: '' };
+  if (osm) { r.osm = await osmPass(db, { now, pause }).catch((e) => ({ error: e.message })); r.reachable += r.osm.found || 0; }
+  if (!enrichEnabled(db)) { r.stopped = 'désactivé'; finish(db, r, now); return r; }
+  const start = creditsUsed(db, now); const cap = enrichCap(db);
+  const siteFor = async (id, website, needEmail = true) => {
+    if (!website || creditsUsed(db, now) + 1 > cap || isPlatform(website)) return null;
+    try { const { email, site } = await inspectSite(db, website, now, cap, { needEmail: emails && needEmail }); saveSite(db, id, site, now); if (site) r.sites++; if (email) r.emails++; return email; } catch { return null; }
+  };
+  // Sites connus pas encore lus (trouvés via OpenStreetMap ou anciens passages) : analyse + e-mail
+  for (const p of db.all("SELECT id, website, email FROM prospects WHERE website IS NOT NULL AND site_checked_at IS NULL AND status='new' LIMIT 10")) {
+    if (isPlatform(p.website)) { db.run("UPDATE prospects SET site_status='plateforme', site_checked_at=? WHERE id=?", now, p.id); continue; }
+    if (creditsUsed(db, now) + 2 > cap) break;
+    const e = await siteFor(p.id, p.website, !p.email);
+    db.run("UPDATE prospects SET email=COALESCE(email,?), site_checked_at=COALESCE(site_checked_at,?) WHERE id=?", e, now, p.id);
+  }
+  const groups = db.all(`SELECT tpl, postal, MIN(city) city, COUNT(*) n FROM prospects WHERE status='new' AND enriched_at IS NULL AND postal!='' GROUP BY tpl, postal ORDER BY MAX(score) DESC, n DESC LIMIT ?`, maxSearches);
   for (const g of groups) {
     if (creditsUsed(db, now) + 10 > cap) { r.stopped = 'plafond mensuel atteint'; break; }
     const pending = db.all("SELECT * FROM prospects WHERE status='new' AND enriched_at IS NULL AND tpl=? AND postal=?", g.tpl, g.postal);
@@ -126,11 +175,13 @@ export async function enrichBatch(db, { maxSearches = 20, now = Date.now(), emai
       const pl = places.find((x, i) => !used.has(i) && x.business_status !== 'permanently_closed' && matches(x, p));
       if (!pl) { db.run('UPDATE prospects SET enriched_at=?, contact_source=? WHERE id=?', now, 'non trouvé', p.id); continue; }
       used.add(places.indexOf(pl));
-      const email = await emailFor(pl.website); const phone = phoneOk(pl.phone_e164 || pl.phone) ? (pl.phone_e164 || pl.phone) : null;
-      db.run('UPDATE prospects SET phone=?, website=?, email=?, contact_source=?, enriched_at=?, maps_closed=? WHERE id=?', phone, pl.website || null, email, 'fiche publique (Maps) + site', now, pl.business_status === 'temporarily_closed' ? 1 : 0, p.id);
+      const phone = phoneOk(pl.phone_e164 || pl.phone) ? (pl.phone_e164 || pl.phone) : null;
+      db.run('UPDATE prospects SET phone=?, website=?, contact_source=?, enriched_at=?, maps_closed=?, site_status=? WHERE id=?', phone, pl.website || null, 'fiche publique (Maps) + site', now, pl.business_status === 'temporarily_closed' ? 1 : 0, siteFromListing(pl.website, true), p.id);
+      const email = await siteFor(p.id, pl.website); if (email) db.run('UPDATE prospects SET email=? WHERE id=?', email, p.id);
+      if (pl.website) db.run('UPDATE prospects SET site_checked_at=COALESCE(site_checked_at,?) WHERE id=?', now, p.id);
       r.matched++; if (phone || email) r.reachable++;
     }
-    // 2. Autres établissements ouverts de la fiche : vérifiés dans le registre (gratuit) avant tout import
+    // 2. Autres établissements ouverts de la fiche, avec ou sans site : vérifiés dans le registre (gratuit) avant tout import
     if (discover) for (const [i, pl] of places.entries()) {
       if (used.has(i) || pl.business_status === 'permanently_closed' || !(pl.phone || pl.phone_e164 || pl.website)) continue;
       let p = null; try { p = await verifyInSirene(pl, { postal: g.postal, city: g.city, tpl: g.tpl }); } catch { p = null; }
@@ -138,15 +189,22 @@ export async function enrichBatch(db, { maxSearches = 20, now = Date.now(), emai
       if (!p) { r.unverified++; continue; }
       if (db.one('SELECT 1 FROM prospects WHERE siren=?', p.siren)) continue;
       importProspects(db, [p]);
-      const email = await emailFor(pl.website); const phone = phoneOk(pl.phone_e164 || pl.phone) ? (pl.phone_e164 || pl.phone) : null;
-      db.run('UPDATE prospects SET phone=?, website=?, email=?, contact_source=?, enriched_at=? WHERE siren=?', phone, pl.website || null, email, 'fiche publique (Maps) vérifiée au registre', now, p.siren);
+      const id = db.one('SELECT id FROM prospects WHERE siren=?', p.siren).id;
+      const phone = phoneOk(pl.phone_e164 || pl.phone) ? (pl.phone_e164 || pl.phone) : null;
+      db.run('UPDATE prospects SET phone=?, website=?, contact_source=?, enriched_at=?, site_status=? WHERE id=?', phone, pl.website || null, 'fiche publique (Maps) vérifiée au registre', now, siteFromListing(pl.website, true), id);
+      const email = await siteFor(id, pl.website); if (email) db.run('UPDATE prospects SET email=? WHERE id=?', email, id);
+      if (pl.website) db.run('UPDATE prospects SET site_checked_at=COALESCE(site_checked_at,?) WHERE id=?', now, id);
       r.discovered++; if (phone || email) r.reachable++;
     }
   }
   r.credits = creditsUsed(db, now) - start;
-  setMeta(db, `enrich_reachable_${month(now)}`, Number(meta(db, `enrich_reachable_${month(now)}`) || 0) + r.reachable);
-  db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.enrich',?,?)", JSON.stringify(r), now);
+  finish(db, r, now);
   return r;
+}
+function finish(db, r, now) {
+  setMeta(db, `enrich_reachable_${month(now)}`, Number(meta(db, `enrich_reachable_${month(now)}`) || 0) + r.reachable);
+  refreshPotentials(db);
+  db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.enrich',?,?)", JSON.stringify(r), now);
 }
 export function enrichStatus(db, now = Date.now()) {
   const c = db.one("SELECT COUNT(*) total, SUM(enriched_at IS NOT NULL) done, SUM(phone IS NOT NULL) phones, SUM(email IS NOT NULL) emails FROM prospects WHERE status!='optout'");

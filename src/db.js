@@ -86,7 +86,13 @@ const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS campaigns(id INTEGER PRIMARY KEY, name TEXT NOT NULL, channel TEXT NOT NULL CHECK(channel IN ('email','sms','appel')), filters TEXT NOT NULL DEFAULT '{}', size INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('draft','approved','canceled')), created_at INTEGER NOT NULL, approved_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS campaign_items(id INTEGER PRIMARY KEY, campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE, prospect_id INTEGER NOT NULL, to_addr TEXT, message TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('ready','sent','skipped')), UNIQUE(campaign_id, prospect_id))`,
   `ALTER TABLE campaign_items ADD COLUMN sent_at INTEGER`,
-  `ALTER TABLE campaign_items ADD COLUMN error TEXT`
+  `ALTER TABLE campaign_items ADD COLUMN error TEXT`,
+  `ALTER TABLE prospects ADD COLUMN potential INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE prospects ADD COLUMN site_status TEXT`,
+  `ALTER TABLE prospects ADD COLUMN site_flags TEXT`,
+  `ALTER TABLE prospects ADD COLUMN site_checked_at INTEGER`,
+  `ALTER TABLE prospects ADD COLUMN osm_checked_at INTEGER`,
+  `CREATE INDEX IF NOT EXISTS prospects_potential ON prospects(status, potential DESC)`
 ];
 
 export function openDb(file, { appEnv = null } = {}) {

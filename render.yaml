@@ -35,7 +35,7 @@ services:
       - key: BILLING_COUNTRIES
         value: FR,GF,GP,MQ,RE,YT
       - key: PROSPECT_DAILY
-        value: "150"
+        value: "600"
       - key: LEGAL_NAME
         value: Pop Chity High-Tech (entreprise individuelle)
       - key: LEGAL_OWNER

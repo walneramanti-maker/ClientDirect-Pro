@@ -56,6 +56,8 @@ export const config = {
   // Recherche automatique des coordonnées (Firecrawl). Rien ne part sans clé ET sans plafond mensuel autorisé.
   firecrawlKey: env.FIRECRAWL_API_KEY || '',
   firecrawlApi: env.FIRECRAWL_API || '',
+  osmEnrich: env.OSM_ENRICH !== '0',
+  overpassApi: env.OVERPASS_API || 'https://overpass-api.de/api/interpreter',
   enrichMonthlyCredits: num(env.ENRICH_MONTHLY_CREDITS, 0),
   // Prix d'un crédit en euros pour le calcul du coût par prospect joignable (0 = crédits gratuits)
   enrichEurPerCredit: num(env.ENRICH_EUR_PER_CREDIT, 0),

@@ -52,7 +52,11 @@ export function notifyAppointment(db, t, a, template, cancelToken) {
 }
 
 async function sendEmail(to, msg) {
-  if (!config.brevoKey) return { skipped: 'E-mail non configuré (BREVO_API_KEY absente)' };
+  if (!config.brevoKey) {
+    // Repli gratuit : la messagerie professionnelle (SMTP) si elle est configurée
+    if (config.smtp?.host) { const { sendMail, buildMessage } = await import('./smtp.js'); const S = config.smtp; await sendMail({ ...S, to, data: buildMessage({ from: S.from, fromName: 'ClientDirect Pro', to, subject: msg.subject, text: msg.text }) }); return { ok: true, via: 'smtp' }; }
+    return { skipped: 'E-mail non configuré (BREVO_API_KEY ou SMTP absents)' };
+  }
   const m = /^(.*)<(.+)>$/.exec(config.mailFrom) || [null, 'ClientDirect Pro', config.mailFrom];
   const res = await net.fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST', headers: { 'api-key': config.brevoKey, 'content-type': 'application/json', accept: 'application/json' },

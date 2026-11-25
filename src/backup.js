@@ -93,6 +93,61 @@ export async function restore(dbFile, { name = null } = {}) {
   return { restored: pick };
 }
 
+/** Âge maximal toléré de la dernière sauvegarde réussie avant alerte critique. */
+export const maxBackupAgeMs = () => Math.max(2, config.backupEveryHours * 3) * 36e5;
+const meta = (db, k) => db.one('SELECT v FROM meta WHERE k=?', k)?.v;
+const setMeta = (db, k, v) => db.run('INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v', k, String(v));
+
+/**
+ * Test de restauration à blanc (quotidien) : télécharge la dernière sauvegarde, la déchiffre, vérifie l'intégrité,
+ * l'environnement et le contenu, SANS toucher à la base en service. Une erreur déclenche une alerte critique.
+ */
+export async function verifyBackup(db, { now = Date.now() } = {}) {
+  const tmp = path.join(path.dirname(path.resolve(db.file)), `.verification-${process.pid}-${now}.db`);
+  const r = { at: new Date(now).toISOString(), ok: false };
+  try {
+    const names = await list(db.file); r.name = names[0] || null; r.count = names.length;
+    if (!r.name) throw new Error('Aucune sauvegarde disponible');
+    const enc = await get(r.name, db.file); r.bytes = enc.length;
+    fs.writeFileSync(tmp, zlib.gunzipSync(decrypt(enc, secretOf())));
+    const check = new DatabaseSync(tmp, { readOnly: true });
+    try {
+      const ok = check.prepare('PRAGMA integrity_check').get().integrity_check;
+      if (ok !== 'ok') throw new Error('Sauvegarde corrompue : ' + ok);
+      const env = check.prepare("SELECT v FROM meta WHERE k='app_env'").get()?.v;
+      if (env && env !== config.appEnv) throw new Error(`Sauvegarde d'un autre environnement (${env})`);
+      const n = (t, w = '') => check.prepare(`SELECT COUNT(*) n FROM ${t} ${w}`).get().n;
+      r.backup = { comptes: n('tenants', 'WHERE example=0'), prospects: n('prospects'), rendezVous: n('appointments') };
+    } finally { check.close(); }
+    const live = { comptes: db.one('SELECT COUNT(*) n FROM tenants WHERE example=0').n, prospects: db.one('SELECT COUNT(*) n FROM prospects').n, rendezVous: db.one('SELECT COUNT(*) n FROM appointments').n };
+    r.live = live;
+    // La sauvegarde a au plus quelques minutes de retard : un écart important signale une sauvegarde incomplète
+    if (r.backup.comptes < live.comptes - 2 || r.backup.prospects < live.prospects * 0.5 || r.backup.rendezVous < live.rendezVous - 20)
+      throw new Error(`Sauvegarde incomplète (comptes ${r.backup.comptes}/${live.comptes}, prospects ${r.backup.prospects}/${live.prospects})`);
+    r.ok = true;
+  } catch (e) {
+    r.error = String(e.message).slice(0, 200);
+    recordIncident(db, { kind: 'backup_verify', severity: 'critical', message: `Test de restauration échoué : ${r.error}` });
+  } finally { fs.rmSync(tmp, { force: true }); }
+  setMeta(db, 'backup_verified', JSON.stringify(r));
+  db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.backup_verify',?,?)", JSON.stringify(r), now);
+  return r;
+}
+
+/** État des sauvegardes pour /health et la surveillance externe. */
+export function backupHealth(db, now = Date.now()) {
+  const last = db.one("SELECT MAX(created_at) at FROM backups WHERE status='ok'").at || 0;
+  const failedSince = db.one("SELECT COUNT(*) n FROM backups WHERE status='failed' AND created_at>?", last).n;
+  let verified = null; try { verified = JSON.parse(meta(db, 'backup_verified') || 'null'); } catch { verified = null; }
+  const problems = [];
+  if (!remoteConfigured()) problems.push('sauvegarde hors serveur non configurée');
+  if (!last) problems.push('aucune sauvegarde réussie');
+  else if (now - last > maxBackupAgeMs()) problems.push('dernière sauvegarde trop ancienne');
+  if (failedSince >= 3) problems.push(`${failedSince} échecs depuis la dernière réussite`);
+  if (verified && !verified.ok) problems.push('dernier test de restauration échoué');
+  return { ok: !problems.length, problems, lastOk: last ? new Date(last).toISOString() : null, failedSince, verified };
+}
+
 /** Surveillance : sauvegarde due ? trop ancienne ? */
 let lastSavedChanges = -1;
 export async function backupJob(db, now = Date.now()) {
@@ -104,7 +159,7 @@ export async function backupJob(db, now = Date.now()) {
   if (dirty || now - last >= config.backupEveryHours * 36e5 - 30e3) {
     try { const r = await createBackup(db); lastSavedChanges = db.one('SELECT total_changes() c').c; return r; } catch { /* incident déjà enregistré */ }
   }
-  if (last && now - last > Math.max(26, config.backupEveryHours * 3) * 36e5) recordIncident(db, { kind: 'backup_age', severity: 'critical', message: 'Aucune sauvegarde réussie depuis plus de 26 heures' });
+  if (last && now - last > maxBackupAgeMs()) recordIncident(db, { kind: 'backup_age', severity: 'critical', message: `Aucune sauvegarde réussie depuis plus de ${Math.round(maxBackupAgeMs() / 36e5)} heures` });
   if (config.isProd && !remoteConfigured()) recordIncident(db, { kind: 'backup_offsite', severity: 'warning', message: 'Sauvegardes uniquement locales : configurez SUPABASE_URL et SUPABASE_SERVICE_KEY' });
   return { last };
 }

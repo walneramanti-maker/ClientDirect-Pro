@@ -12,15 +12,32 @@ import { recordIncident } from './incidents.js';
 export const CHANNELS = { email: 'E-mail', sms: 'SMS', appel: 'Appel téléphonique' };
 export const MAX_CAMPAIGN = 5000;
 
+// Accroche d'appel selon l'analyse (jamais envoyée : aide pour la personne qui appelle). Formulée sans affirmer ce qui n'est pas vérifié.
+const OPENERS = {
+  aucun: "Je n'ai pas trouvé de site Internet pour votre entreprise : vos clients ne peuvent pas vous trouver ni réserver en ligne.",
+  aucun_probable: "Je n'ai pas trouvé de site Internet à votre nom (à confirmer avec la personne).",
+  plateforme: 'Vous êtes présent sur une plateforme ou un réseau social, mais sans site à votre nom.',
+  vieillissant: 'Votre site existe, mais il est ancien',
+  'récent': 'Votre site est récent'
+};
+export function callOpener(p) {
+  const st = p.site_status || (p.website ? null : 'aucun_probable');
+  let f = {}; try { f = JSON.parse(p.site_flags || '{}'); } catch { f = {}; }
+  let o = OPENERS[st] || '';
+  if (st === 'vieillissant') o += f.reasons?.length ? ` (${f.reasons.join(', ')}).` : '.';
+  if (st === 'vieillissant' || st === 'récent') o += `${st === 'récent' ? ' ; ' : ' '}${[!f.booking && 'pas de réservation en ligne', !f.quote && 'pas de formulaire de devis'].filter(Boolean).join(', ') || 'il a déjà l’essentiel : proposer plutôt l’assistant 24 h/24 (Premium)'}.`;
+  return o;
+}
 export function callScript(p, demoUrl) {
   const n = displayName(p.name); const m = (TEMPLATES[p.tpl]?.metier || 'votre activité').toLowerCase();
-  return `« Bonjour, ${config.legal.owner}, de ClientDirect Pro. Je vous appelle au sujet de votre activité (${m}) ; vous avez deux minutes ? J'ai préparé gratuitement un exemple de site pour ${n} : vos clients y demandent un devis ou vous écrivent sur WhatsApp, à toute heure. Je peux vous l'envoyer par SMS ou par e-mail ? » — Si oui : envoyer le lien ${demoUrl}. — Si non : « Très bien, je ne vous rappellerai pas » et passer le statut à « Ne plus contacter ».`;
+  const opener = callOpener(p);
+  return `${opener ? `[Accroche, après la présentation : ${opener}] ` : ''}« Bonjour, ${config.legal.owner}, de ClientDirect Pro. Je vous appelle au sujet de votre activité (${m}) ; vous avez deux minutes ? J'ai préparé gratuitement un exemple de site pour ${n} : vos clients y demandent un devis ou vous écrivent sur WhatsApp, à toute heure. Je peux vous l'envoyer par SMS ou par e-mail ? » — Si oui : envoyer le lien ${demoUrl}. — Si non : « Très bien, je ne vous rappellerai pas » et passer le statut à « Ne plus contacter ».`;
 }
 
 /** Entreprises éligibles : à contacter, coordonnée présente pour le canal, ouvertes, pas déjà dans une campagne. */
-function eligibleSql({ channel, depts = [], tpls = [], minScore = 0 }) {
-  const w = ["p.status='new'", 'p.maps_closed=0', 'p.score>=?', "NOT EXISTS (SELECT 1 FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id WHERE i.prospect_id=p.id AND c.status!='canceled')"];
-  const a = [Number(minScore) || 0];
+function eligibleSql({ channel, depts = [], tpls = [], minScore = 0, minPotential = 0 }) {
+  const w = ["p.status='new'", 'p.maps_closed=0', 'p.score>=?', 'p.potential>=?', "NOT EXISTS (SELECT 1 FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id WHERE i.prospect_id=p.id AND c.status!='canceled')"];
+  const a = [Number(minScore) || 0, Math.max(0, Math.min(100, Number(minPotential) || 0))];
   w.push(channel === 'email' ? 'p.email IS NOT NULL' : 'p.phone IS NOT NULL');
   const d = depts.filter((x) => DEPARTEMENTS[x]); if (d.length) { w.push(`p.dept IN (${d.map(() => '?').join(',')})`); a.push(...d); }
   const t = tpls.filter((x) => TEMPLATES[x]); if (t.length) { w.push(`p.tpl IN (${t.map(() => '?').join(',')})`); a.push(...t); }
@@ -28,11 +45,11 @@ function eligibleSql({ channel, depts = [], tpls = [], minScore = 0 }) {
 }
 export function countEligible(db, f) { const q = eligibleSql(f); return db.one(`SELECT COUNT(*) n FROM prospects p WHERE ${q.where}`, ...q.args).n; }
 
-export function createCampaign(db, { name, channel, depts = [], tpls = [], minScore = 0, size = 500 }, now = Date.now()) {
+export function createCampaign(db, { name, channel, depts = [], tpls = [], minScore = 0, minPotential = 0, size = 500 }, now = Date.now()) {
   if (!CHANNELS[channel]) throw new Error('Canal inconnu');
   size = Math.max(1, Math.min(MAX_CAMPAIGN, Math.floor(Number(size) || 0)));
-  const q = eligibleSql({ channel, depts, tpls, minScore });
-  const rows = db.all(`SELECT p.* FROM prospects p WHERE ${q.where} ORDER BY p.score DESC, p.id LIMIT ?`, ...q.args, size);
+  const q = eligibleSql({ channel, depts, tpls, minScore, minPotential });
+  const rows = db.all(`SELECT p.* FROM prospects p WHERE ${q.where} ORDER BY p.potential DESC, p.score DESC, p.id LIMIT ?`, ...q.args, size);
   if (!rows.length) throw new Error('Aucune entreprise ne correspond à ces critères (coordonnées requises pour ce canal).');
   let id;
   db.tx(() => {

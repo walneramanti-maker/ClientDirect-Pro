@@ -1,3 +1,4 @@
+import { refreshPotentials } from './potential.js';
 import { config } from './config.js';
 import { net } from './net.js';
 import { TEMPLATES, tplFromNaf } from './templates.js';
@@ -147,7 +148,10 @@ export async function seedProspects(db, sirens, { pause = 350 } = {}) {
 
 // ---------- Prospection nationale automatique ----------
 /** Toutes les combinaisons métier × département, parcourues page par page pour couvrir toute la France. */
-export const CAMPAIGN_UNITS = DEPT_CODES.flatMap((d) => Object.keys(TEMPLATES).map((tpl) => ({ d, tpl })));
+// Ordre entrelacé : chaque tour couvre TOUS les départements (métropole et Outre-mer), avec un métier différent
+// d'un département à l'autre, pour que la prospection soit nationale dès les premiers jours.
+const TPLS = Object.keys(TEMPLATES);
+export const CAMPAIGN_UNITS = TPLS.flatMap((_, k) => DEPT_CODES.map((d, i) => ({ d, tpl: TPLS[(k + i) % TPLS.length] })));
 /**
  * Repère chaque jour de nouvelles entreprises dans le registre public, sur toute la France (métropole et Outre-mer).
  * Premier passage : la 1re page de chaque métier dans chaque département, puis la 2e page, etc.
@@ -176,6 +180,7 @@ export async function runNationalCampaign(db, { quota = prospectDaily(db), pause
   }
   db.run("INSERT INTO meta(k,v) VALUES('prospect_cursor',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(cursor));
   db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.prospect',?,?)", JSON.stringify({ added: r.added, calls: r.calls }), now);
+  refreshPotentials(db);
   return { ...r, cursor, coverage: Math.min(1, cursor / U) };
 }
 /** Avancement de la campagne pour l'administration. */

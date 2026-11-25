@@ -1,0 +1,36 @@
+// Coordonnées professionnelles publiques depuis OpenStreetMap (gratuit, licence ODbL : attribution obligatoire).
+// Une requête par code postal renvoie tous les établissements nommés qui ont un téléphone.
+// Utilisé AVANT Firecrawl : ce qui est trouvé ici ne coûte aucun crédit.
+import { config } from './config.js';
+import { net } from './net.js';
+
+export const OSM_SOURCE = 'OpenStreetMap (© contributeurs OSM, ODbL)';
+const PHONE_KEYS = '^(phone|contact:phone|mobile|contact:mobile)$';
+const first = (v) => (v ? String(v).split(';')[0].trim() : null);
+
+export function overpassQuery(postal) {
+  const p = String(postal).replace(/[^0-9A-Za-z]/g, '');
+  return `[out:json][timeout:25];area["boundary"="postal_code"]["postal_code"="${p}"]->.pc;(nwr(area.pc)["name"][~"${PHONE_KEYS}"~"."];nwr["addr:postcode"="${p}"]["name"][~"${PHONE_KEYS}"~"."];);out tags 500;`;
+}
+
+/** Établissements avec téléphone d'un code postal, au format des fiches utilisées pour la correspondance. */
+export async function osmPlaces(postal, city) {
+  const res = await net.fetch(config.overpassApi, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B; contact via site)' },
+    body: 'data=' + encodeURIComponent(overpassQuery(postal))
+  });
+  if (res.status === 429 || res.status === 504) throw Object.assign(new Error(`OpenStreetMap ${res.status}`), { stop: true });
+  if (!res.ok) throw new Error(`OpenStreetMap ${res.status}`);
+  const seen = new Set();
+  return ((await res.json()).elements || []).map((e) => e.tags || {}).filter((t) => {
+    const k = `${t.name}|${t.phone || t['contact:phone'] || t.mobile || t['contact:mobile']}`; if (seen.has(k)) return false; seen.add(k); return !t.disused && !t['disused:shop'];
+  }).map((t) => ({
+    name: t.name,
+    address: [t['addr:housenumber'], t['addr:street'], t['addr:postcode'] || postal, t['addr:city'] || city].filter(Boolean).join(' '),
+    phone: first(t.phone || t['contact:phone'] || t.mobile || t['contact:mobile']),
+    website: first(t.website || t['contact:website'] || t.url),
+    email: first(t.email || t['contact:email']),
+    business_status: 'operational'
+  }));
+}

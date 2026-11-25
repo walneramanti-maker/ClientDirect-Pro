@@ -119,6 +119,8 @@ test('avis des professionnels et page Bilan', async () => {
   assert.doesNotMatch((await c.get('/pro')).text, /Votre avis compte/, 'une fois par mois au plus');
   assert.equal((await c.post('/pro/avis', { csrf: c.csrf(d.text), score: '9' })).status, 400);
   const admin = await makeAdmin();
+  const pr = await admin.get('/admin/pret'); assert.equal(pr.status, 200); assert.match(pr.text, /Préparation du lancement/); assert.match(pr.text, /Paiement test complet/);
+  assert.notEqual((await app.client().get('/admin/pret')).status, 200, 'réservé à l’administrateur');
   const b = await admin.get('/admin/bilan');
   assert.equal(b.status, 200);
   assert.match(b.text, /inscriptions/); assert.match(b.text, /Recommandation \(site client\)/); assert.match(b.text, /Pages métiers \(Google\)/); assert.match(b.text, /Prospection \(démo activée\)/);

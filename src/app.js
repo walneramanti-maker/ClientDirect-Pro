@@ -1,4 +1,7 @@
 // Routeur HTTP de ClientDirect Pro. Aucune dépendance externe.
+import { potentialOf } from './potential.js';
+import { backupHealth } from './backup.js';
+import { readiness } from './readiness.js';
 import { config, PLANS, planHas } from './config.js';
 import { parseCookies, cookie, readBody, parseForm, html, json, redirect, serveStatic, send } from './http.js';
 import * as V from './views.js';
@@ -152,9 +155,16 @@ export function createApp(db) {
     ready.comptes = Object.fromEntries(db.all("SELECT status, COUNT(*) n FROM tenants WHERE example=0 AND status!='demo' GROUP BY status").map((r) => [r.status, r.n]));
     { const w = db.one('SELECT type, received_at FROM webhook_events ORDER BY received_at DESC LIMIT 1'); ready.dernierEvenementStripe = w ? { type: w.type, at: new Date(w.received_at).toISOString() } : null; }
     ready.facturesPayees = db.one("SELECT COUNT(*) n FROM invoices WHERE status='paid'").n;
+    { const b = backupHealth(db); ready.sauvegardes = { ok: b.ok, problemes: b.problems, echecsDepuisDerniereReussite: b.failedSince, testRestauration: b.verified ? { ok: b.verified.ok, at: b.verified.at, fichier: b.verified.name, erreur: b.verified.error || null, contenu: b.verified.backup || null } : null }; }
+    { const pot = db.all("SELECT CASE WHEN potential>=75 THEN 'A' WHEN potential>=50 THEN 'B' ELSE 'C' END cl, COUNT(*) n FROM prospects WHERE status='new' AND (phone IS NOT NULL OR email IS NOT NULL) GROUP BY cl"); ready.potentielJoignables = Object.fromEntries(pot.map((r) => [r.cl, r.n])); }
+    ready.alertesEmail = !!(config.adminEmail && (config.brevoKey || config.smtp.host));
+    { const rd = readiness(db); ready.lancement = { faits: rd.done, total: rd.total, restants: rd.items.filter((i) => !i.ok).map((i) => i.key) }; }
     { const e = enrichStatus(db); ready.prospection = { prospects: db.one("SELECT COUNT(*) n FROM prospects WHERE status!='optout'").n, departements: db.one("SELECT COUNT(DISTINCT dept) n FROM prospects WHERE dept!=''").n, coordonnees: { actif: e.enabled, plafond: e.cap, creditsMois: e.used, joignablesMois: e.reachableMonth, creditsParJoignable: e.creditsPerReachable != null ? Math.round(e.creditsPerReachable * 100) / 100 : null, telephones: e.phones || 0, emails: e.emails || 0 } }; }
     json(c.res, { ok: jobsOk, env: config.appEnv, jobs: hb ? new Date(hb).toISOString() : null, time: new Date().toISOString(), ready }, jobsOk ? 200 : 503);
   });
+
+  // Surveillance externe des sauvegardes (UptimeRobot gratuit) : 503 dès qu'un problème est détecté
+  on('GET', '/health/sauvegardes', (c) => { const b = backupHealth(db); json(c.res, { ok: b.ok, problemes: b.problems, derniere: b.lastOk, test: b.verified ? { ok: b.verified.ok, at: b.verified.at } : null }, b.ok ? 200 : 503); });
 
   // ---------- inscription ----------
   on('GET', '/inscription', (c) => {
@@ -509,7 +519,7 @@ export function createApp(db) {
     requireAdmin(c); checkCsrf(c);
     const depts = String(c.form.depts || '').split(/[\s,;]+/).map((x) => x.trim().toUpperCase()).filter(Boolean);
     const tpls = Object.keys(TEMPLATES).filter((k) => c.form[`tpl_${k}`] === 'on');
-    try { const id = createCampaign(db, { name: c.form.name, channel: c.form.channel, depts, tpls, minScore: c.form.minScore, size: c.form.size }); audit(db, { action: 'campagne.preparee', detail: String(id), ip: c.ip }); redirect(c.res, `/admin/campagnes/${id}`); }
+    try { const id = createCampaign(db, { name: c.form.name, channel: c.form.channel, depts, tpls, minScore: c.form.minScore, minPotential: c.form.minPotential, size: c.form.size }); audit(db, { action: 'campagne.preparee', detail: String(id), ip: c.ip }); redirect(c.res, `/admin/campagnes/${id}`); }
     catch (e) { html(c.res, V.adminCampaigns(csrfToken(c), { list: db.all('SELECT * FROM campaigns ORDER BY id DESC LIMIT 200'), msg: e.message }), 400); }
   });
   on('GET', '/admin/campagnes/:id', (c) => { requireAdmin(c); const d = campaignDetail(db, Number(c.params.id)); if (!d) throw HttpError(404, 'Campagne introuvable'); html(c.res, V.adminCampaign(csrfToken(c), d)); });
@@ -539,6 +549,7 @@ export function createApp(db) {
     db.run("UPDATE rewards SET status='paid', updated_at=? WHERE id=? AND kind='commission' AND status='approved'", Date.now(), Number(c.params.id));
     audit(db, { action: 'commission.versee', detail: String(c.params.id), ip: c.ip }); redirect(c.res, '/admin/partenaires');
   });
+  on('GET', '/admin/pret', (c) => { requireAdmin(c); html(c.res, V.adminReadiness(csrfToken(c), readiness(db))); });
   on('GET', '/admin/bilan', (c) => {
     requireAdmin(c);
     const iso = (d) => d.toISOString().slice(0, 10); const ok = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') && !Number.isNaN(Date.parse(v));
@@ -588,7 +599,7 @@ export function createApp(db) {
     const where = []; const args = [];
     if (filter) { where.push('status=?'); args.push(filter); } else where.push("status!='optout'");
     if (dept) { where.push('dept=?'); args.push(dept); }
-    const list = db.all(`SELECT * FROM prospects WHERE ${where.join(' AND ')} ORDER BY score DESC, id DESC LIMIT 300`, ...args);
+    const list = db.all(`SELECT * FROM prospects WHERE ${where.join(' AND ')} ORDER BY potential DESC, score DESC, id DESC LIMIT 300`, ...args);
     const byDept = db.all("SELECT dept, COUNT(*) n, COALESCE(SUM(demo_views),0) v, SUM(status='converted') c FROM prospects WHERE dept!='' AND status!='optout' GROUP BY dept ORDER BY n DESC");
     html(c.res, V.adminProspects(csrfToken(c), { list, stats: prospectStats(db), filter, msg, demo, campaign: campaignStatus(db), byDept, dept, enrich: enrichStatus(db) }), status);
   }
@@ -622,10 +633,10 @@ export function createApp(db) {
     requireAdmin(c);
     const st = PIPELINE[c.url.searchParams.get('statut')] ? c.url.searchParams.get('statut') : 'new';
     const dept = DEPARTEMENTS[c.url.searchParams.get('dept')] ? c.url.searchParams.get('dept') : '';
-    const rows = db.all(`SELECT * FROM prospects WHERE status=?${dept ? ' AND dept=?' : ''} ORDER BY (phone IS NOT NULL OR email IS NOT NULL) DESC, score DESC, id LIMIT 5000`, ...(dept ? [st, dept] : [st]));
+    const rows = db.all(`SELECT * FROM prospects WHERE status=?${dept ? ' AND dept=?' : ''} ORDER BY (phone IS NOT NULL OR email IS NOT NULL) DESC, potential DESC, score DESC, id LIMIT 5000`, ...(dept ? [st, dept] : [st]));
     const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const head = ['Entreprise', 'Métier', 'Ville', 'Département', 'Priorité', 'SIREN', 'Téléphone', 'E-mail', 'Site', 'Source des coordonnées', 'Démo (non officielle)', "Lien d'opposition", 'Message proposé (NON ENVOYÉ)'];
-    const lines = rows.map((p) => { const demoUrl = `${config.baseUrl}/demo/${demoTokenFor(p.siren)}`; const stop = optoutLink(db, p.id); return [displayName(p.name), TEMPLATES[p.tpl]?.label || p.naf, displayName(p.city), p.dept, p.score, p.siren, p.phone, p.email, p.website, p.contact_source, demoUrl, stop, outreachMessage(p, demoUrl, stop)].map(q).join(';'); });
+    const head = ['Entreprise', 'Métier', 'Ville', 'Département', 'Potentiel (0-100)', 'Pourquoi', 'SIREN', 'Téléphone', 'E-mail', 'Site', 'Source des coordonnées', 'Démo (non officielle)', "Lien d'opposition", 'Message proposé (NON ENVOYÉ)'];
+    const lines = rows.map((p) => { const demoUrl = `${config.baseUrl}/demo/${demoTokenFor(p.siren)}`; const stop = optoutLink(db, p.id); return [displayName(p.name), TEMPLATES[p.tpl]?.label || p.naf, displayName(p.city), p.dept, p.potential, potentialOf(p).why.join(' ; '), p.siren, p.phone, p.email, p.website, p.contact_source, demoUrl, stop, outreachMessage(p, demoUrl, stop)].map(q).join(';'); });
     send(c.res, 200, '\ufeff' + [head.map(q).join(';'), ...lines].join('\r\n'), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="prospects-${st}${dept ? '-' + dept : ''}.csv"` });
   });
   on('POST', '/admin/prospection/:id/demo', (c) => {

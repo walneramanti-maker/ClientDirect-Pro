@@ -3,7 +3,7 @@ import { processOutbox, enqueue, apptPayload } from './notify.js';
 import { openIncidents, recordIncident } from './incidents.js';
 import { loadTenant } from './tenants.js';
 import { checkDomains } from './domains.js';
-import { backupJob } from './backup.js';
+import { backupJob, verifyBackup, remoteConfigured } from './backup.js';
 import { retentionJob } from './privacy.js';
 import { previousMonth } from './stats.js';
 import { money } from './markets.js';
@@ -53,6 +53,8 @@ export async function runJobs(db, now = Date.now()) {
   if (now - lastRun(db, 'job.domains') > 10 * 60e3) { r.domains = await checkDomains(db).catch((e) => ({ error: e.message })); mark(db, 'job.domains', now); }
   // 9. Sauvegardes et surveillance de leur fraîcheur
   r.backup = await backupJob(db, now);
+  // Test de restauration à blanc une fois par jour (n'affecte pas la base en service)
+  if (remoteConfigured() && now - lastRun(db, 'job.backup_verify') > 20 * 36e5) r.backupVerify = await verifyBackup(db, { now }).catch((e) => ({ error: e.message }));
   // 10. RGPD : durées de conservation (une fois par jour)
   if (now - lastRun(db, 'job.retention') > 20 * 36e5) { r.retention = retentionJob(db, now); mark(db, 'job.retention', now); }
   // 11. Bilan mensuel envoyé à chaque professionnel (le 1er du mois, une seule fois)

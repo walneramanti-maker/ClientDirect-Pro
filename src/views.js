@@ -255,7 +255,7 @@ export function legalPage(kind) {
   const [title, body] = pages[kind];
   return layout(t(title), `<header class="mk"><div class="wrap row"><a class="logo" href="/">ClientDirect Pro</a>${langSwitch('/' + kind)}</div></header><main class="band legal"><div class="wrap"><h1>${t(title)}</h1>${body}<p class="note">${t('Dernière mise à jour : 25 novembre 2026.')}</p></div></main>${FOOT()}`);
 }
-export { adminDashboard, adminTicket, adminProspects, adminProfit, adminReview, adminPartners, adminCampaigns, adminCampaign } from './views-admin.js';
+export { adminDashboard, adminTicket, adminProspects, adminProfit, adminReview, adminPartners, adminCampaigns, adminCampaign, adminReadiness } from './views-admin.js';
 
 /** Pages par métier : point d'entrée naturel depuis Google (« site internet garage avec rendez-vous », etc.). */
 export function metiersIndex() {
