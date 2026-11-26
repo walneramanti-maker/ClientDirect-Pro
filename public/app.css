@@ -14,6 +14,7 @@ a{color:var(--blue)}h1,h2,h3{line-height:1.15;margin:0 0 .5em}h1{font-size:clamp
 label{display:block;font-weight:600;margin:12px 0 4px;font-size:.95rem}
 input,select,textarea{width:100%;font:inherit;padding:10px 12px;border:1.5px solid #c9cdd4;border-radius:10px;background:#fff;min-height:44px}textarea{min-height:96px;resize:vertical}
 input[type=checkbox]{width:auto;min-height:0;margin-right:6px}input[type=color]{padding:4px;height:44px}
+.tel{display:flex;gap:6px}.tel select{flex:0 0 6.6em;width:6.6em;padding-left:8px;padding-right:4px;text-overflow:ellipsis}.tel input{flex:1 1 auto;min-width:0}
 .ck{display:flex;align-items:center;font-weight:500}.g2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:18px}
 .flash{padding:12px 14px;border-radius:10px;margin:12px 0;font-weight:600}.flash.ok{background:#e6f6ee;color:#0b5c35}.flash.err{background:#fdecea;color:#8a1c16}.flash.warn{background:#fff6d9;color:#6b4e00}

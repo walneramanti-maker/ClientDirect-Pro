@@ -3,6 +3,7 @@ import { config, recipientAllowed } from './config.js';
 import { t as tr, withLang, fmtDay, fmtTime } from './i18n.js';
 import { net } from './net.js';
 import { dlabel, hfr, esc, phoneFmt } from './util.js';
+import { e164Ok } from './phone.js';
 import { recordIncident } from './incidents.js';
 
 // ---------- contenu des messages ----------
@@ -85,6 +86,9 @@ export function emit(db, event, payload = {}, tenantId = null) {
   return enqueue(db, { tenantId, channel: 'make', to: 'make', template: event, payload });
 }
 async function sendWhatsApp(to, tpl) {
+  // Destinataire au format E.164 (chiffres seuls) : un numéro incomplet n'est jamais envoyé à WhatsApp
+  if (!e164Ok(String(to || '').replace(/^\+/, ''))) return { skipped: 'Numéro WhatsApp invalide (format international attendu)' };
+  to = String(to).replace(/^\+/, '');
   if (!config.waToken || !config.waPhoneId) return { skipped: 'WhatsApp non configuré (WHATSAPP_TOKEN absent)' };
   const res = await net.fetch(`https://graph.facebook.com/v21.0/${config.waPhoneId}/messages`, {
     method: 'POST', headers: { authorization: `Bearer ${config.waToken}`, 'content-type': 'application/json' },

@@ -9,7 +9,8 @@ import { config, PLANS, planHas } from './config.js';
 import { parseCookies, cookie, readBody, parseForm, html, json, redirect, serveStatic, send } from './http.js';
 import * as V from './views.js';
 import { TEMPLATES } from './templates.js';
-import { emailOk, randomId, safeEq, clampStr, nowIn, intlPhone } from './util.js';
+import { emailOk, randomId, safeEq, clampStr, nowIn, intlPhone, phoneOk } from './util.js';
+import { isDial, toE164, domCountryOf, phoneValid } from './phone.js';
 import { hashPassword, passwordProblem, createSession, readSession, destroySession, destroyUserSessions, csrfOk, issueToken, useToken, totpOk, rateLimit, login, audit } from './security.js';
 import { createTenant, loadTenant, siteState, updateSettings, userTenants } from './tenants.js';
 import { freeSlots, openDays, book, createQuote, setAppointmentStatus, cancelByCustomer } from './booking.js';
@@ -25,7 +26,7 @@ import { applyPartner, approvePartner, partnerByToken, partnerStats, referralSta
 import { supportAnswer, openTicket, replyTicket } from './support.js';
 import { recordIncident, openIncidents, resolveIncident } from './incidents.js';
 import { t as tr, withLang, detectLang, regionFromAccept, LANGS, setLang, currentLang } from './i18n.js';
-import { COUNTRIES, country as countryOf, billingOpen, validTz, PRICES, countryByTz } from './markets.js';
+import { COUNTRIES, country as countryOf, billingOpen, validTz, PRICES, countryByTz, countryFromDial } from './markets.js';
 import { exampleTenant, exampleDashboardData, EXAMPLE_TPLS } from './examples.js';
 import { siteHead, siteUrl, sitemap, robots, publicTenants } from './seo.js';
 import { setDomain, tenantByDomain } from './domains.js';
@@ -96,6 +97,25 @@ export function createApp(db) {
   // ---------- site public ClientDirect Pro ----------
   /** Pays probable du visiteur : choix explicite, région du navigateur, sinon France. */
   const guessCountry = (c) => { const q = c.url.searchParams.get('pays'); if (COUNTRIES[q]) return q; const r = regionFromAccept(c.req.headers['accept-language']); return COUNTRIES[r] ? r : (c.lang === 'en' ? 'US' : 'FR'); };
+  /**
+   * Pays et indicatif à l'inscription. Un choix explicite (différent de la proposition affichée) est toujours respecté.
+   * Sinon : territoire d'Outre-mer du numéro WhatsApp, puis fuseau horaire de l'appareil, puis langue du navigateur.
+   * La proposition faite par le serveur (country_guess) n'est jamais prise pour un choix de l'utilisateur.
+   */
+  const signupCountry = (f, fallback) => {
+    const proposed = COUNTRIES[f.country_guess] ? f.country_guess : null;
+    const explicit = COUNTRIES[f.country] && (f.country !== proposed || f.country_set === '1') ? f.country : null;
+    const ccChosen = isDial(f.phone_cc) && f.phone_cc !== (COUNTRIES[proposed]?.dial ?? null) ? String(f.phone_cc) : null;
+    if (explicit) return { country: explicit, phoneCc: ccChosen || COUNTRIES[explicit].dial || (isDial(f.phone_cc) ? String(f.phone_cc) : '') };
+    const tzC = countryByTz(f.tz); const base = COUNTRIES[f.country] ? f.country : fallback;
+    // Indicatif sous lequel le numéro est valide : celui choisi, sinon celui du fuseau, de la proposition, puis le plan français
+    const tries = ccChosen ? [ccChosen] : [...new Set([COUNTRIES[tzC]?.dial, COUNTRIES[base]?.dial, '33'].filter(Boolean))];
+    const ccOk = f.phone ? tries.find((x) => phoneValid(f.phone, x)) : null;
+    const dom = ccOk ? domCountryOf(toE164(f.phone, ccOk)) : null;
+    const viaPhone = ccOk && !ccChosen && ccOk !== COUNTRIES[base]?.dial ? countryFromDial(ccOk) : null;
+    const country = dom || tzC || (viaPhone && viaPhone !== 'OTHER' ? viaPhone : null) || base;
+    return { country, phoneCc: ccChosen || ccOk || COUNTRIES[country].dial || (isDial(f.phone_cc) ? String(f.phone_cc) : '') };
+  };
   on('GET', '/', (c) => { const ctry = guessCountry(c); const cur = PRICES[c.url.searchParams.get('devise')] ? c.url.searchParams.get('devise') : countryOf(ctry).cur; html(c.res, V.marketing({ csrf: csrfToken(c), cur: PRICES[cur] ? cur : 'EUR', country: ctry })); });
   // ---------- programme partenaires ----------
   on('GET', '/partenaires', (c) => html(c.res, V.partnersPage({ csrf: csrfToken(c) })));
@@ -187,6 +207,7 @@ export function createApp(db) {
     if (f.claim && !demo) errors.push(tr('Cette démonstration a déjà été activée.'));
     const email = clampStr(f.email, 190).toLowerCase(); const name = clampStr(f.name, 80);
     if (!demo) { if (!clampStr(f.business, 80)) errors.push(tr("Indiquez le nom de l'entreprise.")); if (!TEMPLATES[f.tpl]) errors.push(tr('Choisissez un métier.')); if (f.country && !COUNTRIES[f.country]) errors.push(tr('Pays inconnu.')); }
+    if (!demo && f.phone) { const { phoneCc } = signupCountry(f, guessCountry(c)); if (!phoneOk(f.phone, phoneCc)) errors.push(tr('Numéro WhatsApp invalide.')); }
     if (!name) errors.push(tr('Indiquez votre nom.'));
     if (!emailOk(email)) errors.push(tr('Adresse e-mail invalide.'));
     const pw = passwordProblem(f.password); if (pw) errors.push(tr(pw));
@@ -206,8 +227,8 @@ export function createApp(db) {
       });
       tenantId = demo.id;
     } else {
-      const ctry = COUNTRIES[f.country] ? f.country : (countryByTz(f.tz) || guessCountry(c));
-      tenantId = createTenant(db, { name: f.business, tpl: f.tpl, city: f.city, phone: f.phone, email, country: ctry, tz: validTz(f.tz) ? f.tz : null, lang: ulang, plan: f.plan, status: 'trial', ownerId: userId }).id;
+      const { country: ctry, phoneCc } = signupCountry(f, guessCountry(c));
+      tenantId = createTenant(db, { name: f.business, tpl: f.tpl, city: f.city, phone: f.phone, phoneCc, email, country: ctry, tz: validTz(f.tz) ? f.tz : null, lang: ulang, plan: f.plan, status: 'trial', ownerId: userId }).id;
       db.run('UPDATE tenants SET source=? WHERE id=?', c.source || 'direct', tenantId);
       // Parrainage et partenariat : rattachement à l'inscription, récompense seulement après paiement
       if (c.source.startsWith('site:')) { const r = db.one("SELECT t.id, u.email FROM tenants t JOIN users u ON u.id=t.owner_user_id WHERE t.slug=? AND t.status IN ('trial','active','past_due')", c.source.slice(5)); if (r && r.email !== email) db.run('UPDATE tenants SET referred_by_tenant_id=? WHERE id=?', r.id, tenantId); }
@@ -338,8 +359,8 @@ export function createApp(db) {
       if (demo) return json(c.res, { ok: true, demo: true, msg: tr('Démonstration : sur le site activé, cette demande arriverait dans l’espace du professionnel. Rien n’a été enregistré.') });
       const r = createQuote(db, t, c.form);
       if (!r.ok) return json(c.res, { ...r, msg: tr(r.msg) }, 400);
-      notifyPro(t, 'demande de devis', `${clampStr(c.form.name, 80)} (+${intlPhone(c.form.phone, t.cc)}) · ${clampStr(c.form.service, 80)} · ${clampStr(c.form.message, 300)}`);
-      emit(db, 'devis', { entreprise: t.name, client: clampStr(c.form.name, 80), telephone: '+' + intlPhone(c.form.phone, t.cc), prestation: clampStr(c.form.service, 80), message: clampStr(c.form.message, 500) }, t.id);
+      notifyPro(t, 'demande de devis', `${clampStr(c.form.name, 80)} (+${intlPhone(c.form.phone, isDial(c.form.cc) ? c.form.cc : t.cc)}) · ${clampStr(c.form.service, 80)} · ${clampStr(c.form.message, 300)}`);
+      emit(db, 'devis', { entreprise: t.name, client: clampStr(c.form.name, 80), telephone: '+' + intlPhone(c.form.phone, isDial(c.form.cc) ? c.form.cc : t.cc), prestation: clampStr(c.form.service, 80), message: clampStr(c.form.message, 500) }, t.id);
       json(c.res, { ok: true, msg: tr('Demande envoyée à {n}. Vous serez recontacté rapidement.', { n: t.name }) });
     });
     on('POST', `${prefix}/chat`, async (c) => {

@@ -1,4 +1,5 @@
 import { nowIn, addDays, dowOf, toMin, fromMin, isDate, isTime, phoneOk, intlPhone, emailOk, clampStr, zonedToUtc, randomId, sha256, dlabel, hfr } from './util.js';
+import { isDial } from './phone.js';
 import { planHas } from './config.js';
 import { t as tr, fmtDay, fmtTime } from './i18n.js';
 import { track } from './stats.js';
@@ -40,11 +41,12 @@ export function openDays(db, t, n = 10, serviceId = null) {
  * Réserve un créneau. La vérification et l'enregistrement se font dans une transaction exclusive :
  * deux demandes simultanées ne peuvent pas obtenir le même poste au même moment.
  */
-export function book(db, t, { date, time, serviceId, name, phone, email = '', source = 'site' }) {
+export function book(db, t, { date, time, serviceId, name, phone, cc = '', email = '', source = 'site' }) {
+  const pcc = isDial(cc) ? String(cc) : t.cc; // indicatif choisi par le client, sinon celui du professionnel
   if (!planHas(t.plan, 'rdv')) return { ok: false, code: 'plan', msg: tr("La prise de rendez-vous en ligne n'est pas incluse dans cette formule.") };
   name = clampStr(name, 80); email = clampStr(email, 190);
   if (!name) return { ok: false, code: 'name', msg: tr('Indiquez votre nom.') };
-  if (!phoneOk(phone, t.cc)) return { ok: false, code: 'phone', msg: tr('Numéro de téléphone invalide.') };
+  if (!phoneOk(phone, pcc)) return { ok: false, code: 'phone', msg: tr('Numéro de téléphone invalide.') };
   if (email && !emailOk(email)) return { ok: false, code: 'email', msg: tr('Adresse e-mail invalide.') };
   if (!isDate(date) || !isTime(time)) return { ok: false, code: 'slot', msg: tr('Date ou heure invalide.') };
   const svc = t.services.find((s) => s.id === Number(serviceId)); if (!svc) return { ok: false, code: 'service', msg: tr('Prestation inconnue.') };
@@ -57,7 +59,7 @@ export function book(db, t, { date, time, serviceId, name, phone, email = '', so
     if (!stf) return null;
     const status = t.auto_confirm ? 'confirmed' : 'pending';
     const r = db.run(`INSERT INTO appointments(tenant_id,service_id,service_name,price,date,time,start_min,dur,staff_id,staff_name,customer_name,customer_phone,customer_email,status,source,starts_at,cancel_token_hash,created_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.id, svc.id, svc.name, svc.price, date, time, start, svc.dur, stf.id, stf.name, name, intlPhone(phone, t.cc), email, status, source, zonedToUtc(date, time, t.tz), sha256(cancelToken), Date.now());
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.id, svc.id, svc.name, svc.price, date, time, start, svc.dur, stf.id, stf.name, name, intlPhone(phone, pcc), email, status, source, zonedToUtc(date, time, t.tz), sha256(cancelToken), Date.now());
     return { id: Number(r.lastInsertRowid), status, staff: stf.name };
   });
   if (!res) return { ok: false, code: 'taken', msg: tr('Ce créneau vient d’être pris. Choisissez une autre heure.') };
@@ -66,13 +68,14 @@ export function book(db, t, { date, time, serviceId, name, phone, email = '', so
   return { ok: true, ...res, cancelToken, msg: res.status === 'confirmed' ? tr('Rendez-vous confirmé le {w} ({s}).', { w: when, s: svc.name }) : tr('Demande de rendez-vous enregistrée pour le {w} ({s}). {n} vous la confirme.', { w: when, s: svc.name, n: t.name }) };
 }
 
-export function createQuote(db, t, { name, phone, email = '', obj = '', service = '', message = '' }) {
+export function createQuote(db, t, { name, phone, cc = '', email = '', obj = '', service = '', message = '' }) {
+  const pcc = isDial(cc) ? String(cc) : t.cc;
   name = clampStr(name, 80);
   if (!name) return { ok: false, msg: tr('Indiquez votre nom.') };
-  if (!phoneOk(phone, t.cc)) return { ok: false, msg: tr('Numéro de téléphone invalide.') };
+  if (!phoneOk(phone, pcc)) return { ok: false, msg: tr('Numéro de téléphone invalide.') };
   if (email && !emailOk(email)) return { ok: false, msg: tr('Adresse e-mail invalide.') };
   const r = db.run('INSERT INTO quotes(tenant_id,customer_name,customer_phone,customer_email,obj,service,message,created_at) VALUES(?,?,?,?,?,?,?,?)',
-    t.id, name, intlPhone(phone, t.cc), clampStr(email, 190), clampStr(obj, 160), clampStr(service, 80), clampStr(message, 2000), Date.now());
+    t.id, name, intlPhone(phone, pcc), clampStr(email, 190), clampStr(obj, 160), clampStr(service, 80), clampStr(message, 2000), Date.now());
   track(db, t, 'quotes');
   return { ok: true, id: Number(r.lastInsertRowid) };
 }

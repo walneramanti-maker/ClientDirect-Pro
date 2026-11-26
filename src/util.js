@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { toE164, phoneValid } from './phone.js';
 
 export const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const pad = (n) => String(n).padStart(2, '0');
@@ -34,19 +35,9 @@ export function zonedToUtc(date, time, tz) {
   return guess - o2;
 }
 
-/** Numéro au format international, chiffres seuls (E.164 sans +). */
-export function intlPhone(raw, cc = '594') {
-  const s = String(raw || '').trim(); const d = s.replace(/\D/g, ''); cc = String(cc || '');
-  if (!d) return '';
-  if (s.startsWith('+')) return d;
-  if (d.startsWith('00')) return d.slice(2);
-  if (d.startsWith('011') && cc === '1') return d.slice(3); // préfixe international nord-américain
-  if (d.startsWith('0') && cc !== '1') return cc + d.slice(1); // préfixe national (France, Belgique, Royaume-Uni…)
-  if (cc === '1' && d.length === 10) return '1' + d; // États-Unis / Canada
-  if (cc && !d.startsWith(cc) && d.length <= 10) return cc + d;
-  return d;
-}
-export const phoneOk = (raw, cc) => { const n = intlPhone(raw, cc); return n.length >= 8 && n.length <= 15; };
+/** Numéro au format international, chiffres seuls (E.164 sans +). Voir phone.js (plan de numérotation français). */
+export const intlPhone = (raw, cc = '594') => toE164(raw, cc);
+export const phoneOk = (raw, cc = '594') => phoneValid(raw, cc);
 const DIALS = ['1', '7', '20', '27', '30', '31', '32', '33', '34', '39', '41', '44', '45', '46', '47', '49', '52', '55', '61', '64', '81', '86', '91', '212', '221', '225', '262', '351', '352', '353', '377', '509', '590', '594', '596', '597', '687', '689'];
 export const phoneFmt = (n) => {
   n = String(n || ''); if (!n) return '';

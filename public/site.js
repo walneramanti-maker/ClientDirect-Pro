@@ -39,7 +39,7 @@
       if (!time) { err.textContent = T('Choisissez une heure.'); return; }
       const btn = book.querySelector('button[type=submit]'); btn.disabled = true;
       try {
-        const r = await call(`${base}/rdv`, { date: day, time, serviceId: svc.value, name: $('b-name').value, phone: $('b-phone').value, email: $('b-email').value });
+        const r = await call(`${base}/rdv`, { date: day, time, serviceId: svc.value, name: $('b-name').value, phone: $('b-phone').value, cc: $('b-cc') ? $('b-cc').value : '', email: $('b-email').value });
         if (r.ok) { ok.className = r.demo ? 'note' : 'success'; ok.textContent = r.msg; if (!r.demo) { book.reset(); } loadSlots(); }
         else { err.textContent = r.msg || T('Réservation impossible, réessayez.'); if (r.code === 'taken') loadSlots(); }
       } catch (x) { err.textContent = T('Connexion impossible. Vérifiez votre réseau et réessayez.'); }
@@ -54,7 +54,7 @@
       e.preventDefault(); const err = $('q-err'), ok = $('q-ok'); err.textContent = ''; ok.textContent = '';
       const btn = quote.querySelector('button[type=submit]'); btn.disabled = true;
       try {
-        const r = await call(`${quote.dataset.base}/devis`, { name: $('q-name').value, phone: $('q-phone').value, email: $('q-email').value, obj: $('q-obj').value, service: $('q-svc').value, message: $('q-msg').value });
+        const r = await call(`${quote.dataset.base}/devis`, { name: $('q-name').value, phone: $('q-phone').value, cc: $('q-cc') ? $('q-cc').value : '', email: $('q-email').value, obj: $('q-obj').value, service: $('q-svc').value, message: $('q-msg').value });
         if (r.ok) { ok.className = r.demo ? 'note' : 'success'; ok.textContent = r.msg; if (!r.demo) quote.reset(); } else err.textContent = r.msg || T('Envoi impossible, réessayez.');
       } catch (x) { err.textContent = T('Connexion impossible. Vérifiez votre réseau et réessayez.'); }
       btn.disabled = false;

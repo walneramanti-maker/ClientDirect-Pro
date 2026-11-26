@@ -15,8 +15,8 @@
     "create-admin": "node --no-warnings scripts/create-admin.js",
     "restore": "node --no-warnings scripts/restore.js",
     "backup": "node --no-warnings scripts/backup.js",
-    "test:all": "node --no-warnings --test test/*.test.js test/mobile.e2e.js test/devices.e2e.js",
-    "test:browser": "node --no-warnings --test test/mobile.e2e.js test/devices.e2e.js"
+    "test:all": "node --no-warnings --test test/*.test.js test/mobile.e2e.js test/devices.e2e.js test/phone.e2e.js",
+    "test:browser": "node --no-warnings --test test/mobile.e2e.js test/devices.e2e.js test/phone.e2e.js"
   },
   "dependencies": {}
 }

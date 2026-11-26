@@ -1,6 +1,7 @@
 // Pages publiques, sites des entreprises et espace pro. Tous les textes passent par t() (clé = français).
 import { cgvHtml } from './cgv.js';
 import { esc, phoneFmt } from './util.js';
+import { dialOptions } from './phone.js';
 import { PLANS, planHas, config } from './config.js';
 import { TEMPLATES, tplLabel, templateFor } from './templates.js';
 import { KB } from './support.js';
@@ -8,6 +9,12 @@ import { t, currentLang, LANGS, fmtTime, fmtDay, dayName, fmtDate, locale } from
 import { COUNTRIES, countryName, priceOf, money, ALL_TZ, CURRENCIES } from './markets.js';
 
 const FONT = '<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&display=swap" rel="stylesheet">';
+/** Champ téléphone avec indicatif modifiable (le « + » saisi dans le numéro reste prioritaire). */
+const telField = ({ id, name = 'phone', ccId, ccName = 'cc', cc = '', value = '', required = false, autocomplete = 'tel', lang = currentLang() }) => {
+  const opts = dialOptions(lang); const has = opts.some((o) => o.dial === String(cc));
+  return `<div class="tel"><select id="${ccId}" name="${ccName}" aria-label="${t('Indicatif')}" autocomplete="tel-country-code">${has ? '' : `<option value="" selected>${t('Indicatif')}</option>`}${opts.map((o) => `<option value="${o.dial}" ${o.dial === String(cc) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select><input id="${id}" name="${name}" type="tel" inputmode="tel" autocomplete="${autocomplete}"${required ? ' required' : ''} maxlength="30" value="${esc(value)}"></div>`;
+};
+
 export function layout(title, body, { bodyClass = '', brand = null, head = '', lang = null, langs = true } = {}) {
   const style = brand ? `<style>:root{--brand:${/^#[0-9a-f]{6}$/i.test(brand) ? brand : '#ffcf33'}}</style>` : '';
   const env = config.appEnv === 'staging' ? `<div class="env-bar" role="note">${t('ENVIRONNEMENT DE TEST : paiements fictifs, aucun message envoyé aux vrais clients')}</div>` : '';
@@ -89,10 +96,10 @@ export function signupPage({ csrf, f = {}, errors = [], claim = null, demo = nul
   const cur = f.currency || COUNTRIES[f.country]?.cur || 'EUR';
   const planOpts = Object.keys(PLANS).map((k) => `<option value="${k}" ${(f.plan || 'pro') === k ? 'selected' : ''}>${planName(k)} — ${t('{p} HT/mois + {s} HT de mise en service, après l’essai', { p: price(k, cur).m, s: price(k, cur).s })}</option>`).join('');
   return layout(t('Créer mon site'), `<main class="auth"><a class="logo" href="/">ClientDirect Pro</a><h1>${demo ? t('Activer le site de {n}', { n: esc(demo.name) }) : t('Créer mon site')}</h1><p class="muted">${t('Essai gratuit de {d} jours, sans carte bancaire.', { d: config.trialDays })}</p>${errs(errors)}
-  <form method="post" action="/inscription" class="card" id="signup" novalidate>${csrfField(csrf)}${claim ? `<input type="hidden" name="claim" value="${esc(claim)}">` : ''}<input type="hidden" name="tz" id="tz" value="${esc(f.tz || '')}"><input type="hidden" name="lang" value="${esc(f.lang || lang)}">
+  <form method="post" action="/inscription" class="card" id="signup" novalidate>${csrfField(csrf)}${claim ? `<input type="hidden" name="claim" value="${esc(claim)}">` : ''}<input type="hidden" name="tz" id="tz" value="${esc(f.tz || '')}"><input type="hidden" name="country_guess" id="country_guess" value="${esc(f.country_guess || f.country || '')}"><input type="hidden" name="country_set" id="country_set" value="${f.country_set === '1' ? '1' : ''}"><input type="hidden" name="lang" value="${esc(f.lang || lang)}">
   ${demo ? '' : `<label for="business">${t('Nom de l’entreprise')}</label><input id="business" name="business" required maxlength="80" value="${esc(f.business)}">
   <div class="g2"><div><label for="tpl">${t('Métier')}</label><select id="tpl" name="tpl">${tplOpts}</select></div><div><label for="city">${t('Ville')}</label><input id="city" name="city" maxlength="60" value="${esc(f.city)}"></div></div>
-  <div class="g2"><div><label for="country">${t('Pays')}</label><select id="country" name="country">${cOpts}</select></div><div><label for="phone">${t('Téléphone WhatsApp')}</label><input id="phone" name="phone" type="tel" autocomplete="tel" value="${esc(f.phone)}"></div></div>`}
+  <div class="g2"><div><label for="country">${t('Pays')}</label><select id="country" name="country" data-dials="${esc(JSON.stringify(Object.fromEntries(Object.entries(COUNTRIES).map(([k, c]) => [k, c.dial]))))}">${cOpts}</select></div><div><label for="phone">${t('Téléphone WhatsApp')}</label>${telField({ id: 'phone', ccId: 'phone_cc', ccName: 'phone_cc', cc: f.phone_cc || COUNTRIES[f.country]?.dial || '', value: f.phone || '', lang })}</div></div>`}
   <label for="plan">${t('Formule')}</label><select id="plan" name="plan">${planOpts}</select>
   <label for="name">${t('Votre nom')}</label><input id="name" name="name" autocomplete="name" required maxlength="80" value="${esc(f.name)}">
   <label for="email">${t('E-mail')}</label><input id="email" name="email" type="email" autocomplete="email" required value="${esc(f.email)}">
@@ -127,7 +134,7 @@ export function tenantSite(tn, { base, mode = 'live', days = [], aiMode = 'simpl
     <form id="book" data-base="${esc(base)}" data-lang="${lang}" novalidate><label for="b-svc">${t('Prestation')}</label><select id="b-svc" name="serviceId">${opts}</select>
     <label>${t('Jour')}</label><div class="days" id="b-days" role="group" aria-label="${t('Jour')}">${days.map((d, i) => `<button type="button" class="chip" data-d="${d}" aria-pressed="${i === 0}">${esc(fmtDay(d))}</button>`).join('')}</div>
     <label>${t('Heure')}</label><div class="slots" id="b-slots" role="group" aria-label="${t('Heure')}"><p class="muted">${t('Chargement…')}</p></div>
-    <div class="g2"><div><label for="b-name">${t('Nom')}</label><input id="b-name" name="name" autocomplete="name" required></div><div><label for="b-phone">${t('Téléphone')}</label><input id="b-phone" name="phone" type="tel" autocomplete="tel" required></div></div>
+    <div class="g2"><div><label for="b-name">${t('Nom')}</label><input id="b-name" name="name" autocomplete="name" required></div><div><label for="b-phone">${t('Téléphone')}</label>${telField({ id: 'b-phone', ccId: 'b-cc', cc: tn.cc, required: true, lang })}</div></div>
     <label for="b-email">${t('E-mail (pour recevoir la confirmation)')}</label><input id="b-email" name="email" type="email" autocomplete="email">
     <div class="err" id="b-err" role="alert"></div><button class="btn red wide" type="submit">${tn.auto_confirm ? t('Réserver') : t('Demander ce créneau')}</button><div id="b-ok" role="status"></div>${NOTICE(tn)}</form></div>` : '';
   return layout(tn.name, `${banner}<section class="hero band"><div class="wrap hgrid"><div><h1>${esc(tn.name)}</h1><p class="sub">${esc(tn.metier)}${tn.city ? ` · ${esc(tn.city)}` : ''}</p><p class="lead">${esc(tn.lead)}</p>
@@ -136,7 +143,7 @@ export function tenantSite(tn, { base, mode = 'live', days = [], aiMode = 'simpl
   <div class="stripe" aria-hidden="true"></div>
   <section class="band"><div class="wrap"><h2>${t('Prestations et tarifs')}</h2><div class="svcs">${svcCards}</div></div></section>
   <section class="band alt"><div class="wrap two">${booking}
-    <div class="card" id="devis"><h3>${t('Demander un devis')}</h3><form id="quote" data-base="${esc(base)}" novalidate><div class="g2"><div><label for="q-name">${t('Nom')}</label><input id="q-name" name="name" required></div><div><label for="q-phone">${t('Téléphone')}</label><input id="q-phone" name="phone" type="tel" required></div></div>
+    <div class="card" id="devis"><h3>${t('Demander un devis')}</h3><form id="quote" data-base="${esc(base)}" novalidate><div class="g2"><div><label for="q-name">${t('Nom')}</label><input id="q-name" name="name" required></div><div><label for="q-phone">${t('Téléphone')}</label>${telField({ id: 'q-phone', ccId: 'q-cc', cc: tn.cc, required: true, lang })}</div></div>
     <label for="q-email">${t('E-mail')}</label><input id="q-email" name="email" type="email"><label for="q-obj">${esc(tn.obj_label)}</label><input id="q-obj" name="obj"><label for="q-svc">${t('Prestation')}</label><select id="q-svc" name="service">${tn.services.map((s) => `<option>${esc(s.name)}</option>`).join('')}<option>${t('Autre')}</option></select>
     <label for="q-msg">${t('Votre demande')}</label><textarea id="q-msg" name="message" maxlength="2000"></textarea><div class="err" id="q-err" role="alert"></div><button class="btn wide" type="submit">${t('Envoyer la demande')}</button><div id="q-ok" role="status"></div>${NOTICE(tn)}</form></div></div></section>
   <section class="band"><div class="wrap grid3"><div><h3>${t('Adresse')}</h3><p class="muted">${esc(tn.address || tn.city)}</p></div><div><h3>${t('Horaires')}</h3><table class="hours">${hours}</table><p class="note">${t('Heure locale : {z}', { z: esc(tn.tz) })}</p></div><div><h3>${t('Contact')}</h3><p class="muted">${esc(phoneFmt(tn.phone))}</p>${wa ? `<a class="btn wa" href="${esc(wa)}" rel="noopener">${t('Écrire sur WhatsApp')}</a>` : ''}</div></div></section>
@@ -196,7 +203,7 @@ export function proSettings(tn, user, csrf, { errors = [], saved = false, domain
   <section class="card"><h2>${t('Prestations et tarifs')}</h2><p class="muted">${t('Pour retirer une prestation, videz son nom.')}</p><div class="scroll"><table class="etab"><thead><tr><th>${t('Prestation')}</th><th>${t('Prix')} (${esc(tn.currency)})</th><th>${t('Durée min')}</th><th>${t('Description')}</th></tr></thead><tbody>${svc}${empty}</tbody></table></div></section>
   <div class="two"><section class="card"><h2>${t('Horaires')}</h2>${hours}<label class="ck"><input type="checkbox" name="auto_confirm" ${tn.auto_confirm ? 'checked' : ''}> ${t('Confirmer automatiquement les rendez-vous')}</label></section>
   <section class="card"><h2>${t('Postes ou employés')}</h2><p class="muted">${t('Un rendez-vous à la fois par poste.')}</p><div class="staff">${staff}</div></section></div>
-  <section class="card"><h2>${t('Informations')}</h2><div class="g2"><div><label for="name">${t('Nom')}</label><input id="name" name="name" value="${esc(tn.name)}" maxlength="80"></div><div><label for="phone">${t('Téléphone WhatsApp')}</label><input id="phone" name="phone" type="tel" value="${esc(tn.phone ? '+' + tn.phone : '')}"></div></div>
+  <section class="card"><h2>${t('Informations')}</h2><div class="g2"><div><label for="name">${t('Nom')}</label><input id="name" name="name" value="${esc(tn.name)}" maxlength="80"></div><div><label for="phone">${t('Téléphone WhatsApp')}</label>${telField({ id: 'phone', ccId: 'phone_cc', ccName: 'phone_cc', cc: tn.cc, value: tn.phone ? '+' + tn.phone : '', lang })}${/^33(594|694|590|69[01]|596|69[67]|26[239]|639|69[23])/.test(tn.phone || '') ? `<p class="muted" id="phone-warn">${t('Ce numéro est enregistré avec l’indicatif +33 alors que son préfixe est celui d’un département d’Outre-mer. Vérifiez-le : il n’est pas modifié sans votre accord.')}</p>` : ''}</div></div>
   <div class="g2"><div><label for="country">${t('Pays')}</label><select id="country" name="country">${cOpts}</select></div><div><label for="tz">${t('Fuseau horaire')}</label><select id="tz" name="tz">${tzOpts}</select></div></div>
   <div class="g2"><div><label for="currency">${t('Devise des prix')}</label><select id="currency" name="currency">${CURRENCIES.map((c) => `<option ${tn.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div><div><label for="lang">${t('Langue du site')}</label><select id="lang" name="lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${tn.lang === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>
   <div class="g2"><div><label for="city">${t('Ville')}</label><input id="city" name="city" value="${esc(tn.city)}" maxlength="60"></div><div><label for="color">${t('Couleur')}</label><input id="color" name="color" type="color" value="${esc(tn.color)}"></div></div>
