@@ -578,5 +578,18 @@
  "J’accepte les CGV, dont l’engagement de 12 mois": "I accept the terms of sale, including the 12-month commitment",
  "Cochez l’acceptation des CGV (engagement de 12 mois) pour continuer.": "Please accept the terms of sale (12-month commitment) to continue.",
  "Indicatif": "Country code",
- "Ce numéro est enregistré avec l’indicatif +33 alors que son préfixe est celui d’un département d’Outre-mer. Vérifiez-le : il n’est pas modifié sans votre accord.": "This number is stored with the +33 code although its prefix belongs to a French overseas territory. Please check it: it is never changed without your consent."
+ "Ce numéro est enregistré avec l’indicatif +33 alors que son préfixe est celui d’un département d’Outre-mer. Vérifiez-le : il n’est pas modifié sans votre accord.": "This number is stored with the +33 code although its prefix belongs to a French overseas territory. Please check it: it is never changed without your consent.",
+ "Votre abonnement {f} est actif": "Your {f} subscription is active",
+ "Merci ! L’abonnement {f} de {t} est actif. Votre site reste en ligne sans interruption.": "Thank you! The {f} subscription for {t} is active. Your site stays online without interruption.",
+ "Factures et moyen de paiement : {u}": "Invoices and payment method: {u}",
+ "Paiement reçu : {m}": "Payment received: {m}",
+ "Nous avons bien reçu votre paiement de {m} pour {t}.": "We have received your payment of {m} for {t}.",
+ "Votre facture : {u}": "Your invoice: {u}",
+ "Votre abonnement est résilié": "Your subscription has been cancelled",
+ "L’abonnement de {t} est résilié. Vos données restent disponibles ; vous pouvez reprendre une formule à tout moment : {u}": "The subscription for {t} has been cancelled. Your data remains available; you can pick a plan again at any time: {u}",
+ "Votre engagement se renouvelle le {d}": "Your commitment renews on {d}",
+ "La période d’engagement de 12 mois de {t} se termine le {d}. Sans action de votre part, l’abonnement se poursuit aux mêmes conditions.": "The 12-month commitment period for {t} ends on {d}. If you do nothing, the subscription continues on the same terms.",
+ "Gérer votre abonnement : {u}": "Manage your subscription: {u}",
+ "Votre site est en pause": "Your site is paused",
+ "Le paiement de l’abonnement de {t} n’a pas été régularisé : le site est en pause. Il revient en ligne dès le paiement : {u}": "The subscription payment for {t} has not been settled: the site is paused. It comes back online as soon as payment is made: {u}"
 }

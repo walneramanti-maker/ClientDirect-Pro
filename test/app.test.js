@@ -171,9 +171,10 @@ test('envois : e-mail Brevo et WhatsApp, nouvelles tentatives puis incident', as
   assert.equal(wa.template.name, 'rdv_rappel'); assert.equal(wa.template.components[0].parameters.length, 4);
   const id = enqueue(db, { channel: 'email', to: 'fail@x.fr', template: 'welcome', payload: {} });
   mock(() => jsonResponse({ message: 'down' }, 500));
-  for (let i = 0; i < 5; i++) { db.run('UPDATE outbox SET next_at=0 WHERE id=?', id); await processOutbox(db); }
+  // Panne prolongée de Brevo : 8 essais espacés (≈ 16 h) avant abandon, puis incident
+  for (let i = 0; i < 8; i++) { db.run('UPDATE outbox SET next_at=0 WHERE id=?', id); await processOutbox(db); }
   const row = db.one('SELECT * FROM outbox WHERE id=?', id);
-  assert.equal(row.status, 'failed'); assert.equal(row.attempts, 5);
+  assert.equal(row.status, 'failed'); assert.equal(row.attempts, 8);
   assert.ok(db.one("SELECT * FROM incidents WHERE kind='send_email'"));
 });
 

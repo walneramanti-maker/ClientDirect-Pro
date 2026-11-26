@@ -1,5 +1,5 @@
 import { net } from './net.js';
-import { config } from './config.js';
+import { config, PLANS, planHas } from './config.js';
 import { processOutbox, enqueue, apptPayload } from './notify.js';
 import { openIncidents, recordIncident } from './incidents.js';
 import { loadTenant } from './tenants.js';
@@ -24,6 +24,8 @@ export async function runJobs(db, now = Date.now()) {
   const cache = new Map();
   for (const a of due) {
     let t = cache.get(a.tenant_id); if (!t) { t = loadTenant(db, 'id', a.tenant_id); cache.set(a.tenant_id, t); }
+    // Rappels : seulement pour les formules qui les incluent (Pro, Premium)
+    if (!planHas(t.plan, 'rappels')) { db.run('UPDATE appointments SET reminded_at=? WHERE id=?', now, a.id); continue; }
     const p = apptPayload(t, a, null);
     if (a.customer_email) enqueue(db, { tenantId: t.id, channel: 'email', to: a.customer_email, template: 'appt_reminder', payload: p });
     enqueue(db, { tenantId: t.id, channel: 'whatsapp', to: a.customer_phone, template: 'appt_reminder', payload: p });
@@ -36,7 +38,15 @@ export async function runJobs(db, now = Date.now()) {
     r.trialNotices++;
   }
   // 3. Impayés au-delà du délai de grâce : site en pause
-  r.paused = Number(db.run("UPDATE tenants SET status='paused' WHERE status='past_due' AND COALESCE(current_period_end,0) + ? < ?", config.graceDays * 864e5, now).changes);
+  { const toPause = db.all("SELECT t.id, t.name, t.lang, t.current_period_end, u.email FROM tenants t LEFT JOIN users u ON u.id=t.owner_user_id WHERE t.status='past_due' AND COALESCE(t.current_period_end,0) + ? < ?", config.graceDays * 864e5, now);
+    r.paused = Number(db.run("UPDATE tenants SET status='paused' WHERE status='past_due' AND COALESCE(current_period_end,0) + ? < ?", config.graceDays * 864e5, now).changes);
+    for (const t of toPause) if (t.email) enqueue(db, { tenantId: t.id, channel: 'email', to: t.email, template: 'site_paused', key: `pause:${t.id}:${t.current_period_end || 0}`, payload: { lang: t.lang, tenant: t.name, billingUrl: `${config.baseUrl}/pro/abonnement` } }); }
+  // 3 bis. Fin de l'engagement de 12 mois (date anniversaire du premier paiement) : prévenir 30 jours avant, une fois par année
+  for (const t of db.all("SELECT t.id, t.name, t.lang, u.email, MIN(i.paid_at) first FROM tenants t JOIN invoices i ON i.tenant_id=t.id AND i.status='paid' JOIN users u ON u.id=t.owner_user_id WHERE t.status IN ('active','past_due') GROUP BY t.id")) {
+    const d0 = new Date(t.first); let y = 1, end;
+    do { end = Date.UTC(d0.getUTCFullYear() + y, d0.getUTCMonth(), d0.getUTCDate()); y++; } while (end < now);
+    if (end - now <= 30 * 864e5) enqueue(db, { tenantId: t.id, channel: 'email', to: t.email, template: 'renewal_reminder', key: `renouvellement:${t.id}:${new Date(end).toISOString().slice(0, 10)}`, payload: { lang: t.lang, tenant: t.name, renewal: new Date(end).toLocaleDateString(t.lang === 'en' ? 'en-US' : 'fr-FR', { timeZone: 'UTC' }), billingUrl: `${config.baseUrl}/pro/abonnement` } });
+  }
   // 4. Tickets répondus sans retour depuis 7 jours : fermés
   r.closed = Number(db.run("UPDATE tickets SET status='closed' WHERE status='answered' AND updated_at < ?", now - 7 * 864e5).changes);
   // 5. Envois en attente

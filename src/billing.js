@@ -3,6 +3,7 @@ import { onInvoicePaid, onRefund } from './rewards.js';
 import { config, PLANS } from './config.js';
 import { net } from './net.js';
 import { safeEq } from './util.js';
+import { money } from './markets.js';
 import { enqueue, emit } from './notify.js';
 import { recordIncident } from './incidents.js';
 import { audit } from './security.js';
@@ -137,6 +138,11 @@ export const tenantFrom = (db, obj, type = '') => {
   return t;
 };
 
+/** E-mail au titulaire du compte (une seule fois par clé, même si Stripe renvoie l'événement). */
+function mailOwner(db, t, template, payload, key) {
+  const owner = db.one('SELECT email FROM users WHERE id=?', t.owner_user_id); if (!owner) return;
+  enqueue(db, { tenantId: t.id, channel: 'email', to: owner.email, template, key, payload: { lang: t.lang, tenant: t.name, billingUrl: `${config.baseUrl}/pro/abonnement`, ...payload } });
+}
 /** Traite un événement Stripe vérifié. Idempotent : un même événement n'est appliqué qu'une fois. */
 export function handleStripeEvent(db, ev) {
   if (!ev?.id || !ev?.type) return { ok: false };
@@ -149,7 +155,8 @@ export function handleStripeEvent(db, ev) {
       case 'checkout.session.completed': {
         const plan = PLANS[o.metadata?.plan] ? o.metadata.plan : t.plan;
         db.run("UPDATE tenants SET status='active', plan=?, stripe_customer=COALESCE(?,stripe_customer), stripe_sub=COALESCE(?,stripe_sub) WHERE id=?", plan, o.customer || null, o.subscription || null, t.id);
-        audit(db, { tenantId: t.id, action: 'abonnement.active', detail: plan }); break;
+        audit(db, { tenantId: t.id, action: 'abonnement.active', detail: plan });
+        mailOwner(db, t, 'subscription_confirmed', { plan: PLANS[plan].name }, `abonnement:${t.id}:${o.id}`); break;
       }
       case 'invoice.paid': case 'invoice.payment_succeeded': {
         const end = (o.lines?.data?.[0]?.period?.end || o.period_end || 0) * 1000 || null;
@@ -157,7 +164,8 @@ export function handleStripeEvent(db, ev) {
           ON CONFLICT(stripe_invoice) DO UPDATE SET status=excluded.status, paid_at=excluded.paid_at`, t.id, o.id, Number(o.amount_paid || 0), o.currency || 'eur', 'paid', now, now);
         db.run("UPDATE tenants SET status='active', current_period_end=COALESCE(?,current_period_end) WHERE id=?", end, t.id);
         emit(db, 'paiement_recu', { entreprise: t.name, montant_eur: Number(o.amount_paid || 0) / 100, facture: o.id }, t.id);
-        onInvoicePaid(db, db.one('SELECT * FROM tenants WHERE id=?', t.id), o, now); break;
+        onInvoicePaid(db, db.one('SELECT * FROM tenants WHERE id=?', t.id), o, now);
+        if (Number(o.amount_paid || 0) > 0) mailOwner(db, t, 'payment_receipt', { amount: money(Number(o.amount_paid) / 100, String(o.currency || 'eur').toUpperCase(), t.lang === 'en' ? 'en-US' : 'fr-FR'), invoiceUrl: o.hosted_invoice_url || '' }, `recu:${o.id}`); break;
       }
       case 'charge.refunded': {
         const n = onRefund(db, o.invoice, now);
@@ -166,7 +174,7 @@ export function handleStripeEvent(db, ev) {
       case 'invoice.payment_failed': {
         db.run("UPDATE tenants SET status='past_due' WHERE id=?", t.id);
         const owner = db.one('SELECT u.email FROM users u WHERE u.id=?', t.owner_user_id);
-        if (owner) enqueue(db, { tenantId: t.id, channel: 'email', to: owner.email, template: 'payment_failed', payload: { lang: t.lang, tenant: t.name, billingUrl: `${config.baseUrl}/pro/abonnement` } });
+        if (owner) enqueue(db, { tenantId: t.id, channel: 'email', to: owner.email, template: 'payment_failed', key: `echec:${o.id || ev.id}`, payload: { lang: t.lang, tenant: t.name, billingUrl: `${config.baseUrl}/pro/abonnement` } });
         recordIncident(db, { kind: 'billing', severity: 'info', message: `Paiement échoué : ${t.name}`, tenantId: t.id });
         emit(db, 'paiement_echoue', { entreprise: t.name, email: owner?.email || '' }, t.id); break;
       }
@@ -175,7 +183,8 @@ export function handleStripeEvent(db, ev) {
         db.run('UPDATE tenants SET status=?, plan=?, stripe_sub=?, current_period_end=COALESCE(?,current_period_end) WHERE id=?', st, plan, o.id || t.stripe_sub, o.current_period_end ? o.current_period_end * 1000 : null, t.id); break;
       }
       case 'customer.subscription.deleted':
-        db.run("UPDATE tenants SET status='canceled' WHERE id=?", t.id); audit(db, { tenantId: t.id, action: 'abonnement.resilie' }); break;
+        db.run("UPDATE tenants SET status='canceled' WHERE id=?", t.id); audit(db, { tenantId: t.id, action: 'abonnement.resilie' });
+        mailOwner(db, t, 'subscription_canceled', {}, `resiliation:${t.id}:${o.id || ev.id}`); break;
       default: break;
     }
   });

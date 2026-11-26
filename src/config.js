@@ -41,6 +41,12 @@ export const config = {
   // E-mail (Brevo)
   brevoKey: env.BREVO_API_KEY || '',
   mailFrom: env.MAIL_FROM || 'ClientDirect Pro <no-reply@example.com>',
+  // Adresse de réponse des e-mails de la plateforme (les e-mails d'un professionnel à ses clients répondent au professionnel)
+  mailReplyTo: env.MAIL_REPLY_TO || env.LEGAL_EMAIL || '',
+  // Plafond quotidien d'e-mails transactionnels (Brevo gratuit : 300/jour PARTAGÉS avec les autres projets du compte)
+  emailDailyMax: num(env.EMAIL_DAILY_MAX, 200),
+  // Liste blanche d'e-mails (adresses ou @domaines) appliquée même en production : tests réels avant ouverture complète
+  emailAllowlist: String(env.EMAIL_ALLOWLIST || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
   adminEmail: env.ADMIN_EMAIL || '',
   // WhatsApp Cloud API (Meta)
   waToken: env.WHATSAPP_TOKEN || '',

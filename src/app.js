@@ -14,7 +14,7 @@ import { isDial, toE164, domCountryOf, phoneValid } from './phone.js';
 import { hashPassword, passwordProblem, createSession, readSession, destroySession, destroyUserSessions, csrfOk, issueToken, useToken, totpOk, rateLimit, login, audit } from './security.js';
 import { createTenant, loadTenant, siteState, updateSettings, userTenants } from './tenants.js';
 import { freeSlots, openDays, book, createQuote, setAppointmentStatus, cancelByCustomer } from './booking.js';
-import { notifyAppointment, enqueue, emit } from './notify.js';
+import { notifyAppointment, enqueue, emit, sampleEmails, renderEmail, esc, emailsSentToday } from './notify.js';
 import { answer, aiAvailable, ruleAnswer, aiCostEur } from './ai.js';
 import { billingConfigured, createCheckout, createPortal, verifyStripeSignature, handleStripeEvent, useDb, isTestKey } from './billing.js';
 import { safeSearch, importProspects, prepareDemo, outreachMessage, demoTenantByToken, recordDemoView, prospectStats, PIPELINE, runNationalCampaign, campaignStatus, demoTokenFor, displayName } from './prospect.js';
@@ -181,6 +181,8 @@ export function createApp(db) {
     { const w = db.one('SELECT type, received_at FROM webhook_events ORDER BY received_at DESC LIMIT 1'); ready.dernierEvenementStripe = w ? { type: w.type, at: new Date(w.received_at).toISOString() } : null; }
     ready.facturesPayees = db.one("SELECT COUNT(*) n FROM invoices WHERE status='paid'").n;
     ready.disque = diskUsage();
+    ready.emails = { cleBrevo: !!config.brevoKey, expediteur: config.mailFrom.replace(/^.*<|>$/g, ''), envoyesAujourdhui: emailsSentToday(db), plafondJour: config.emailDailyMax,
+      enAttente: db.one("SELECT COUNT(*) n FROM outbox WHERE channel='email' AND status='pending'").n, echecs24h: db.one("SELECT COUNT(*) n FROM outbox WHERE channel='email' AND status='failed' AND created_at>?", Date.now() - 864e5).n, listeBlanche: config.emailAllowlist.length > 0 };
     if (!config.isProd) { let a = null; try { a = JSON.parse(db.one("SELECT v FROM meta WHERE k='autotest_last'")?.v || 'null'); } catch { a = null; } ready.autotest = a ? { at: a.at, ok: a.ok, formules: a.formules.map((f) => `${f.formule} : ${f.ok ? 'réussi' : 'échec'}`) } : null; }
     { const b = backupHealth(db); ready.sauvegardes = { ok: b.ok, problemes: b.problems, echecsDepuisDerniereReussite: b.failedSince, testRestauration: b.verified ? { ok: b.verified.ok, at: b.verified.at, fichier: b.verified.name, erreur: b.verified.error || null, contenu: b.verified.backup || null } : null }; }
     { const pot = db.all("SELECT CASE WHEN potential>=75 THEN 'A' WHEN potential>=50 THEN 'B' ELSE 'C' END cl, COUNT(*) n FROM prospects WHERE status='new' AND (phone IS NOT NULL OR email IS NOT NULL) GROUP BY cl"); ready.potentielJoignables = Object.fromEntries(pot.map((r) => [r.cl, r.n])); }
@@ -241,6 +243,7 @@ export function createApp(db) {
     enqueue(db, { tenantId, channel: 'email', to: email, template: 'verify_email', payload: { lang: ulang, url: `${config.baseUrl}/verifier/${vt}` } });
     enqueue(db, { tenantId, channel: 'email', to: email, template: 'welcome', payload: { lang: ulang, tenant: t.name, siteUrl: `${config.baseUrl}/s/${t.slug}`, dashUrl: `${config.baseUrl}/pro`, trialEnd: new Date(t.trial_ends_at).toLocaleDateString(ulang === 'fr' ? 'fr-FR' : 'en-US') } });
     audit(db, { userId, tenantId, action: demo ? 'inscription.demo' : 'inscription', ip: c.ip });
+    if (config.adminEmail && !/^(autotest|utm:controle)/.test(c.source || '')) enqueue(db, { channel: 'email', to: config.adminEmail, template: 'admin_new_signup', key: `inscription:${tenantId}`, payload: { lang: 'fr', tenant: t.name, metier: t.metier, city: t.city, plan: t.plan, source: c.source, at: new Date().toLocaleString('fr-FR', { timeZone: 'America/Cayenne' }) + ' (Guyane)', siteUrl: `${config.baseUrl}/s/${t.slug}`, adminUrl: `${config.baseUrl}/admin` } });
     emit(db, 'inscription', { entreprise: t.name, metier: t.metier, ville: t.city, formule: t.plan, email, nom: name, depuis_demo: !!demo, site: `${config.baseUrl}/s/${t.slug}` }, tenantId);
     const s = createSession(db, userId);
     redirect(c.res, '/pro?bienvenue=1', { 'Set-Cookie': cookie(SESSION, s.token, { maxAge: 30 * 86400 }) });
@@ -547,6 +550,9 @@ export function createApp(db) {
       prospects: { found: pr.found || 0, viewed: db.one("SELECT COALESCE(SUM(n),0) n FROM visits_source WHERE source='demo' AND day BETWEEN ? AND ?", fromIso, toIso).n, converted: pr.converted || 0, optout: pr.optout || 0, depts: pr.depts || 0 }
     };
   }
+  // Aperçu des e-mails (modèles avec un contenu d'exemple) : validation de la présentation sans aucun envoi
+  on('GET', '/admin/emails', (c) => { requireAdmin(c); const list = Object.keys(sampleEmails()); html(c.res, `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Aperçu des e-mails</title><link rel="stylesheet" href="/static/app.css"></head><body><main class="wrap"><h1>Aperçu des e-mails</h1><p class="muted">Contenu d'exemple, aucun envoi. Expéditeur : ${esc(config.mailFrom)} · réponse : ${esc(config.mailReplyTo || '—')} · plafond : ${config.emailDailyMax}/jour${config.emailAllowlist.length ? ` · liste blanche : ${esc(config.emailAllowlist.join(', '))}` : ''}</p><ul>${list.map((k) => `<li><a href="/admin/emails/${k}">${k}</a></li>`).join('')}</ul></main></body></html>`); });
+  on('GET', '/admin/emails/:tpl', (c) => { requireAdmin(c); const p = sampleEmails()[c.params.tpl]; if (!p) throw HttpError(404, 'Modèle inconnu'); const m = renderEmail(c.params.tpl, p); html(c.res, m.html.replace('<body', `<body data-subject="${esc(m.subject)}" data-from="${esc(m.fromName || 'ClientDirect Pro')}"`)); });
   on('GET', '/admin/campagnes', (c) => { requireAdmin(c); html(c.res, V.adminCampaigns(csrfToken(c), { list: db.all('SELECT * FROM campaigns ORDER BY id DESC LIMIT 200') })); });
   on('POST', '/admin/campagnes', (c) => {
     requireAdmin(c); checkCsrf(c);

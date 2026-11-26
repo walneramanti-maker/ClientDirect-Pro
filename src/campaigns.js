@@ -87,7 +87,10 @@ function businessHours(p, now) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', hour: 'numeric', hour12: false }).formatToParts(new Date(now)).map((x) => [x.type, x.value]));
   const h = Number(parts.hour) % 24; return !['Sat', 'Sun'].includes(parts.weekday) && h >= 9 && h < 18;
 }
-export function sendingReady() { const s = config.smtp; return config.campaignSending && !!(s.host && s.user && s.pass && s.from); }
+/** Les campagnes de prospection ne passent JAMAIS par Brevo (règles anti-spam de Brevo : contacts sans consentement
+ * interdits ; un blocage du compte toucherait aussi les e-mails transactionnels et les autres projets du compte). */
+export const brevoRelay = (host) => /(^|\.)brevo\.com$|sendinblue/i.test(String(host || ''));
+export function sendingReady() { const s = config.smtp; return config.campaignSending && !!(s.host && s.user && s.pass && s.from) && !brevoRelay(s.host); }
 export function sentToday(db, now = Date.now()) { return db.one('SELECT COUNT(*) n FROM campaign_items WHERE sent_at>=?', now - (now % 864e5)).n; }
 /**
  * Envoie AU PLUS UN e-mail par passage, espacés d'au moins CAMPAIGN_GAP_MIN minutes, sous le plafond quotidien,
