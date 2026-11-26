@@ -118,3 +118,28 @@ export async function sendNext(db, { now = Date.now(), send = sendMail } = {}) {
   }
   return { skipped: 'rien à envoyer à cette heure' };
 }
+
+/** Préfixe des campagnes préparées automatiquement (régénérées chaque jour tant qu'elles ne sont pas validées). */
+export const AUTO_PREFIX = 'Préparée automatiquement';
+/**
+ * Prépare les campagnes en brouillon, sans jamais les valider ni les envoyer : e-mail (potentiel ≥ 50) et appels (potentiel ≥ 75).
+ * Les brouillons automatiques encore non validés sont recréés à chaque passage : prospects à jour, opposition respectée,
+ * liens de démonstration construits sur l'adresse actuelle du site (ex. après le passage au nom de domaine définitif).
+ * Une campagne validée par l'administrateur n'est jamais modifiée.
+ */
+export function prepareDrafts(db, now = Date.now()) {
+  // Une entreprise n'est que dans une campagne à la fois : les appels (potentiel A) d'abord, les e-mails pour les autres
+  const plans = [
+    { channel: 'appel', minPotential: 75, size: 300, label: 'appels, potentiel A' },
+    { channel: 'email', minPotential: 50, size: 500, label: 'e-mails, potentiel A et B' }
+  ];
+  const out = {};
+  db.run("UPDATE campaigns SET status='canceled' WHERE status='draft' AND name LIKE ?", `${AUTO_PREFIX}%`);
+  for (const p of plans) {
+    try {
+      const id = createCampaign(db, { name: `${AUTO_PREFIX} : ${p.label} (${new Date(now).toISOString().slice(0, 10)})`, channel: p.channel, minPotential: p.minPotential, size: p.size }, now);
+      out[p.channel] = { brouillon: id, entreprises: db.one('SELECT COUNT(*) n FROM campaign_items WHERE campaign_id=?', id).n };
+    } catch (e) { out[p.channel] = { aucune: e.message }; }
+  }
+  return out;
+}

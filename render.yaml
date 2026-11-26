@@ -83,17 +83,19 @@ services:
       - key: LEGAL_ADDRESS
         sync: false
       - key: LEGAL_EMAIL
-        sync: false
+        value: contact@clientdirectpro.fr
       - key: LEGAL_PHONE
         sync: false
       # Ex. « TVA non applicable, article 293 B du CGI » (franchise en base) ou le numéro de TVA : à confirmer avec votre comptable
       - key: LEGAL_VAT
         sync: false
-      # Alertes techniques et e-mails transactionnels (Brevo, offre gratuite)
+      # Alertes techniques et e-mails transactionnels (Brevo, offre gratuite). Clé dédiée « ClientDirect Pro » :
+      # l'application n'utilise que l'envoi transactionnel (aucun contact ni liste créés), Ti-Job n'est pas touché.
       - key: BREVO_API_KEY
         sync: false
+      # Expéditeur des e-mails (domaine à authentifier dans Brevo : enregistrements DKIM et DMARC fournis par Brevo)
       - key: MAIL_FROM
-        sync: false
+        value: ClientDirect Pro <contact@clientdirectpro.fr>
       # Envoi des campagnes validées depuis la boîte du domaine (désactivé tant que CAMPAIGN_SENDING n'est pas « on »)
       - key: SMTP_HOST
         sync: false

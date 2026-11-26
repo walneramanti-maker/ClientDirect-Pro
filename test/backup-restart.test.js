@@ -107,3 +107,63 @@ test('migration recette → production : reprise de la sauvegarde vérifiée, un
   assert.doesNotMatch(srv.log(), /Migration réussie/); assert.match(srv.log(), /Base restaurée depuis cdp-/);
   await stop(srv);
 });
+test('répétition de la migration recette → production : toutes les tables identiques, sauvegardes de la recette intactes', async () => {
+  store.clear(); fs.rmSync(path.join(dir, 'data'), { recursive: true, force: true });
+  let srv = await start();
+  const c = makeClient(`http://127.0.0.1:${port}`);
+  await c.submit('/inscription', '/inscription', { business: 'Garage Répétition', tpl: 'garage', city: 'Cayenne', country: 'GF', tz: 'America/Cayenne', phone: '0694 12 34 56', plan: 'pro', name: 'R', email: 'repetition@test.fr', password: 'Repetition2026', cgu: 'on' });
+  await stop(srv);
+  // Données de toutes natures, comme sur le serveur de recette : réglages, rendez-vous, devis, prospects, campagnes, factures, opposition
+  { const { DatabaseSync } = await import('node:sqlite'); const d = new DatabaseSync(path.join(dir, 'data', 'cdp.db')); const now = Date.now();
+    const t = d.prepare("SELECT id FROM tenants WHERE slug='garage-repetition'").get().id;
+    d.prepare("UPDATE tenants SET lead='Accueil personnalisé', faq='CB et espèces', color='#112233', auto_confirm=1 WHERE id=?").run(t);
+    d.prepare("INSERT INTO appointments(tenant_id,service_name,date,time,start_min,dur,staff_id,staff_name,customer_name,customer_phone,customer_email,status,starts_at,created_at) VALUES(?,'Vidange','2030-01-02','09:00',540,60,1,'P','Client R','594694000002','c@r.fr','confirmed',?,?)").run(t, now + 864e5, now);
+    d.prepare("INSERT INTO quotes(tenant_id,customer_name,customer_phone,customer_email,created_at) VALUES(?,'Devis R','33612345678','',?)").run(t, now);
+    d.prepare("INSERT INTO invoices(tenant_id,stripe_invoice,amount_cents,currency,status,paid_at,created_at) VALUES(?,'in_r',54800,'eur','paid',?,?)").run(t, now, now);
+    for (let i = 0; i < 25; i++) d.prepare("INSERT INTO prospects(siren,name,tpl,city,postal,dept,status,score,potential,phone,email,created_at) VALUES(?,?,?,?,?,?,'new',5,80,?,?,?)").run(String(700000000 + i), `PROSPECT ${i}`, 'garage', 'CAYENNE', '97300', '973', `+59459400${String(i).padStart(4, '0')}`, `p${i}@x.fr`, now);
+    d.prepare("INSERT INTO campaigns(name,channel,filters,size,status,created_at) VALUES('Campagne R','email','{}',25,'draft',?)").run(now);
+    d.prepare("INSERT INTO meta(k,v) VALUES('launch_date','2026-11-26') ON CONFLICT(k) DO UPDATE SET v=excluded.v").run();
+    d.prepare("INSERT INTO meta(k,v) VALUES('stripe_price_pro_EUR_month','price_test_x') ON CONFLICT(k) DO UPDATE SET v=excluded.v").run();
+    d.close(); }
+  srv = await start({ RESTORE_ON_BOOT: '0', DISABLE_JOBS: '1' }); await stop(srv); // sauvegarde de recette à l'arrêt
+  const dbFile = path.join(dir, 'data', 'cdp.db');
+  const { DatabaseSync } = await import('node:sqlite');
+  const dump = (file) => { const d = new DatabaseSync(file); const tables = d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+    const o = Object.fromEntries(tables.map((tb) => [tb, d.prepare(`SELECT * FROM ${tb} ORDER BY rowid`).all().map((r) => JSON.stringify(r))])); d.close(); return o; };
+  const before = dump(dbFile);
+  const stagingKeys = [...store.keys()].filter((k) => k.startsWith('backups/development/')).sort();
+  const name = stagingKeys.map((k) => k.split('/').pop()).sort().pop();
+  fs.rmSync(path.join(dir, 'data'), { recursive: true, force: true }); // serveur permanent neuf : disque vide
+  // Migration seule (sans démarrer le serveur ni les tâches) pour comparer exactement la base obtenue
+  const env = { ...ENV(), APP_ENV: 'production', NODE_ENV: 'production' };
+  const code = `import('./src/backup.js').then(async (b) => { const r = await b.migrateFrom(process.env.DB_PATH, { fromEnv: 'development', name: ${JSON.stringify(name)} }); console.log(JSON.stringify(r)); })`;
+  const out = await new Promise((ok, ko) => { const p = spawn(process.execPath, ['--no-warnings', '-e', code], { env, stdio: ['ignore', 'pipe', 'pipe'] }); let s = ''; p.stdout.on('data', (x) => (s += x)); p.stderr.on('data', (x) => (s += x)); p.on('exit', (e) => (e === 0 ? ok(s) : ko(new Error(s)))); });
+  assert.match(out, /"comptes":\d+/);
+  const after = dump(dbFile);
+  // Référence exacte : la sauvegarde de recette restaurée telle quelle (même procédure qu'un redémarrage de la recette)
+  const refFile = path.join(dir, 'reference', 'cdp.db'); fs.mkdirSync(path.dirname(refFile), { recursive: true });
+  const code2 = `import('./src/backup.js').then(async (b) => { await b.restore(process.env.DB_PATH, { name: ${JSON.stringify(name)} }); })`;
+  await new Promise((ok, ko) => { const p = spawn(process.execPath, ['--no-warnings', '-e', code2], { env: { ...ENV(), DB_PATH: refFile }, stdio: ['ignore', 'pipe', 'pipe'] }); let s = ''; p.stderr.on('data', (x) => (s += x)); p.on('exit', (e) => (e === 0 ? ok() : ko(new Error(s)))); });
+  const backup = dump(refFile);
+  // Rien de la recette n'est perdu : chaque ligne métier de la base vivante est dans la sauvegarde
+  for (const tb of ['users', 'tenants', 'memberships', 'services', 'staff', 'hours', 'appointments', 'quotes', 'invoices', 'prospects', 'campaigns', 'campaign_items', 'partners', 'rewards', 'suppressions', 'contacts', 'tickets'])
+    assert.deepEqual(backup[tb], before[tb], `sauvegarde complète : ${tb} (${before[tb].length} lignes)`);
+  assert.deepEqual(Object.keys(after), Object.keys(before), 'mêmes tables');
+  // Base de production = sauvegarde de recette, table par table, ligne par ligne
+  for (const tb of Object.keys(backup)) if (tb !== 'meta') assert.deepEqual(after[tb], backup[tb], `table ${tb} identique (${backup[tb].length} lignes)`);
+  const meta = (rows) => Object.fromEntries(rows.map((r) => JSON.parse(r)).map((r) => [r.k, r.v]));
+  const mb = meta(backup.meta); const ma = meta(after.meta);
+  for (const [k, v] of Object.entries(mb)) {
+    if (k === 'app_env') assert.equal(ma[k], 'production');
+    else if (k.startsWith('stripe_')) assert.equal(ma[k], undefined, `${k} (mode test) retiré`);
+    else assert.equal(ma[k], v, `réglage ${k} conservé`);
+  }
+  assert.match(ma.migrated_from, new RegExp(`^development/${name}`));
+  assert.ok(before.tenants.length >= 1 && before.prospects.length >= 25 && before.invoices.length >= 1 && before.campaigns.length >= 1);
+  // Démarrage du serveur permanent sur la base migrée, puis sauvegarde dans son propre espace : la recette n'est jamais touchée
+  srv = await start({ APP_ENV: 'production', NODE_ENV: 'production', BASE_URL: 'https://clientdirectpro.example', APP_SECRET: 's'.repeat(40), DISABLE_JOBS: '1' });
+  assert.equal((await fetch(`http://127.0.0.1:${port}/s/garage-repetition`)).status, 200);
+  await stop(srv);
+  assert.deepEqual([...store.keys()].filter((k) => k.startsWith('backups/development/')).sort(), stagingKeys, 'sauvegardes de la recette intactes');
+  assert.ok([...store.keys()].some((k) => k.startsWith('backups/production/')), 'la production a ses propres sauvegardes');
+});

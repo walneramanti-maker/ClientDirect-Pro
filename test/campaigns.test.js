@@ -55,3 +55,23 @@ test('campagne : sélection par critères, message conforme, validation groupée
   assert.match(db.one('SELECT message FROM campaign_items WHERE campaign_id=? LIMIT 1', call).message, /je ne vous rappellerai pas/);
   assert.equal((await app.client().get('/admin/campagnes')).status === 200, false, 'réservé à l’administrateur');
 });
+
+test('campagnes préparées automatiquement : brouillons régénérés chaque jour, jamais validés ni envoyés, campagne validée intacte', async () => {
+  db.run("UPDATE prospects SET potential=80 WHERE dept='62'"); db.run("UPDATE prospects SET potential=55 WHERE dept='973'");
+  const before = db.one("SELECT COUNT(*) n FROM campaign_items WHERE sent_at IS NOT NULL").n;
+  const r1 = C.prepareDrafts(db, Date.UTC(2026, 10, 26));
+  assert.ok(r1.email.brouillon && r1.appel.brouillon, JSON.stringify(r1));
+  const d1 = db.all("SELECT id, status, channel FROM campaigns WHERE name LIKE ?", `${C.AUTO_PREFIX}%`);
+  assert.deepEqual(d1.map((x) => x.status), ['draft', 'draft'], 'brouillons uniquement');
+  const msg = db.one('SELECT message FROM campaign_items WHERE campaign_id=? LIMIT 1', r1.email.brouillon).message; assert.match(msg, /\/demo\//);
+  // Le lendemain : anciens brouillons annulés et remplacés (liens et prospects à jour), toujours aucun envoi
+  const r2 = C.prepareDrafts(db, Date.UTC(2026, 10, 27));
+  assert.notEqual(r2.email.brouillon, r1.email.brouillon); assert.equal(r2.email.entreprises, r1.email.entreprises, 'mêmes entreprises reprises'); assert.equal(r2.appel.entreprises, r1.appel.entreprises);
+  const both = db.one('SELECT COUNT(*) n FROM campaign_items a JOIN campaign_items b ON a.prospect_id=b.prospect_id WHERE a.campaign_id=? AND b.campaign_id=?', r2.email.brouillon, r2.appel.brouillon).n; assert.equal(both, 0, 'jamais sollicitée deux fois');
+  assert.equal(db.one('SELECT status FROM campaigns WHERE id=?', r1.email.brouillon).status, 'canceled');
+  assert.equal(db.one("SELECT COUNT(*) n FROM campaigns WHERE name LIKE ? AND status='draft'", `${C.AUTO_PREFIX}%`).n, 2);
+  // Une campagne validée par l'administrateur n'est jamais touchée
+  C.approveCampaign(db, r2.appel.brouillon); C.prepareDrafts(db, Date.UTC(2026, 10, 28));
+  assert.equal(db.one('SELECT status FROM campaigns WHERE id=?', r2.appel.brouillon).status, 'approved');
+  assert.equal(db.one("SELECT COUNT(*) n FROM campaign_items WHERE sent_at IS NOT NULL").n, before, 'aucun envoi');
+});

@@ -1,0 +1,38 @@
+# Déploiement automatique : à chaque mise à jour de main, les tests sont lancés ; s'ils réussissent,
+# Render est prévenu par son lien de déploiement (secret RENDER_DEPLOY_HOOK_URL, jamais écrit dans le dépôt).
+# Sans ce secret, les tests tournent quand même et le déploiement est simplement signalé comme non configuré.
+name: Tests et déploiement
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --omit=dev --no-audit --no-fund
+      - run: npm test
+  deploiement:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Déclencher le déploiement Render
+        env:
+          HOOK_TEST: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          HOOK_PROD: ${{ secrets.RENDER_DEPLOY_HOOK_URL_PROD }}
+        run: |
+          n=0
+          for h in "$HOOK_TEST" "$HOOK_PROD"; do
+            [ -z "$h" ] && continue
+            curl -fsS --retry 3 -X POST "$h" -o /dev/null && n=$((n+1))
+          done
+          if [ "$n" -eq 0 ]; then echo "::warning::Aucun lien de déploiement Render (secrets RENDER_DEPLOY_HOOK_URL / RENDER_DEPLOY_HOOK_URL_PROD)"; else echo "Déploiement Render demandé ($n service(s)) pour ${GITHUB_SHA}"; fi
