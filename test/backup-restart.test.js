@@ -89,12 +89,18 @@ test('migration recette → production : reprise de la sauvegarde vérifiée, un
   const name = [...store.keys()].filter((k) => k.startsWith('backups/development/')).map((k) => k.split('/').pop()).sort().pop();
   fs.rmSync(path.join(dir, 'data'), { recursive: true, force: true }); // nouveau serveur, disque vide
   const PROD = { APP_ENV: 'production', NODE_ENV: 'production', BASE_URL: 'https://clientdirectpro.example', APP_SECRET: 's'.repeat(40), MIGRATE_FROM_ENV: 'development' };
+  // Production sans sauvegarde et sans migration : refus de démarrer avec une base vide
+  { const { MIGRATE_FROM_ENV, ...noMig } = PROD; const p = spawn(process.execPath, ['--no-warnings', 'src/server.js'], { env: ENV(noMig), stdio: ['ignore', 'pipe', 'pipe'] }); let out = ''; p.stderr.on('data', (d) => (out += d));
+    assert.equal(await new Promise((r) => p.on('exit', r)), 1); assert.match(out, /aucune sauvegarde et aucune migration configurée, démarrage refusé/); }
+  assert.equal(fs.existsSync(path.join(dir, 'data', 'cdp.db')), false);
   // Sans le nom exact de la sauvegarde : refus de démarrer, rien n'est créé
   { const p = spawn(process.execPath, ['--no-warnings', 'src/server.js'], { env: ENV(PROD), stdio: ['ignore', 'pipe', 'pipe'] }); let out = ''; p.stderr.on('data', (d) => (out += d));
     assert.equal(await new Promise((r) => p.on('exit', r)), 1); assert.match(out, /Migration impossible, démarrage refusé : MIGRATE_FROM_BACKUP manquant/); }
   assert.equal(fs.existsSync(path.join(dir, 'data', 'cdp.db')), false);
   srv = await start({ ...PROD, MIGRATE_FROM_BACKUP: name });
   assert.match(srv.log(), /Migration réussie depuis development\//);
+  assert.match(srv.log(), /Première sauvegarde « production » après migration : cdp-/);
+  assert.ok([...store.keys()].some((k) => k.startsWith('backups/production/')), 'sauvegarde de production créée dès le démarrage, avant tout arrêt');
   assert.equal((await fetch(`http://127.0.0.1:${port}/s/garage-migration`)).status, 200, 'le site du client est repris');
   const h = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   assert.equal(h.ready.stripeWebhook, false, 'le secret de webhook du mode test n’est pas repris');

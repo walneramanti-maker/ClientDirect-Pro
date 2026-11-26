@@ -21,12 +21,22 @@ if (config.restoreOnBoot && !fs.existsSync(config.dbPath)) {
       // Premier démarrage de la production : reprise de la sauvegarde vérifiée de la recette (MIGRATE_FROM_ENV + MIGRATE_FROM_BACKUP)
       try { const m = await migrateFrom(config.dbPath, { fromEnv: process.env.MIGRATE_FROM_ENV.trim(), name: (process.env.MIGRATE_FROM_BACKUP || '').trim() }); restoredFrom = m.migrated; console.log(`Migration réussie depuis ${m.migrated} : ${JSON.stringify(m.counts)}`); }
       catch (e2) { console.error(`Migration impossible, démarrage refusé : ${e2.message}`); process.exit(1); }
+    } else if (config.isProd && remoteConfigured() && process.env.FRESH_START !== '1') {
+      // Production sans sauvegarde ni migration : jamais de base vide implicite (données perdues sans que personne ne le voie)
+      console.error('Production : aucune sauvegarde et aucune migration configurée, démarrage refusé (FRESH_START=1 pour une base neuve volontaire).'); process.exit(1);
     } else console.log('Aucune sauvegarde : nouvelle base.');
   }
 }
 const db = openDb(config.dbPath, { appEnv: config.appEnv });
 // Trace de la dernière restauration, visible dans /health (preuve que la reprise après redémarrage fonctionne)
 if (restoredFrom) db.run("INSERT INTO meta(k,v) VALUES('restored_from',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", `${restoredFrom} @ ${new Date().toISOString()}`);
+// Après une migration : première sauvegarde de l'environnement cible IMMÉDIATEMENT, avant d'accepter le trafic.
+// Sans elle, un redéploiement (ou la maintenance, qui suspend les sauvegardes) laisserait l'espace de sauvegarde vide :
+// le serveur suivant repartirait d'une base neuve. En cas d'échec, démarrage refusé (l'ancien serveur reste en service).
+if (restoredFrom && process.env.MIGRATE_FROM_ENV && restoredFrom.startsWith(`${process.env.MIGRATE_FROM_ENV.trim()}/`) && remoteConfigured()) {
+  try { const b = await createBackup(db); console.log(`Première sauvegarde « ${config.appEnv} » après migration : ${b?.name || 'ok'}`); }
+  catch (e) { console.error(`Sauvegarde après migration impossible, démarrage refusé : ${e.message}`); db.close(); process.exit(1); }
+}
 // Premier démarrage sans accès console (hébergement sans terminal) : création du compte administrateur depuis les variables
 // ADMIN_LOGIN, ADMIN_PASSWORD et ADMIN_TOTP_SECRET, uniquement s'il n'existe encore aucun administrateur.
 if (process.env.ADMIN_LOGIN && process.env.ADMIN_PASSWORD && process.env.ADMIN_TOTP_SECRET && !db.one("SELECT 1 FROM users WHERE role='superadmin'")) {
@@ -51,10 +61,10 @@ setTimeout(() => import('./privacy.js').then(async ({ purgeTestTenant }) => {
   for (const id of ids) { try { const r = await purgeTestTenant(db, id); if (r) console.log(`Compte de test supprimé entièrement : ${r.slug}`); } catch (e) { console.log('Suppression du compte de test refusée :', e.message); break; } }
 }).catch((e) => console.error('Purge :', e.message)), 5000).unref?.();
 // Autotest de bout en bout des 3 formules (mode test Stripe, hors production) : AUTOTEST=1, au plus toutes les 6 heures
-if (process.env.AUTOTEST === '1') setTimeout(() => import('./selftest.js').then(async ({ runSelfTest, selfTestAllowed }) => {
+if (process.env.AUTOTEST === '1' || process.env.AUTOTEST === 'force') setTimeout(() => import('./selftest.js').then(async ({ runSelfTest, selfTestAllowed }) => {
   if (!selfTestAllowed()) return console.log('Autotest : refusé (clé Stripe réelle ou production)');
   const last = db.one("SELECT MAX(created_at) at FROM audit WHERE action='job.autotest'").at || 0;
-  if (Date.now() - last < 6 * 36e5) return console.log('Autotest : déjà effectué il y a moins de 6 h');
+  if (process.env.AUTOTEST !== 'force' && Date.now() - last < 6 * 36e5) return console.log('Autotest : déjà effectué il y a moins de 6 h');
   const r = await runSelfTest(db);
   for (const f of r.formules || []) console.log(`Autotest ${f.formule} : ${f.ok ? 'RÉUSSI' : 'ÉCHEC'} — ${f.etapes.map((e) => `${e.ok ? '✓' : '✗'} ${e.etape}${e.detail ? ' (' + e.detail + ')' : ''}`).join(' ; ')}`);
 }).catch((e) => console.error('Autotest :', e.message)), 25000).unref?.();
