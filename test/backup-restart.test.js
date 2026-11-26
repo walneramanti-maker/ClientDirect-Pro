@@ -142,9 +142,10 @@ test('répétition de la migration recette → production : toutes les tables id
   fs.rmSync(path.join(dir, 'data'), { recursive: true, force: true }); // serveur permanent neuf : disque vide
   // Migration seule (sans démarrer le serveur ni les tâches) pour comparer exactement la base obtenue
   const env = { ...ENV(), APP_ENV: 'production', NODE_ENV: 'production' };
-  const code = `import('./src/backup.js').then(async (b) => { const r = await b.migrateFrom(process.env.DB_PATH, { fromEnv: 'development', name: ${JSON.stringify(name)} }); console.log(JSON.stringify(r)); })`;
+  // « latest » désigne la plus récente sauvegarde de la recette : ici, celle prise à l'arrêt
+  const code = `import('./src/backup.js').then(async (b) => { const r = await b.migrateFrom(process.env.DB_PATH, { fromEnv: 'development', name: 'latest' }); console.log(JSON.stringify(r)); })`;
   const out = await new Promise((ok, ko) => { const p = spawn(process.execPath, ['--no-warnings', '-e', code], { env, stdio: ['ignore', 'pipe', 'pipe'] }); let s = ''; p.stdout.on('data', (x) => (s += x)); p.stderr.on('data', (x) => (s += x)); p.on('exit', (e) => (e === 0 ? ok(s) : ko(new Error(s)))); });
-  assert.match(out, /"comptes":\d+/);
+  assert.match(out, /"comptes":\d+/); assert.match(out, new RegExp(`"migrated":"development/${name}"`), 'latest = sauvegarde la plus récente');
   const after = dump(dbFile);
   // Référence exacte : la sauvegarde de recette restaurée telle quelle (même procédure qu'un redémarrage de la recette)
   const refFile = path.join(dir, 'reference', 'cdp.db'); fs.mkdirSync(path.dirname(refFile), { recursive: true });

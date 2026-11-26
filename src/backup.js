@@ -105,7 +105,9 @@ export async function migrateFrom(dbFile, { fromEnv, name }) {
   if (!name) throw new Error('MIGRATE_FROM_BACKUP manquant : indiquez la sauvegarde vérifiée à migrer');
   if (fs.existsSync(dbFile)) throw new Error('Migration refusée : une base existe déjà sur ce disque');
   if ((await list(dbFile)).length) throw new Error(`Migration refusée : l'environnement « ${config.appEnv} » a déjà des sauvegardes`);
-  if (!(await list(dbFile, fromEnv)).includes(name)) throw new Error(`Sauvegarde ${name} introuvable dans « ${fromEnv} »`);
+  // « latest » : la plus récente de l'environnement source (sa recette doit être en maintenance : plus aucune écriture)
+  if (name === 'latest') { name = (await list(dbFile, fromEnv))[0]; if (!name) throw new Error(`Aucune sauvegarde dans « ${fromEnv} »`); }
+  else if (!(await list(dbFile, fromEnv)).includes(name)) throw new Error(`Sauvegarde ${name} introuvable dans « ${fromEnv} »`);
   const raw = zlib.gunzipSync(decrypt(await get(name, dbFile, fromEnv), secretOf()));
   const tmp = `${dbFile}.migration`; fs.mkdirSync(path.dirname(path.resolve(dbFile)), { recursive: true }); fs.writeFileSync(tmp, raw);
   const db = new DatabaseSync(tmp);
