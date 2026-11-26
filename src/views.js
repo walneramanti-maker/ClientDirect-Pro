@@ -40,7 +40,7 @@ const IDEAL = { essentiel: 'Pour être trouvé et contacté facilement', pro: 'P
 export function planCards(cur, { action = null, csrf = '', current = null, disabled = false } = {}) {
   return `<div class="plans">${Object.keys(PLANS).map((k) => {
     const p = price(k, cur); const best = k === 'pro';
-    const cta = action ? `<form method="post" action="${action}">${csrfField(csrf)}<input type="hidden" name="plan" value="${k}"><button class="btn ${current === k || best ? 'blue' : 'ghost'} wide" type="submit" ${disabled ? 'disabled' : ''}>${t('Choisir {p}', { p: planName(k) })}</button></form>` : `<a class="btn ${best ? 'blue' : 'ghost'} wide" href="/inscription?formule=${k}">${t('Essayer gratuitement')}</a>`;
+    const cta = action ? `<form method="post" action="${action}">${csrfField(csrf)}<input type="hidden" name="plan" value="${k}"><label class="ck small"><input type="checkbox" name="cgv" required> ${t('J’accepte les CGV, dont l’engagement de 12 mois')} (<a href="/cgv" target="_blank" rel="noopener">${t('CGV')}</a>)</label><button class="btn ${current === k || best ? 'blue' : 'ghost'} wide" type="submit" ${disabled ? 'disabled' : ''}>${t('Choisir {p}', { p: planName(k) })}</button></form>` : `<a class="btn ${best ? 'blue' : 'ghost'} wide" href="/inscription?formule=${k}">${t('Essayer gratuitement')}</a>`;
     return `<div class="plan ${best ? 'best' : ''}">${best ? `<span class="ribbon">${t('Le plus choisi')}</span>` : ''}<h3>${planName(k)}</h3><p class="ideal">${t(IDEAL[k])}</p><div class="price">${p.m}<small> ${t('HT / mois')}</small></div><p class="muted small">${t('+ {s} HT de mise en service, une seule fois', { s: p.s })}</p>
       <ul class="feat">${FEATURES.filter(([f]) => has(k, f)).map(([, l]) => `<li>${ICON.check}<span>${t(l)}</span></li>`).join('')}</ul>${FEATURES.some(([f]) => !has(k, f)) ? `<p class="feat-off-title">${t('Non inclus')}</p><ul class="feat off-list">${FEATURES.filter(([f]) => !has(k, f)).map(([, l]) => `<li class="off">${ICON.no}<span>${t(l)}</span></li>`).join('')}</ul>` : `<p class="feat-all">${ICON.check}<span>${t('Toutes les fonctionnalités incluses')}</span></p>`}${cta}</div>`;
   }).join('')}</div>`;
@@ -257,7 +257,7 @@ export function legalPage(kind) {
   const [title, body] = pages[kind];
   return layout(t(title), `<header class="mk"><div class="wrap row"><a class="logo" href="/">ClientDirect Pro</a>${langSwitch('/' + kind)}</div></header><main class="band legal"><div class="wrap"><h1>${t(title)}</h1>${body}<p class="note">${t('Dernière mise à jour : 25 novembre 2026.')}</p></div></main>${FOOT()}`);
 }
-export { adminDashboard, adminTicket, adminProspects, adminProfit, adminReview, adminPartners, adminCampaigns, adminCampaign, adminReadiness } from './views-admin.js';
+export { adminDashboard, adminTicket, adminProspects, adminProfit, adminReview, adminPartners, adminCampaigns, adminCampaign, adminReadiness, adminDaily } from './views-admin.js';
 
 /** Pages par métier : point d'entrée naturel depuis Google (« site internet garage avec rendez-vous », etc.). */
 export function metiersIndex() {

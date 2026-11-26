@@ -95,6 +95,7 @@ export async function createCheckout(t, userEmail, plan) {
     customer: t.stripe_customer || undefined, customer_email: t.stripe_customer ? undefined : userEmail,
     metadata: { tenant_id: t.id, plan }, subscription_data: { metadata: { tenant_id: t.id, plan } },
     billing_address_collection: 'required', allow_promotion_codes: 'true',
+    custom_text: { submit: { message: t.lang === 'en' ? 'Subscription with a 12-month commitment (see terms of sale). Setup fee charged once.' : 'Abonnement avec engagement de 12 mois (voir CGV). Frais de mise en service facturés une seule fois.' } },
     success_url: `${config.baseUrl}/pro/abonnement?ok=1`, cancel_url: `${config.baseUrl}/pro/abonnement?annule=1`
   });
   return s.url;

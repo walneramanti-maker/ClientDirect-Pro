@@ -46,7 +46,7 @@ async function onePlan(db, plan, stamp) {
     if (!site.text.includes('id="devis"')) fail('Fonctions de la formule', 'formulaire de devis absent');
     ok('Site professionnel', `en ligne, devis ✓, rendez-vous ${hasRdv ? '✓' : '— (non inclus)'}`);
     const bill = await c.req('/pro/abonnement'); const tok = c.csrf(bill.text);
-    const co = await c.post('/pro/abonnement/checkout', { csrf: tok, plan });
+    const co = await c.post('/pro/abonnement/checkout', { csrf: tok, plan, cgv: 'on' });
     if (co.status !== 303 || !/^https:\/\/checkout\.stripe\.com\//.test(co.location || '')) fail('Page de paiement Stripe', `HTTP ${co.status} ${co.location || co.text.slice(0, 120)}`);
     ok('Page de paiement Stripe', 'générée (mode test)');
     // Paiement test : carte Visa de test Stripe, puis abonnement (mensualité + mise en service), comme après la page de paiement

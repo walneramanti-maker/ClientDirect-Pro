@@ -10,7 +10,7 @@ import { CHANNELS } from './campaigns.js';
 import { layout, csrfField, flash, STATUS_LABEL } from './views.js';
 // ---------- administration ----------
 function adminShell(csrf, active, body) {
-  const nav = [['/admin', 'Tableau de bord', 'home'], ['/admin/rentabilite', 'Rentabilité', 'profit'], ['/admin/prospection', 'Prospection', 'pros'], ['/admin/campagnes', 'Campagnes', 'camp'], ['/admin/partenaires', 'Partenaires', 'partners'], ['/admin/bilan', 'Bilan', 'bilan'], ['/admin/pret', 'Lancement', 'pret']].map(([h, l, k]) => `<a href="${h}" ${active === k ? 'aria-current="page"' : ''}>${l}</a>`).join('');
+  const nav = [['/admin', 'Tableau de bord', 'home'], ['/admin/rentabilite', 'Rentabilité', 'profit'], ['/admin/prospection', 'Prospection', 'pros'], ['/admin/campagnes', 'Campagnes', 'camp'], ['/admin/partenaires', 'Partenaires', 'partners'], ['/admin/bilan', 'Bilan', 'bilan'], ['/admin/journal', 'Quotidien', 'jour'], ['/admin/pret', 'Lancement', 'pret']].map(([h, l, k]) => `<a href="${h}" ${active === k ? 'aria-current="page"' : ''}>${l}</a>`).join('');
   return layout('Administration', `<header class="appbar dark"><div class="wrap row"><b class="logo">ClientDirect Pro · Admin</b><nav>${nav}</nav><form method="post" action="/deconnexion">${csrfField(csrf)}<button class="linkbtn" type="submit">Déconnexion</button></form></div></header><main class="band app"><div class="wrap">${body}</div></main>`, { bodyClass: 'appbody', langs: false });
 }
 export function adminDashboard(csrf, d) {
@@ -108,11 +108,13 @@ export function adminCampaign(csrf, c) {
   ${c.status === 'approved' ? `<a class="btn" href="/admin/campagnes/${c.id}/export.csv">Exporter pour l'envoi (CSV)</a> <span class="muted">Validée le ${new Date(c.approved_at).toLocaleString('fr-FR')}. Aucun message n'a été envoyé.</span>` : ''}</section>`);
 }
 
-export function adminReadiness(csrf, r, msg = '') {
+export function adminReadiness(csrf, r, msg = '', maint = false) {
   const rows = r.items.map((i) => `<tr><td>${i.ok ? '✅' : '⬜'}</td><td><b>${esc(i.label)}</b><br><span class="small muted">${esc(i.detail || '')}</span></td><td class="small">${i.ok ? '' : esc(i.action || 'Automatique')}</td></tr>`).join('');
   return adminShell(csrf, 'pret', `<h1>Préparation du lancement</h1><p class="muted">${r.done} sur ${r.total} conditions remplies. Rien n'est acheté, envoyé ni publié sans votre autorisation.</p>
   ${msg ? flash(msg) : ''}<div class="scroll"><table class="list"><thead><tr><th></th><th>Condition</th><th>Qui</th></tr></thead><tbody>${rows}</tbody></table></div>
   <section class="card"><h2>Alertes et e-mails (Brevo, offre gratuite)</h2><ol><li>Créez un compte gratuit sur brevo.com (300 e-mails par jour, sans carte bancaire).</li><li>Menu « Expéditeurs » : ajoutez et validez l’adresse d’envoi.</li><li>Menu « SMTP et API » puis « Clés API » : créez une clé.</li><li>Dans Render, ajoutez : <code>BREVO_API_KEY</code>, <code>MAIL_FROM</code> (ex. « ClientDirect Pro &lt;adresse validée&gt; ») et <code>ADMIN_EMAIL</code> (où recevoir les alertes).</li><li>Revenez ici et cliquez sur le bouton ci-dessous.</li></ol>
+  <section class="card"><h2>Migration vers le disque permanent</h2><p>${maint ? '<b>Maintenance ACTIVE</b> : les clients ne peuvent rien enregistrer.' : 'Maintenance inactive.'}</p><p class="small muted">1. Activer la maintenance (dernière sauvegarde + test de restauration). 2. Ajouter le disque dans Render. 3. Vérifier les compteurs sur /health. 4. Désactiver la maintenance.</p>
+  <form method="post" action="/admin/maintenance">${csrfField(csrf)}<input type="hidden" name="on" value="${maint ? '0' : '1'}"><button class="btn ${maint ? 'blue' : 'red'}" type="submit">${maint ? 'Désactiver la maintenance' : 'Activer la maintenance et sauvegarder'}</button></form></section>
   <form method="post" action="/admin/test-email">${csrfField(csrf)}<button class="btn" type="submit">Envoyer un e-mail de test</button></form><p class="small muted">Seuls des e-mails techniques et transactionnels partent par ce moyen. La prospection reste désactivée sans votre autorisation.</p></section>`);
 }
 
@@ -133,4 +135,14 @@ function salesSection(S) {
   <h3>Résultats des contacts</h3><p>${Object.entries(S.outcomes).map(([o, n]) => `${esc(OUTCOMES[o]?.label || o)} : <b>${n}</b>`).join(' · ')}</p>
   <details><summary>Jour par jour</summary><div class="scroll"><table class="list"><thead><tr><th>Jour</th><th class="num">Contacts</th><th class="num">Positifs</th><th class="num">Inscriptions</th><th class="num">Paiements</th></tr></thead><tbody>${days}</tbody></table></div></details>
   <p><a href="/admin/bilan/contacts.csv">Exporter tous les contacts (CSV)</a></p></section>`;
+}
+
+export function adminDaily(csrf, d) {
+  const e = (x) => euros(x);
+  const rows = d.jours.map((r) => `<tr><td>${r.day}</td><td class="num">${r.inscriptions}</td><td class="num">${r.nouveauxAbonnes}</td><td class="num">${e(r.revenus)}</td><td class="num">${e(r.fraisStripe + r.fraisFixes)}</td><td class="num"><b>${e(r.benefice)}</b></td></tr>`).join('');
+  const m = d.mois;
+  return adminShell(csrf, 'jour', `<h1>Tableau de bord quotidien</h1><p class="muted">Chiffres réels (comptes de test et exemples exclus). Bénéfice estimé avant cotisations sociales et impôts.</p>
+  <div class="kpis"><div class="k"><strong>${d.abonnes}</strong><span>abonnés payants</span></div><div class="k"><strong>${d.essais}</strong><span>essais en cours</span></div><div class="k"><strong>${e(m.revenus)}</strong><span>revenus ${m.month}</span></div><div class="k"><strong>${e(m.fraisStripe + m.fraisFixes + m.coutsVariables)}</strong><span>dépenses ${m.month}</span></div><div class="k"><strong>${e(m.benefice)}</strong><span>bénéfice estimé ${m.month}</span></div></div>
+  <p class="small muted">Dépenses du mois : Stripe ${e(m.fraisStripe)} · frais fixes ${e(m.fraisFixes)} (saisis dans « Rentabilité ») · IA, e-mails et WhatsApp ${e(m.coutsVariables)}.</p>
+  <div class="scroll"><table class="list"><thead><tr><th>Jour</th><th class="num">Inscriptions</th><th class="num">Nouveaux abonnés</th><th class="num">Revenus</th><th class="num">Dépenses</th><th class="num">Bénéfice estimé</th></tr></thead><tbody>${rows}</tbody></table></div>`);
 }

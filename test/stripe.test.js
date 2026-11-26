@@ -41,7 +41,7 @@ test('Stripe test : le paiement utilise la devise du client et le secret du webh
   const { c, t } = await signup(app, { business: 'Garage Devise', email: 'devise@test.fr' });
   app.db.run("UPDATE tenants SET currency='CAD', country='GF' WHERE id=?", t.id);
   S.calls = []; const page = await c.get('/pro/abonnement');
-  const r = await c.post('/pro/abonnement/checkout', { csrf: c.csrf(page.text), plan: 'pro' });
+  const r = await c.post('/pro/abonnement/checkout', { csrf: c.csrf(page.text), plan: 'pro', cgv: 'on' });
   assert.equal(r.status, 303);
   const call = S.calls.find((x) => x.p === 'checkout/sessions');
   assert.equal(call.body['line_items[0][price]'], S.prices.find((x) => x.lookup_key === 'cdp_pro_month_cad').id);
@@ -81,4 +81,12 @@ test('Stripe : renouvellement, échec de paiement, remboursement et résiliation
   // Un échec de paiement d'un AUTRE client portant ce numéro en métadonnée ne touche pas ce compte
   await hook({ id: 'evt_c5', type: 'invoice.payment_failed', data: { object: { id: 'in_x', customer: 'cus_autre', subscription_details: { metadata: { tenant_id: String(t.id) } } } } }); assert.equal(st(), 'active');
   await hook({ id: 'evt_c6', type: 'customer.subscription.deleted', data: { object: { id: 'sub_cycle', customer: 'cus_cycle', status: 'canceled', metadata: { tenant_id: String(t.id) } } } }); assert.equal(st(), 'canceled');
+});
+test('CGV : paiement refusé sans acceptation de l’engagement de 12 mois ; acceptation gardée comme preuve ; rappel sur la page Stripe', async () => {
+  const { c, t } = await signup(app, { business: 'Garage CGV', email: 'cgv@test.fr' });
+  const page = await c.get('/pro/abonnement'); assert.match(page.text, /name="cgv" required/);
+  const no = await c.post('/pro/abonnement/checkout', { csrf: c.csrf(page.text), plan: 'pro' }); assert.equal(no.status, 400);
+  S.calls = []; const yes = await c.post('/pro/abonnement/checkout', { csrf: c.csrf(page.text), plan: 'pro', cgv: 'on' }); assert.equal(yes.status, 303);
+  assert.ok(app.db.one("SELECT 1 FROM audit WHERE tenant_id=? AND action='cgv.acceptees' AND detail LIKE '%12 mois%'", t.id));
+  assert.match(S.calls.find((x) => x.p === 'checkout/sessions').body['custom_text[submit][message]'], /engagement de 12 mois/);
 });

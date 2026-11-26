@@ -32,6 +32,7 @@ import { setDomain, tenantByDomain } from './domains.js';
 import { track, isBot, last30, daily } from './stats.js';
 import { tenantCosts } from './costs.js';
 import { optoutLink, optout, exportTenant, deleteTenant, purgeTestTenant } from './privacy.js';
+import { maintenanceOn, setMaintenance, MAINTENANCE_ALLOWED } from './maintenance.js';
 import { verifyPassword } from './security.js';
 
 const SESSION = 'cdp_s', PRE = 'cdp_pre';
@@ -161,6 +162,7 @@ export function createApp(db) {
     { let a = null; try { a = JSON.parse(db.one("SELECT v FROM meta WHERE k='autotest_last'")?.v || 'null'); } catch { a = null; } ready.autotest = a ? { at: a.at, ok: a.ok, formules: a.formules.map((f) => `${f.formule} : ${f.ok ? 'réussi' : 'échec'}`) } : null; }
     { const b = backupHealth(db); ready.sauvegardes = { ok: b.ok, problemes: b.problems, echecsDepuisDerniereReussite: b.failedSince, testRestauration: b.verified ? { ok: b.verified.ok, at: b.verified.at, fichier: b.verified.name, erreur: b.verified.error || null, contenu: b.verified.backup || null } : null }; }
     { const pot = db.all("SELECT CASE WHEN potential>=75 THEN 'A' WHEN potential>=50 THEN 'B' ELSE 'C' END cl, COUNT(*) n FROM prospects WHERE status='new' AND (phone IS NOT NULL OR email IS NOT NULL) GROUP BY cl"); ready.potentielJoignables = Object.fromEntries(pot.map((r) => [r.cl, r.n])); }
+    ready.maintenance = maintenanceOn(db);
     ready.alertesEmail = !!(config.adminEmail && (config.brevoKey || config.smtp.host));
     ready.veille = { maintienEveil: config.keepAwake, dernierAppel: keepAwake.last ? { at: new Date(keepAwake.last.at).toISOString(), statut: keepAwake.last.status || keepAwake.last.error } : null };
     { const rd = readiness(db); ready.lancement = { faits: rd.done, total: rd.total, restants: rd.items.filter((i) => !i.ok).map((i) => i.key) }; }
@@ -444,7 +446,10 @@ export function createApp(db) {
     requirePro(c); checkCsrf(c);
     if (!billingConfigured()) throw HttpError(503, 'Le paiement en ligne n’est pas encore activé.');
     if (!billingOpen(c.tenant.country)) throw HttpError(403, 'Les abonnements payants ne sont pas encore ouverts dans votre pays.');
+    // Acceptation expresse des CGV (engagement de 12 mois) avant le paiement, gardée comme preuve
+    if (c.form.cgv !== 'on') throw HttpError(400, 'Cochez l’acceptation des CGV (engagement de 12 mois) pour continuer.');
     const url = await createCheckout(c.tenant, c.user.email, c.form.plan);
+    audit(db, { userId: c.user.id, tenantId: c.tenant.id, action: 'cgv.acceptees', detail: `CGV du 25 novembre 2026, formule ${c.form.plan}, engagement 12 mois`, ip: c.ip });
     audit(db, { userId: c.user.id, tenantId: c.tenant.id, action: 'checkout', detail: c.form.plan, ip: c.ip });
     redirect(c.res, url);
   });
@@ -554,7 +559,27 @@ export function createApp(db) {
     db.run("UPDATE rewards SET status='paid', updated_at=? WHERE id=? AND kind='commission' AND status='approved'", Date.now(), Number(c.params.id));
     audit(db, { action: 'commission.versee', detail: String(c.params.id), ip: c.ip }); redirect(c.res, '/admin/partenaires');
   });
-  on('GET', '/admin/pret', (c) => { requireAdmin(c); html(c.res, V.adminReadiness(csrfToken(c), readiness(db), c.url.searchParams.get('msg') || '')); });
+  on('GET', '/admin/journal', async (c) => { requireAdmin(c); const { dailyReport } = await import('./daily.js'); html(c.res, V.adminDaily(csrfToken(c), dailyReport(db))); });
+  on('GET', '/admin/pret', (c) => { requireAdmin(c); html(c.res, V.adminReadiness(csrfToken(c), readiness(db), c.url.searchParams.get('msg') || '', maintenanceOn(db))); });
+  // Migration sans perte : 1) maintenance (plus aucune écriture), 2) dernière sauvegarde, 3) test de restauration de CETTE sauvegarde
+  on('POST', '/admin/maintenance', async (c) => {
+    requireAdmin(c); checkCsrf(c);
+    let msg;
+    if (c.form.on === '1') {
+      setMaintenance(db, true);
+      try {
+        const { createBackup, verifyBackup, remoteConfigured } = await import('./backup.js');
+        if (!remoteConfigured()) msg = 'Maintenance activée. Sauvegarde hors serveur non configurée : migration à ne pas lancer.';
+        else {
+          const b = await createBackup(db); const v = await verifyBackup(db);
+          const okSame = v.ok && v.name === b.name && JSON.stringify(v.backup) === JSON.stringify(v.live); // écritures bloquées : copie identique exigée
+          msg = okSame ? `Maintenance activée. Dernière sauvegarde ${b.name} créée et restauration vérifiée (${JSON.stringify(v.backup || {})}). Vous pouvez migrer.` : `Maintenance activée, mais la vérification de la dernière sauvegarde a échoué (${v.error || v.name || 'inconnue'}) : NE PAS migrer.`;
+        }
+      } catch (e) { msg = `Maintenance activée, mais la sauvegarde a échoué : ${String(e.message).slice(0, 160)}. NE PAS migrer.`; }
+    } else { setMaintenance(db, false); msg = 'Maintenance désactivée : les clients peuvent de nouveau écrire.'; }
+    audit(db, { action: 'admin.maintenance', detail: msg.slice(0, 200), ip: c.ip });
+    redirect(c.res, '/admin/pret?msg=' + encodeURIComponent(msg));
+  });
   on('POST', '/admin/test-email', async (c) => {
     requireAdmin(c);
     let msg;
@@ -725,6 +750,7 @@ export function createApp(db) {
       let found = null, methodMismatch = false;
       for (const r of routes) { const m = r.re.exec(path); if (!m) continue; if (r.method !== method) { methodMismatch = true; continue; } found = r; c.params = Object.fromEntries(Object.entries(m.groups || {}).map(([k, v]) => [k, decodeURIComponent(v)])); break; }
       if (!found) throw HttpError(methodMismatch ? 405 : 404, methodMismatch ? 'Méthode non autorisée' : 'Page introuvable');
+      if (method === 'POST' && !MAINTENANCE_ALLOWED.has(path) && maintenanceOn(db)) { res.setHeader('Retry-After', '300'); throw HttpError(503, 'Maintenance en cours : réessayez dans quelques minutes. Rien n’a été enregistré.'); }
       if (method === 'POST') { c.raw = await readBody(req); c.form = parseForm(c.raw, String(req.headers['content-type'] || '')); }
       await found.handler(c);
     } catch (e) {

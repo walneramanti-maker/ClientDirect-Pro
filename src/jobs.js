@@ -17,6 +17,7 @@ const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet'
 
 /** Tâches automatiques : rappels, envois, fin d'essai, impayés, tickets, alertes. */
 export async function runJobs(db, now = Date.now()) {
+  if ((await import('./maintenance.js')).maintenanceOn(db)) return { maintenance: true }; // aucune écriture pendant une migration
   const r = { reminders: 0, trialNotices: 0, paused: 0, closed: 0, digest: false };
   // 1. Rappels la veille (entre 2 h et 24 h avant), une seule fois par rendez-vous
   const due = db.all("SELECT * FROM appointments WHERE status='confirmed' AND reminded_at IS NULL AND starts_at BETWEEN ? AND ?", now + 2 * 36e5, now + 24 * 36e5);

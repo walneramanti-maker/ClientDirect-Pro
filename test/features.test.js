@@ -363,7 +363,7 @@ test('alertes : une panne serveur crée un incident critique', async () => {
   const { c } = await signup(app, { business: 'Garage Panne', email: 'panne@test.fr' });
   mock((url) => (url.includes('api.stripe.com') ? jsonResponse({ error: { message: 'boom' } }, 500) : null));
   const p = await c.get('/pro/abonnement');
-  const r = await c.post('/pro/abonnement/checkout', { csrf: c.csrf(p.text), plan: 'pro' });
+  const r = await c.post('/pro/abonnement/checkout', { csrf: c.csrf(p.text), plan: 'pro', cgv: 'on' });
   assert.equal(r.status, 500); assert.match(r.text, /signalée automatiquement/); assert.doesNotMatch(r.text, /boom/, 'pas de détail technique affiché');
   assert.ok(db.one("SELECT 1 FROM incidents WHERE kind='http' AND severity='critical' AND message LIKE '%checkout%'"));
   mock();

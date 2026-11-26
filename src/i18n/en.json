@@ -574,5 +574,7 @@
  "CGV": "Terms of sale",
  "Conditions générales de vente": "Terms of sale (French version prevails)",
  "J’accepte les <a href=\"/cgv\" target=\"_blank\" rel=\"noopener\">conditions générales de vente</a>, les <a href=\"/cgu\" target=\"_blank\" rel=\"noopener\">conditions d’utilisation</a> (dont l’accord de sous-traitance des données) et la <a href=\"/confidentialite\" target=\"_blank\" rel=\"noopener\">politique de confidentialité</a>": "I accept the <a href=\"/cgv\" target=\"_blank\" rel=\"noopener\">terms of sale</a>, the <a href=\"/cgu\" target=\"_blank\" rel=\"noopener\">terms of use</a> (including the data processing agreement) and the <a href=\"/confidentialite\" target=\"_blank\" rel=\"noopener\">privacy policy</a>",
- "{p} HT/mois + {s} HT de mise en service, après l’essai": "{p}/month + {s} setup fee (excl. tax), after the trial"
+ "{p} HT/mois + {s} HT de mise en service, après l’essai": "{p}/month + {s} setup fee (excl. tax), after the trial",
+ "J’accepte les CGV, dont l’engagement de 12 mois": "I accept the terms of sale, including the 12-month commitment",
+ "Cochez l’acceptation des CGV (engagement de 12 mois) pour continuer.": "Please accept the terms of sale (12-month commitment) to continue."
 }

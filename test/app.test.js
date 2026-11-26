@@ -104,7 +104,7 @@ test('abonnement : page de paiement Stripe puis activation par notification sign
   const { c, t } = await signup(app, { business: 'Garage Stripe', email: 'stripe@test.fr' });
   calls = []; mock((url) => url.includes('checkout/sessions') ? jsonResponse({ id: 'cs_1', url: 'https://checkout.stripe.com/c/pay/cs_1' }) : jsonResponse({}, 404));
   const page = await c.get('/pro/abonnement');
-  const r = await c.post('/pro/abonnement/checkout', { csrf: c.csrf(page.text), plan: 'pro' });
+  const r = await c.post('/pro/abonnement/checkout', { csrf: c.csrf(page.text), plan: 'pro', cgv: 'on' });
   assert.equal(r.status, 303); assert.equal(r.location, 'https://checkout.stripe.com/c/pay/cs_1');
   const sent = decodeURIComponent(calls[0].opt.body);
   assert.match(sent, /line_items\[0\]\[price\]=price_pro/); assert.match(sent, /line_items\[1\]\[price\]=price_setup_pro/); assert.match(sent, new RegExp(`metadata\\[tenant_id\\]=${t.id}`));
