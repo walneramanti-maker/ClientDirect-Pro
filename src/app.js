@@ -179,7 +179,7 @@ export function createApp(db) {
     ready.comptes = Object.fromEntries(db.all("SELECT status, COUNT(*) n FROM tenants WHERE example=0 AND status!='demo' AND COALESCE(source,'')!='autotest' GROUP BY status").map((r) => [r.status, r.n]));
     { const w = db.one('SELECT type, received_at FROM webhook_events ORDER BY received_at DESC LIMIT 1'); ready.dernierEvenementStripe = w ? { type: w.type, at: new Date(w.received_at).toISOString() } : null; }
     ready.facturesPayees = db.one("SELECT COUNT(*) n FROM invoices WHERE status='paid'").n;
-    { let a = null; try { a = JSON.parse(db.one("SELECT v FROM meta WHERE k='autotest_last'")?.v || 'null'); } catch { a = null; } ready.autotest = a ? { at: a.at, ok: a.ok, formules: a.formules.map((f) => `${f.formule} : ${f.ok ? 'réussi' : 'échec'}`) } : null; }
+    if (!config.isProd) { let a = null; try { a = JSON.parse(db.one("SELECT v FROM meta WHERE k='autotest_last'")?.v || 'null'); } catch { a = null; } ready.autotest = a ? { at: a.at, ok: a.ok, formules: a.formules.map((f) => `${f.formule} : ${f.ok ? 'réussi' : 'échec'}`) } : null; }
     { const b = backupHealth(db); ready.sauvegardes = { ok: b.ok, problemes: b.problems, echecsDepuisDerniereReussite: b.failedSince, testRestauration: b.verified ? { ok: b.verified.ok, at: b.verified.at, fichier: b.verified.name, erreur: b.verified.error || null, contenu: b.verified.backup || null } : null }; }
     { const pot = db.all("SELECT CASE WHEN potential>=75 THEN 'A' WHEN potential>=50 THEN 'B' ELSE 'C' END cl, COUNT(*) n FROM prospects WHERE status='new' AND (phone IS NOT NULL OR email IS NOT NULL) GROUP BY cl"); ready.potentielJoignables = Object.fromEntries(pot.map((r) => [r.cl, r.n])); }
     ready.maintenance = maintenanceOn(db);

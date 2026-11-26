@@ -92,7 +92,9 @@ export async function runJobs(db, now = Date.now()) {
     r.rewards = await processRewards(db, { now, stripeCall: config.stripeKey ? stripe : null }).catch((e) => ({ error: e.message })); mark(db, 'job.rewards', now);
   }
   // 14 bis. Campagnes préparées en brouillon chaque jour (jamais validées ni envoyées automatiquement)
-  if (now - lastRun(db, 'job.drafts') > 20 * 36e5) { const { prepareDrafts } = await import('./campaigns.js'); r.drafts = prepareDrafts(db, now); mark(db, 'job.drafts', now); console.log('Campagnes préparées (brouillons, rien n’est envoyé) :', JSON.stringify(r.drafts)); }
+  // … et immédiatement si l'adresse du site a changé (liens de démonstration à jour, ex. passage au nom de domaine)
+  const staleDraft = db.one("SELECT 1 FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id WHERE c.status='draft' AND c.name LIKE 'Préparée automatiquement%' AND i.message LIKE '%/demo/%' AND i.message NOT LIKE ? LIMIT 1", `%${config.baseUrl}/demo/%`);
+  if (staleDraft || now - lastRun(db, 'job.drafts') > 20 * 36e5) { const { prepareDrafts } = await import('./campaigns.js'); r.drafts = prepareDrafts(db, now); mark(db, 'job.drafts', now); console.log('Campagnes préparées (brouillons, rien n’est envoyé) :', JSON.stringify(r.drafts)); }
   // 14. Campagnes e-mail validées : un envoi espacé par passage, seulement si l'envoi a été autorisé (CAMPAIGN_SENDING=on)
   { const { sendNext } = await import('./campaigns.js'); r.campaign = await sendNext(db, { now }).catch((e) => ({ error: e.message })); }
   // 15. Battement de cœur : prouve que les tâches automatiques tournent
