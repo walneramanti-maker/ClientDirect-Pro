@@ -49,10 +49,12 @@ services:
       - key: KEEP_AWAKE
         value: "0"
       # Secrets : à saisir dans Render, jamais dans ce fichier
+      # À RECOPIER depuis le service de test (ne pas générer) : une nouvelle BACKUP_KEY empêcherait de déchiffrer
+      # les sauvegardes existantes, et un nouvel APP_SECRET invaliderait les sessions et les liens d'opposition déjà envoyés.
       - key: APP_SECRET
-        generateValue: true
+        sync: false
       - key: BACKUP_KEY
-        generateValue: true
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_KEY

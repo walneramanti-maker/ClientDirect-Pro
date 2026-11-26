@@ -90,3 +90,18 @@ test('vidéo : servie par morceaux (lecture sur iPhone/Safari)', async () => {
   assert.equal(r.headers.get('content-type'), 'video/mp4');
   assert.equal((await fetch(app.base + '/static/video/presentation-fr.mp4', { headers: { range: 'bytes=999999999-' } })).status, 416);
 });
+test('i18n : un sélecteur de langue FR/EN est présent sur toutes les pages publiques et de compte, et le choix est mémorisé', async () => {
+  const c = app.client();
+  const pages = ['/', '/exemples', '/metiers', '/partenaires', '/annuaire', '/cgu', '/cgv', '/confidentialite', '/mentions-legales', '/connexion', '/inscription', '/mot-de-passe-oublie', '/exemple/garage', '/partenaires/conditions'];
+  const sans = [];
+  for (const p of pages) { const r = await c.get(p); if (r.status !== 200 || !/class="langs"/.test(r.text) || !/hreflang="en"/.test(r.text)) sans.push(`${p} (HTTP ${r.status})`); }
+  assert.deepEqual(sans, [], 'pages sans sélecteur de langue');
+  const en = await c.get('/cgv?lang=en'); assert.match(en.text, /<html lang="en"/);
+  const next = await c.get('/mentions-legales'); assert.match(next.text, /<html lang="en"/, 'la langue choisie est gardée sur la page suivante');
+  const { c: pro } = await signup(app, { business: 'Garage Langue', email: 'langue@test.fr' });
+  const dash = await pro.get('/pro'); assert.match(dash.text, /class="langs"/, 'espace pro');
+});
+test('i18n : la page d’accueil n’annonce plus « changez quand vous voulez » (engagement de 12 mois des CGV)', async () => {
+  const r = await app.client().get('/?lang=fr');
+  assert.doesNotMatch(r.text, /quand vous voulez/); assert.match(r.text, /Engagement de 12 mois/);
+});

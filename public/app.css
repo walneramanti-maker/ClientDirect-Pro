@@ -88,3 +88,5 @@ input[type=checkbox]{width:auto;min-height:0;margin-right:6px}input[type=color]{
 .lead-plans{font-size:1rem;opacity:.85;margin:-4px 0 18px;max-width:34em}.cta-sub{margin:-6px 0 18px;opacity:.85}
 .svc-list{list-style:none;padding:0;display:grid;gap:12px}.svc-list li{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 pre.msg{white-space:pre-wrap;font:inherit;font-size:.9rem;background:var(--bg);border-radius:8px;padding:10px;margin:6px 0 0}
+
+.lang-float{display:flex;justify-content:flex-end;max-width:1100px;margin:0 auto;padding:6px 18px 0;font-size:.85rem}.lang-float .langs a{color:var(--blue)}

@@ -109,3 +109,7 @@ test('compte de test supprimé entièrement : même adresse réutilisable, rien 
   const prod = config.isProd; config.isProd = true;
   try { await assert.rejects(purgeTestTenant(db, 1), /test/); } finally { config.isProd = prod; }
 });
+test('migration : le plan de production ne régénère ni BACKUP_KEY ni APP_SECRET (sinon les sauvegardes existantes seraient illisibles)', async () => {
+  const yaml = (await import('node:fs')).readFileSync('render.yaml', 'utf8');
+  for (const k of ['BACKUP_KEY', 'APP_SECRET']) assert.doesNotMatch(yaml, new RegExp(`key: ${k}\\n\\s+generateValue: true`), k);
+});

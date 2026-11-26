@@ -116,18 +116,31 @@ export function verifyStripeSignature(payload, header, secret = webhookSecret(),
 }
 
 const STATUS = { active: 'active', trialing: 'active', past_due: 'past_due', unpaid: 'past_due', canceled: 'canceled', incomplete_expired: 'canceled', paused: 'paused' };
-const tenantFrom = (db, obj) => {
+// Événements qui retirent un droit : ils ne s'appliquent qu'au client Stripe déjà rattaché à l'entreprise.
+const NEEDS_CUSTOMER = new Set(['customer.subscription.deleted', 'invoice.payment_failed', 'charge.refunded']);
+/**
+ * Retrouve l'entreprise concernée. Le client Stripe fait foi : un numéro d'entreprise seul (métadonnée) peut désigner
+ * une autre entreprise si un compte a été supprimé puis son numéro réattribué (SQLite réutilise les numéros).
+ */
+export const tenantFrom = (db, obj, type = '') => {
+  const cust = typeof obj?.customer === 'string' ? obj.customer : obj?.customer?.id;
+  if (cust) { const byCust = db.one('SELECT * FROM tenants WHERE stripe_customer=?', cust); if (byCust) return byCust; }
   const id = Number(obj?.metadata?.tenant_id || obj?.client_reference_id || obj?.subscription_details?.metadata?.tenant_id || 0);
-  if (id) return db.one('SELECT * FROM tenants WHERE id=?', id);
-  if (obj?.customer) return db.one('SELECT * FROM tenants WHERE stripe_customer=?', obj.customer);
-  return null;
+  if (!id) return null;
+  const t = db.one('SELECT * FROM tenants WHERE id=?', id); if (!t) return null;
+  if (cust && t.stripe_customer && t.stripe_customer !== cust) return null; // autre client Stripe : ce n'est pas cette entreprise
+  const linked = (cust && t.stripe_customer === cust) || (!cust && obj?.id && t.stripe_sub === obj.id);
+  if (NEEDS_CUSTOMER.has(type) && !linked) return null;
+  // Un client Stripe pas encore rattaché peut activer l'abonnement, jamais le dégrader (impayé, résilié…)
+  if (type === 'customer.subscription.updated' && cust && !linked && STATUS[obj?.status] !== 'active') return null;
+  return t;
 };
 
 /** Traite un événement Stripe vérifié. Idempotent : un même événement n'est appliqué qu'une fois. */
 export function handleStripeEvent(db, ev) {
   if (!ev?.id || !ev?.type) return { ok: false };
   if (db.one('SELECT 1 FROM webhook_events WHERE id=?', ev.id)) return { ok: true, duplicate: true };
-  const o = ev.data?.object || {}; const t = tenantFrom(db, o); const now = Date.now();
+  const o = ev.data?.object || {}; const t = tenantFrom(db, o, ev.type); const now = Date.now();
   db.tx(() => {
     db.run('INSERT INTO webhook_events(id,type,received_at) VALUES(?,?,?)', ev.id, ev.type, now);
     if (!t) { if (/^(checkout|invoice|customer\.subscription)/.test(ev.type)) recordIncident(db, { kind: 'billing', severity: 'warning', message: `Événement ${ev.type} sans entreprise associée` }); return; }

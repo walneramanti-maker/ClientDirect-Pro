@@ -11,7 +11,7 @@ import { layout, csrfField, flash, STATUS_LABEL } from './views.js';
 // ---------- administration ----------
 function adminShell(csrf, active, body) {
   const nav = [['/admin', 'Tableau de bord', 'home'], ['/admin/rentabilite', 'Rentabilité', 'profit'], ['/admin/prospection', 'Prospection', 'pros'], ['/admin/campagnes', 'Campagnes', 'camp'], ['/admin/partenaires', 'Partenaires', 'partners'], ['/admin/bilan', 'Bilan', 'bilan'], ['/admin/pret', 'Lancement', 'pret']].map(([h, l, k]) => `<a href="${h}" ${active === k ? 'aria-current="page"' : ''}>${l}</a>`).join('');
-  return layout('Administration', `<header class="appbar dark"><div class="wrap row"><b class="logo">ClientDirect Pro · Admin</b><nav>${nav}</nav><form method="post" action="/deconnexion">${csrfField(csrf)}<button class="linkbtn" type="submit">Déconnexion</button></form></div></header><main class="band app"><div class="wrap">${body}</div></main>`, { bodyClass: 'appbody' });
+  return layout('Administration', `<header class="appbar dark"><div class="wrap row"><b class="logo">ClientDirect Pro · Admin</b><nav>${nav}</nav><form method="post" action="/deconnexion">${csrfField(csrf)}<button class="linkbtn" type="submit">Déconnexion</button></form></div></header><main class="band app"><div class="wrap">${body}</div></main>`, { bodyClass: 'appbody', langs: false });
 }
 export function adminDashboard(csrf, d) {
   const k = (v, l) => `<div class="k"><strong>${esc(v)}</strong><span>${esc(l)}</span></div>`;

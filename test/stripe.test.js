@@ -52,3 +52,33 @@ test('Stripe test : le paiement utilise la devise du client et le secret du webh
   const res = await fetch(app.base + '/webhooks/stripe', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': `t=${ts},v1=${sig}` }, body: raw });
   assert.equal(res.status, 200); assert.equal(app.db.one('SELECT status FROM tenants WHERE id=?', t.id).status, 'active');
 });
+const hook = async (obj) => {
+  const raw = JSON.stringify(obj); const ts = Math.floor(Date.now() / 1000); const sig = crypto.createHmac('sha256', 'whsec_auto_123').update(`${ts}.${raw}`).digest('hex');
+  return fetch(app.base + '/webhooks/stripe', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': `t=${ts},v1=${sig}` }, body: raw });
+};
+test('Stripe : une résiliation tardive d’un compte supprimé n’annule pas le nouveau compte qui reprend son numéro (bug formule Pro)', async () => {
+  const { purgeTestTenant } = await import('../src/privacy.js');
+  const { t: old } = await signup(app, { business: 'Ancien Essentiel', email: 'ancien@test.fr', plan: 'essentiel' });
+  app.db.run("UPDATE tenants SET stripe_customer='cus_ancien', source='autotest' WHERE id=?", old.id);
+  await purgeTestTenant(app.db, old.id);
+  const { t: neuf } = await signup(app, { business: 'Nouveau Pro', email: 'nouveau@test.fr', plan: 'pro' });
+  assert.equal(neuf.id, old.id, 'SQLite réattribue le même numéro : c’est la condition du bug');
+  const r = await hook({ id: 'evt_del_ancien', type: 'customer.subscription.deleted', data: { object: { id: 'sub_ancien', customer: 'cus_ancien', status: 'canceled', metadata: { tenant_id: String(old.id), plan: 'essentiel' } } } });
+  assert.equal(r.status, 200);
+  const after = app.db.one('SELECT status, plan FROM tenants WHERE id=?', neuf.id);
+  assert.deepEqual({ ...after }, { status: 'trial', plan: 'pro' });
+});
+test('Stripe : renouvellement, échec de paiement, remboursement et résiliation du bon client', async () => {
+  const { t } = await signup(app, { business: 'Cycle Complet', email: 'cycle@test.fr', plan: 'pro' });
+  app.db.run("UPDATE tenants SET stripe_customer='cus_cycle', stripe_sub='sub_cycle' WHERE id=?", t.id);
+  const st = () => app.db.one('SELECT status FROM tenants WHERE id=?', t.id).status;
+  await hook({ id: 'evt_c1', type: 'invoice.paid', data: { object: { id: 'in_c1', customer: 'cus_cycle', amount_paid: 54800, currency: 'eur', lines: { data: [{ period: { end: 1800000000 } }] } } } });
+  assert.equal(st(), 'active'); assert.equal(app.db.one("SELECT amount_cents FROM invoices WHERE stripe_invoice='in_c1'").amount_cents, 54800);
+  await hook({ id: 'evt_c2', type: 'invoice.payment_failed', data: { object: { id: 'in_c2', customer: 'cus_cycle' } } }); assert.equal(st(), 'past_due');
+  await hook({ id: 'evt_c3', type: 'invoice.paid', data: { object: { id: 'in_c3', customer: 'cus_cycle', amount_paid: 14900, currency: 'eur' } } }); assert.equal(st(), 'active', 'renouvellement payé après un échec');
+  const r4 = await hook({ id: 'evt_c4', type: 'charge.refunded', data: { object: { id: 'ch_c4', customer: 'cus_cycle', invoice: 'in_c3' } } }); assert.equal(r4.status, 200);
+  assert.ok(app.db.one("SELECT 1 FROM audit WHERE tenant_id=? AND action='paiement.rembourse'", t.id));
+  // Un échec de paiement d'un AUTRE client portant ce numéro en métadonnée ne touche pas ce compte
+  await hook({ id: 'evt_c5', type: 'invoice.payment_failed', data: { object: { id: 'in_x', customer: 'cus_autre', subscription_details: { metadata: { tenant_id: String(t.id) } } } } }); assert.equal(st(), 'active');
+  await hook({ id: 'evt_c6', type: 'customer.subscription.deleted', data: { object: { id: 'sub_cycle', customer: 'cus_cycle', status: 'canceled', metadata: { tenant_id: String(t.id) } } } }); assert.equal(st(), 'canceled');
+});
