@@ -17,6 +17,12 @@ export const config = {
   secret: env.APP_SECRET || 'dev-secret-change-me-dev-secret-change-me',
   trialDays: num(env.TRIAL_DAYS, 14),
   graceDays: num(env.GRACE_DAYS, 7),
+  // Sites exclus du sitemap, de l'annuaire et de l'indexation (comptes de démonstration), séparés par des virgules
+  sitemapExclude: String(env.SITEMAP_EXCLUDE || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
+  // Google Search Console : code de la balise de vérification (méthode « Balise HTML »)
+  googleVerification: String(env.GOOGLE_SITE_VERIFICATION || '').replace(/[^\w-]/g, '').slice(0, 100),
+  // Alerte quand le disque de la base dépasse ce taux de remplissage (%)
+  diskAlertPct: num(env.DISK_ALERT_PCT, 85),
   // IA (Claude). Sans clé : réponses automatiques simples.
   anthropicKey: env.ANTHROPIC_API_KEY || '',
   aiModel: env.AI_MODEL || 'claude-haiku-5-5',

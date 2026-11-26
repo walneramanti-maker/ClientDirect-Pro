@@ -97,6 +97,9 @@ export async function runJobs(db, now = Date.now()) {
   if (staleDraft || now - lastRun(db, 'job.drafts') > 20 * 36e5) { const { prepareDrafts } = await import('./campaigns.js'); r.drafts = prepareDrafts(db, now); mark(db, 'job.drafts', now); console.log('Campagnes préparées (brouillons, rien n’est envoyé) :', JSON.stringify(r.drafts)); }
   // 14. Campagnes e-mail validées : un envoi espacé par passage, seulement si l'envoi a été autorisé (CAMPAIGN_SENDING=on)
   { const { sendNext } = await import('./campaigns.js'); r.campaign = await sendNext(db, { now }).catch((e) => ({ error: e.message })); }
+  // 14 ter. Disque presque plein : incident (alerte e-mail à l'administrateur quand les e-mails sont configurés)
+  { const { diskUsage } = await import('./disk.js'); const d = diskUsage(); r.disque = d && d.utilisePct;
+    if (d?.alerte) recordIncident(db, { kind: 'disk', severity: d.utilisePct >= 95 ? 'critical' : 'warning', message: `Disque de la base rempli à ${d.utilisePct} % (${d.libreMo} Mo libres) : augmenter la taille du disque dans Render` }); }
   // 15. Battement de cœur : prouve que les tâches automatiques tournent
   heartbeat.at = now;
   return r;

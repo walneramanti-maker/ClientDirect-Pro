@@ -4,7 +4,7 @@
 import { config } from './config.js';
 import { tenantCosts } from './costs.js';
 
-const REAL = "t.example=0 AND t.status!='demo' AND COALESCE(t.source,'')!='autotest'";
+const REAL = "t.example=0 AND t.status!='demo' AND COALESCE(t.source,'')!='autotest' AND COALESCE(t.source,'') NOT LIKE 'utm:controle%'";
 const dayIso = (ms) => new Date(ms).toISOString().slice(0, 10);
 const daysInMonth = (m) => new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0)).getUTCDate();
 const r2 = (x) => Math.round(x * 100) / 100;

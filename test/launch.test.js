@@ -1,7 +1,7 @@
 // Préparation du lancement : suivi commercial, CGV, crédits répartis, maintien en éveil, e-mail de test.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setup, jsonResponse } from './helpers.js';
+import { setup, signup, jsonResponse } from './helpers.js';
 
 const app = await setup({ FIRECRAWL_API_KEY: 'fc-test', ADMIN_EMAIL: 'admin@exemple.fr', BREVO_API_KEY: 'xkeysib-test', MAIL_FROM: 'ClientDirect Pro <alertes@exemple.fr>' });
 const { db } = app;
@@ -112,4 +112,19 @@ test('compte de test supprimé entièrement : même adresse réutilisable, rien 
 test('migration : le plan de production ne régénère ni BACKUP_KEY ni APP_SECRET (sinon les sauvegardes existantes seraient illisibles)', async () => {
   const yaml = (await import('node:fs')).readFileSync('render.yaml', 'utf8');
   for (const k of ['BACKUP_KEY', 'APP_SECRET']) assert.doesNotMatch(yaml, new RegExp(`key: ${k}\\n\\s+generateValue: true`), k);
+});
+
+test('lancement : espace disque surveillé, sites exclus du sitemap, comptes de contrôle hors statistiques, vérification Google', async () => {
+  const { diskUsage } = await import('../src/disk.js'); const d = diskUsage();
+  assert.ok(d && d.totalMo > 0 && d.libreMo >= 0 && d.utilisePct >= 0 && d.utilisePct <= 100 && typeof d.alerte === 'boolean', JSON.stringify(d));
+  const h = await (await fetch(`${app.base}/health`)).json(); assert.equal(typeof h.ready.disque.utilisePct, 'number');
+  const { config } = await import('../src/config.js'); const { publicTenants } = await import('../src/seo.js');
+  const { t } = await signup(app, { business: 'Garage Vitrine Demo', email: 'vitrine-demo@test.fr' });
+  assert.ok(publicTenants(app.db).some((x) => x.slug === t.slug));
+  const before = config.sitemapExclude; config.sitemapExclude = [t.slug];
+  try { assert.ok(!publicTenants(app.db).some((x) => x.slug === t.slug), 'exclu du sitemap et de l’annuaire'); } finally { config.sitemapExclude = before; }
+  app.db.run("UPDATE tenants SET source='utm:controle-lancement' WHERE id=?", t.id);
+  assert.ok(!publicTenants(app.db).some((x) => x.slug === t.slug), 'compte de contrôle jamais public');
+  const g = config.googleVerification; config.googleVerification = 'abc123';
+  try { assert.match((await app.client().get('/')).text, /<meta name="google-site-verification" content="abc123">/); } finally { config.googleVerification = g; }
 });

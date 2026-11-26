@@ -26,7 +26,7 @@ export function siteHead(t, { mode = 'live' } = {}) {
     makesOffer: t.services.slice(0, 10).map((s) => ({ '@type': 'Offer', name: s.name, price: s.price > 0 ? String(s.price) : undefined, priceCurrency: 'EUR' }))
   };
   const json = JSON.stringify(ld).replace(/</g, '\\u003c');
-  const robots = mode === 'live' && config.isProd ? 'index, follow' : 'noindex, nofollow';
+  const robots = mode === 'live' && config.isProd && !config.sitemapExclude.includes(String(t.slug).toLowerCase()) ? 'index, follow' : 'noindex, nofollow';
   return `<meta name="description" content="${esc(desc)}"><meta name="robots" content="${robots}"><link rel="canonical" href="${esc(url)}">
 <meta property="og:type" content="website"><meta property="og:title" content="${esc(t.name)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(url)}"><meta property="og:locale" content="fr_FR">
 <script type="application/ld+json">${json}</script>`;
@@ -43,6 +43,8 @@ export function robots(sitemapUrl, { allow = true } = {}) {
 /** Sites publiés (essai en cours, actifs ou en délai de grâce) pour le sitemap et l'annuaire. */
 export function publicTenants(db, now = Date.now()) {
   return db.all(`SELECT id, slug, name, metier, city, custom_domain, domain_status, created_at, updated_at FROM tenants
-    WHERE status='active' OR (status='trial' AND trial_ends_at > ?) OR (status='past_due' AND COALESCE(current_period_end,0) + ? > ?) ORDER BY city, name`, now, config.graceDays * 864e5, now);
+    WHERE (status='active' OR (status='trial' AND trial_ends_at > ?) OR (status='past_due' AND COALESCE(current_period_end,0) + ? > ?))
+      AND COALESCE(source,'') NOT LIKE 'utm:controle%' AND COALESCE(source,'')!='autotest' ORDER BY city, name`, now, config.graceDays * 864e5, now)
+    .filter((t) => !config.sitemapExclude.includes(String(t.slug).toLowerCase()));
 }
 export const DAYS_FR = DAYS;

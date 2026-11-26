@@ -34,6 +34,7 @@ import { track, isBot, last30, daily } from './stats.js';
 import { tenantCosts } from './costs.js';
 import { optoutLink, optout, exportTenant, deleteTenant, purgeTestTenant } from './privacy.js';
 import { maintenanceOn, setMaintenance, MAINTENANCE_ALLOWED } from './maintenance.js';
+import { diskUsage } from './disk.js';
 import { verifyPassword } from './security.js';
 
 const SESSION = 'cdp_s', PRE = 'cdp_pre';
@@ -176,9 +177,10 @@ export function createApp(db) {
     const lastBackup = db.one("SELECT created_at FROM backups WHERE status='ok' ORDER BY id DESC LIMIT 1")?.created_at || null;
     const ready = { backups: !!(config.supabaseUrl && config.supabaseServiceKey), lastBackup: lastBackup ? new Date(lastBackup).toISOString() : null, restoredFrom: db.one("SELECT v FROM meta WHERE k='restored_from'")?.v || null, stripe: !!config.stripeKey, stripeWebhook: !!(config.stripeWebhookSecret || db.one("SELECT 1 FROM meta WHERE k='stripe_webhook_secret'")), firecrawl: !!config.firecrawlKey, emailSending: !!(config.campaignSending && config.smtp.host) };
     // Compteurs anonymes pour vérifier les tests d'inscription et de paiement (aucune donnée personnelle)
-    ready.comptes = Object.fromEntries(db.all("SELECT status, COUNT(*) n FROM tenants WHERE example=0 AND status!='demo' AND COALESCE(source,'')!='autotest' GROUP BY status").map((r) => [r.status, r.n]));
+    ready.comptes = Object.fromEntries(db.all("SELECT status, COUNT(*) n FROM tenants WHERE example=0 AND status!='demo' AND COALESCE(source,'')!='autotest' AND COALESCE(source,'') NOT LIKE 'utm:controle%' GROUP BY status").map((r) => [r.status, r.n]));
     { const w = db.one('SELECT type, received_at FROM webhook_events ORDER BY received_at DESC LIMIT 1'); ready.dernierEvenementStripe = w ? { type: w.type, at: new Date(w.received_at).toISOString() } : null; }
     ready.facturesPayees = db.one("SELECT COUNT(*) n FROM invoices WHERE status='paid'").n;
+    ready.disque = diskUsage();
     if (!config.isProd) { let a = null; try { a = JSON.parse(db.one("SELECT v FROM meta WHERE k='autotest_last'")?.v || 'null'); } catch { a = null; } ready.autotest = a ? { at: a.at, ok: a.ok, formules: a.formules.map((f) => `${f.formule} : ${f.ok ? 'réussi' : 'échec'}`) } : null; }
     { const b = backupHealth(db); ready.sauvegardes = { ok: b.ok, problemes: b.problems, echecsDepuisDerniereReussite: b.failedSince, testRestauration: b.verified ? { ok: b.verified.ok, at: b.verified.at, fichier: b.verified.name, erreur: b.verified.error || null, contenu: b.verified.backup || null } : null }; }
     { const pot = db.all("SELECT CASE WHEN potential>=75 THEN 'A' WHEN potential>=50 THEN 'B' ELSE 'C' END cl, COUNT(*) n FROM prospects WHERE status='new' AND (phone IS NOT NULL OR email IS NOT NULL) GROUP BY cl"); ready.potentielJoignables = Object.fromEntries(pot.map((r) => [r.cl, r.n])); }
@@ -517,8 +519,8 @@ export function createApp(db) {
   // Bilan d'une période : inscriptions, abonnements, revenus, dépenses, canaux, territoires, avis
   function reviewData(fromIso, toIso) {
     const from = Date.parse(fromIso + 'T00:00:00Z'), to = Date.parse(toIso + 'T23:59:59Z');
-    const T = db.all("SELECT id, plan, status, country, source, created_at FROM tenants WHERE status NOT IN ('demo') AND example=0 AND COALESCE(source,'')!='autotest' AND created_at BETWEEN ? AND ?", from, to);
-    const paid = db.all("SELECT i.tenant_id, i.amount_cents FROM invoices i JOIN tenants t ON t.id=i.tenant_id WHERE i.status='paid' AND COALESCE(t.source,'')!='autotest' AND i.paid_at BETWEEN ? AND ?", from, to);
+    const T = db.all("SELECT id, plan, status, country, source, created_at FROM tenants WHERE status NOT IN ('demo') AND example=0 AND COALESCE(source,'')!='autotest' AND COALESCE(source,'') NOT LIKE 'utm:controle%' AND created_at BETWEEN ? AND ?", from, to);
+    const paid = db.all("SELECT i.tenant_id, i.amount_cents FROM invoices i JOIN tenants t ON t.id=i.tenant_id WHERE i.status='paid' AND COALESCE(t.source,'')!='autotest' AND COALESCE(t.source,'') NOT LIKE 'utm:controle%' AND i.paid_at BETWEEN ? AND ?", from, to);
     const revBy = new Map(); for (const i of paid) revBy.set(i.tenant_id, (revBy.get(i.tenant_id) || 0) + i.amount_cents / 100);
     const isPaying = (t) => ['active', 'past_due'].includes(t.status);
     const months = []; for (let d = new Date(fromIso + 'T00:00:00Z'); d <= new Date(to); d.setUTCMonth(d.getUTCMonth() + 1, 1)) months.push(d.toISOString().slice(0, 7));
