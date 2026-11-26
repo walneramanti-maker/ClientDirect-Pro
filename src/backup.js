@@ -33,15 +33,15 @@ async function put(name, data, dbFile) {
   const r = await storage(`object/${config.backupBucket}/${config.appEnv}/${name}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-upsert': 'true' }, body: data });
   if (!r.ok) throw new Error(`Supabase Storage ${r.status}: ${(await r.text()).slice(0, 160)}`);
 }
-export async function list(dbFile) {
-  if (!remoteConfigured()) { const d = localDir(dbFile); return fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith('.enc')).sort().reverse() : []; }
-  const r = await storage(`object/list/${config.backupBucket}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix: `${config.appEnv}/`, limit: 1000, sortBy: { column: 'name', order: 'desc' } }) });
+export async function list(dbFile, envName = config.appEnv) {
+  if (!remoteConfigured()) { const d = path.join(path.dirname(path.resolve(dbFile)), 'backups', envName); return fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith('.enc')).sort().reverse() : []; }
+  const r = await storage(`object/list/${config.backupBucket}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix: `${envName}/`, limit: 1000, sortBy: { column: 'name', order: 'desc' } }) });
   if (!r.ok) throw new Error(`Supabase Storage ${r.status}`);
   return (await r.json()).map((o) => o.name).filter((n) => n.endsWith('.enc')).sort().reverse();
 }
-async function get(name, dbFile) {
-  if (!remoteConfigured()) return fs.readFileSync(path.join(localDir(dbFile), name));
-  const r = await storage(`object/${config.backupBucket}/${config.appEnv}/${name}`);
+async function get(name, dbFile, envName = config.appEnv) {
+  if (!remoteConfigured()) return fs.readFileSync(path.join(path.dirname(path.resolve(dbFile)), 'backups', envName, name));
+  const r = await storage(`object/${config.backupBucket}/${envName}/${name}`);
   if (!r.ok) throw new Error(`Supabase Storage ${r.status}`);
   return Buffer.from(await r.arrayBuffer());
 }
@@ -91,6 +91,41 @@ export async function restore(dbFile, { name = null } = {}) {
   for (const s of ['-wal', '-shm']) fs.rmSync(dbFile + s, { force: true });
   fs.renameSync(tmp, dbFile);
   return { restored: pick };
+}
+
+/**
+ * Migration d'un environnement vers un autre (ex. recette « staging » → « production »), sur un disque vide uniquement.
+ * Exige le nom exact de la sauvegarde (celle créée et vérifiée par le mode maintenance) et refuse si l'environnement
+ * cible possède déjà des sauvegardes (on ne remplace jamais une production existante). La base migrée est rattachée au
+ * nouvel environnement ; les réglages Stripe propres à l'ancien (prix et secret de webhook du mode test) sont retirés
+ * pour être recréés avec la clé du nouvel environnement. Le mode maintenance reste actif : à désactiver après contrôle.
+ */
+export async function migrateFrom(dbFile, { fromEnv, name }) {
+  if (!fromEnv || fromEnv === config.appEnv) throw new Error('Environnement source invalide');
+  if (!name) throw new Error('MIGRATE_FROM_BACKUP manquant : indiquez la sauvegarde vérifiée à migrer');
+  if (fs.existsSync(dbFile)) throw new Error('Migration refusée : une base existe déjà sur ce disque');
+  if ((await list(dbFile)).length) throw new Error(`Migration refusée : l'environnement « ${config.appEnv} » a déjà des sauvegardes`);
+  if (!(await list(dbFile, fromEnv)).includes(name)) throw new Error(`Sauvegarde ${name} introuvable dans « ${fromEnv} »`);
+  const raw = zlib.gunzipSync(decrypt(await get(name, dbFile, fromEnv), secretOf()));
+  const tmp = `${dbFile}.migration`; fs.mkdirSync(path.dirname(path.resolve(dbFile)), { recursive: true }); fs.writeFileSync(tmp, raw);
+  const db = new DatabaseSync(tmp);
+  let counts;
+  try {
+    const ok = db.prepare('PRAGMA integrity_check').get().integrity_check;
+    if (ok !== 'ok') throw new Error('Sauvegarde corrompue : ' + ok);
+    const env = db.prepare("SELECT v FROM meta WHERE k='app_env'").get()?.v;
+    if (env && env !== fromEnv) throw new Error(`La sauvegarde appartient à « ${env} », pas à « ${fromEnv} »`);
+    db.exec('BEGIN');
+    db.prepare("INSERT INTO meta(k,v) VALUES('app_env',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(config.appEnv);
+    db.prepare("DELETE FROM meta WHERE k LIKE 'stripe\\_%' ESCAPE '\\'").run();
+    db.prepare("INSERT INTO meta(k,v) VALUES('migrated_from',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(`${fromEnv}/${name} @ ${new Date().toISOString()}`);
+    db.exec('COMMIT');
+    const n = (t) => db.prepare(`SELECT COUNT(*) n FROM ${t}`).get().n;
+    counts = { comptes: n('tenants'), prospects: n('prospects'), rendezVous: n('appointments') };
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} db.close(); fs.rmSync(tmp, { force: true }); throw e; }
+  db.close();
+  fs.renameSync(tmp, dbFile);
+  return { migrated: `${fromEnv}/${name}`, counts };
 }
 
 /** Âge maximal toléré de la dernière sauvegarde réussie avant alerte critique. */

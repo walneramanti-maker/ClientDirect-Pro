@@ -48,6 +48,15 @@ services:
       # Serveur payant : jamais en veille, pas de maintien en éveil
       - key: KEEP_AWAKE
         value: "0"
+      # Prix et webhook Stripe du mode réel créés automatiquement au premier démarrage (aucun paiement)
+      - key: STRIPE_AUTOSETUP
+        value: live
+      # Migration sans perte depuis la recette : nom EXACT de la sauvegarde affichée par le mode maintenance de la recette
+      # (Administration > Lancement > Maintenance). Utilisée une seule fois, sur le disque vide ; à retirer ensuite.
+      - key: MIGRATE_FROM_ENV
+        value: staging
+      - key: MIGRATE_FROM_BACKUP
+        sync: false
       # Secrets : à saisir dans Render, jamais dans ce fichier
       # À RECOPIER depuis le service de test (ne pas générer) : une nouvelle BACKUP_KEY empêcherait de déchiffrer
       # les sauvegardes existantes, et un nouvel APP_SECRET invaliderait les sessions et les liens d'opposition déjà envoyés.

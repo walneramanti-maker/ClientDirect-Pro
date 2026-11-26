@@ -77,3 +77,33 @@ test('restauration impossible (mauvaise clé ou stockage injoignable) : le serve
   }
   assert.deepEqual([...store.keys()].sort(), before, 'les bonnes sauvegardes ne sont jamais écrasées');
 });
+test('migration recette → production : reprise de la sauvegarde vérifiée, une seule fois, sans réglages Stripe de test', async () => {
+  store.clear(); fs.rmSync(path.join(dir, 'data'), { recursive: true, force: true });
+  let srv = await start();
+  const c = makeClient(`http://127.0.0.1:${port}`);
+  await c.submit('/inscription', '/inscription', { business: 'Garage Migration', tpl: 'garage', city: 'Cayenne', country: 'GF', tz: 'America/Cayenne', plan: 'pro', name: 'T', email: 'migration@test.fr', password: 'Migration2026', cgu: 'on' });
+  await stop(srv);
+  // Réglage Stripe du mode test enregistré dans la base de recette : ne doit pas suivre en production
+  { const { DatabaseSync } = await import('node:sqlite'); const d = new DatabaseSync(path.join(dir, 'data', 'cdp.db')); d.prepare("INSERT INTO meta(k,v) VALUES('stripe_webhook_secret','whsec_test') ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(); d.close(); }
+  srv = await start({ RESTORE_ON_BOOT: '0' }); await stop(srv); // nouvelle sauvegarde à l'arrêt, avec ce réglage
+  const name = [...store.keys()].filter((k) => k.startsWith('backups/development/')).map((k) => k.split('/').pop()).sort().pop();
+  fs.rmSync(path.join(dir, 'data'), { recursive: true, force: true }); // nouveau serveur, disque vide
+  const PROD = { APP_ENV: 'production', NODE_ENV: 'production', BASE_URL: 'https://clientdirectpro.example', APP_SECRET: 's'.repeat(40), MIGRATE_FROM_ENV: 'development' };
+  // Sans le nom exact de la sauvegarde : refus de démarrer, rien n'est créé
+  { const p = spawn(process.execPath, ['--no-warnings', 'src/server.js'], { env: ENV(PROD), stdio: ['ignore', 'pipe', 'pipe'] }); let out = ''; p.stderr.on('data', (d) => (out += d));
+    assert.equal(await new Promise((r) => p.on('exit', r)), 1); assert.match(out, /Migration impossible, démarrage refusé : MIGRATE_FROM_BACKUP manquant/); }
+  assert.equal(fs.existsSync(path.join(dir, 'data', 'cdp.db')), false);
+  srv = await start({ ...PROD, MIGRATE_FROM_BACKUP: name });
+  assert.match(srv.log(), /Migration réussie depuis development\//);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/s/garage-migration`)).status, 200, 'le site du client est repris');
+  const h = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
+  assert.equal(h.ready.stripeWebhook, false, 'le secret de webhook du mode test n’est pas repris');
+  assert.match(h.ready.restoredFrom, new RegExp(`development/${name}`));
+  await stop(srv);
+  assert.ok([...store.keys()].some((k) => k.startsWith('backups/production/')), 'la production sauvegarde dans son propre espace');
+  // Redémarrage : la production repart de SES sauvegardes, la migration n'est jamais rejouée
+  fs.rmSync(path.join(dir, 'data'), { recursive: true, force: true });
+  srv = await start({ ...PROD, MIGRATE_FROM_BACKUP: name });
+  assert.doesNotMatch(srv.log(), /Migration réussie/); assert.match(srv.log(), /Base restaurée depuis cdp-/);
+  await stop(srv);
+});

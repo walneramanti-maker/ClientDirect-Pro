@@ -4,7 +4,7 @@ import { openDb } from './db.js';
 import { createApp } from './app.js';
 import fs from 'node:fs';
 import { startScheduler } from './jobs.js';
-import { restore, createBackup, remoteConfigured } from './backup.js';
+import { restore, migrateFrom, createBackup, remoteConfigured } from './backup.js';
 
 const problems = envProblems();
 if (problems.length) { console.error(`Configuration refusée (${config.appEnv}) :\n- ` + problems.join('\n- ')); process.exit(1); }
@@ -17,7 +17,11 @@ if (config.restoreOnBoot && !fs.existsSync(config.dbPath)) {
     // Aucune sauvegarde : premier démarrage, on part d'une base neuve. Toute autre erreur (réseau, clé, fichier altéré) :
     // on refuse de démarrer, pour ne jamais remplacer les bonnes sauvegardes par une base vide.
     if (e.message !== 'Aucune sauvegarde disponible') { console.error(`Restauration impossible, démarrage refusé : ${e.message}`); process.exit(1); }
-    console.log('Aucune sauvegarde : nouvelle base.');
+    if (process.env.MIGRATE_FROM_ENV) {
+      // Premier démarrage de la production : reprise de la sauvegarde vérifiée de la recette (MIGRATE_FROM_ENV + MIGRATE_FROM_BACKUP)
+      try { const m = await migrateFrom(config.dbPath, { fromEnv: process.env.MIGRATE_FROM_ENV.trim(), name: (process.env.MIGRATE_FROM_BACKUP || '').trim() }); restoredFrom = m.migrated; console.log(`Migration réussie depuis ${m.migrated} : ${JSON.stringify(m.counts)}`); }
+      catch (e2) { console.error(`Migration impossible, démarrage refusé : ${e2.message}`); process.exit(1); }
+    } else console.log('Aucune sauvegarde : nouvelle base.');
   }
 }
 const db = openDb(config.dbPath, { appEnv: config.appEnv });
