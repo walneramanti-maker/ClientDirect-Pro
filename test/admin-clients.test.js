@@ -113,3 +113,20 @@ test('nouvelle interface : menu latéral, recherche globale, filtres rapides, pa
   const g = await admin.get('/admin/clients?kind=tous&q=Bruxelles'); assert.match(g.text, /Garage Bruxelles/, 'la recherche globale couvre tous les comptes');
   for (const u of ['/admin/paiements', '/admin/tickets', '/admin/parametres']) assert.notEqual((await app.client().get(u)).status, 200, `${u} réservé`);
 });
+
+test('accueil : filtres pays / territoire / ville, lignes cliquables, formules, temps réel, couleurs du résultat', async () => {
+  const d = await admin.get('/admin'); const rec = () => (x) => x.split('id="recentes"')[1].split('</section>')[0];
+  assert.match(d.text, /data-href="\/admin\/clients\/\d+"/, 'lignes cliquables'); assert.match(d.text, /\/static\/admin\.js/);
+  assert.match(d.text, /Abonnements et essais par formule/); for (const p of ['Essentiel', 'Pro', 'Premium']) assert.match(d.text, new RegExp(`<b>${p}</b>`));
+  assert.doesNotMatch(d.text, /Standard/, 'seulement les trois formules existantes');
+  const be = await admin.get('/admin?pays=BE'); assert.match(rec()(be.text), /Garage Bruxelles/); assert.doesNotMatch(rec()(be.text), /Salon Lyon/);
+  const city = await admin.get('/admin?ville=Fort'); assert.match(rec()(city.text), /Resto Fort/); assert.doesNotMatch(rec()(city.text), /Garage Bruxelles/);
+  const both = await admin.get('/admin?terr=FR&ville=Lyon'); assert.match(rec()(both.text), /Salon Lyon/); assert.match(both.text, /country=|terr=FR/);
+  const inj = await admin.get('/admin?ville=%25%27%3Cb%3E'); assert.equal(inj.status, 200); assert.doesNotMatch(inj.text, /value="%'<b>"/);
+  const live = await admin.get('/admin/live.json'); assert.equal(live.status, 200); const j = JSON.parse(live.text);
+  for (const k of ['active', 'trial', 'pastDue', 'mrr', 'revenue', 'expenses', 'result', 'byPlan', 'at']) assert.ok(k in j, k);
+  assert.equal(j.byPlan.length, 3); assert.deepEqual(j.byPlan.map((p) => p.plan), ['essentiel', 'pro', 'premium']);
+  assert.equal(j.result, Math.round((j.revenue - j.expenses) * 100) / 100);
+  assert.match(d.text, j.result < 0 ? /kc c-neg" data-k="result"/ : /kc c-pos" data-k="result"/, 'résultat rouge si négatif, vert sinon');
+  assert.notEqual((await app.client().get('/admin/live.json')).status, 200, 'réservé à l’administrateur');
+});

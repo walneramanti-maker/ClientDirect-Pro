@@ -507,9 +507,18 @@ export function createApp(db) {
   function adminData(c, msg = '') {
     const m = month(); const start = Date.parse(m + '-01T00:00:00Z');
     const terr = territoryStats(db);
-    const tf = c.url.searchParams.get('terr'); const terrFilter = ['GF', 'FR', 'MQ', 'GP', 'RE', 'YT', 'XX'].includes(tf) ? tf : '';
-    const terrSql = terrFilter ? (terrFilter === 'XX' ? " AND t.country NOT IN ('GF','FR','MQ','GP','RE','YT')" : ' AND t.country=?') : '';
-    const recent = db.all(`SELECT t.* FROM tenants t WHERE (${KIND_SQL})='client'${terrSql} ORDER BY t.created_at DESC LIMIT 8`, ...(terrFilter && terrFilter !== 'XX' ? [terrFilter] : [])); const tenants = recent;
+    // Filtres géographiques de l'accueil : territoire, pays, ville (entreprises récentes)
+    const sp = c.url.searchParams; const tf = sp.get('terr'); const terrFilter = ['GF', 'FR', 'MQ', 'GP', 'RE', 'YT', 'XX'].includes(tf) ? tf : '';
+    const countryFilter = COUNTRIES[sp.get('pays')] ? sp.get('pays') : ''; const cityFilter = clampStr(sp.get('ville') || '', 60);
+    const geo = []; const geoArgs = [];
+    if (terrFilter === 'XX') geo.push("t.country NOT IN ('GF','FR','MQ','GP','RE','YT')"); else if (terrFilter) { geo.push('t.country=?'); geoArgs.push(terrFilter); }
+    if (countryFilter) { geo.push('t.country=?'); geoArgs.push(countryFilter); }
+    if (cityFilter) { geo.push("t.city LIKE ? ESCAPE '\\'"); geoArgs.push(`%${cityFilter.replace(/[\\%_]/g, (x) => `\\${x}`)}%`); }
+    const recent = db.all(`SELECT t.*, (SELECT MAX(paid_at) FROM invoices i WHERE i.tenant_id=t.id AND i.status='paid') last_paid FROM tenants t WHERE (${KIND_SQL})='client'${geo.map((g) => ` AND ${g}`).join('')} ORDER BY t.created_at DESC LIMIT 8`, ...geoArgs); const tenants = recent;
+    const recentTotal = db.one(`SELECT COUNT(*) n FROM tenants t WHERE (${KIND_SQL})='client'${geo.map((g) => ` AND ${g}`).join('')}`, ...geoArgs).n;
+    const byPlan = Object.keys(PLANS).map((k) => ({ plan: k, name: PLANS[k].name, monthly: PLANS[k].monthly, payants: db.one(`SELECT COUNT(*) n FROM tenants t WHERE (${KIND_SQL})='client' AND t.plan=? AND t.status IN ('active','past_due')`, k).n, essais: db.one(`SELECT COUNT(*) n FROM tenants t WHERE (${KIND_SQL})='client' AND t.plan=? AND t.status='trial'`, k).n }));
+    const cities = db.all(`SELECT t.city, COUNT(*) n FROM tenants t WHERE (${KIND_SQL})='client' AND t.city!='' GROUP BY t.city ORDER BY n DESC LIMIT 200`).map((r) => r.city);
+    const countries = db.all(`SELECT DISTINCT t.country FROM tenants t WHERE (${KIND_SQL})='client'`).map((r) => r.country).filter((k) => COUNTRIES[k]);
     const clientCount = (where, ...a) => db.one(`SELECT COUNT(*) n FROM tenants t WHERE (${KIND_SQL})='client' AND ${where}`, ...a).n;
     const ai = db.one('SELECT COALESCE(SUM(calls),0) calls, COALESCE(SUM(in_tokens),0) i, COALESCE(SUM(out_tokens),0) o FROM ai_usage WHERE month=?', m);
     const expenses = db.all('SELECT * FROM expenses WHERE month=? OR (recurring=1 AND month<=?) ORDER BY id DESC', m, m);
@@ -517,7 +526,7 @@ export function createApp(db) {
     const count = (s) => db.one(`SELECT COUNT(*) n FROM tenants t WHERE t.status=? AND (${KIND_SQL})='client'`, s).n;
     return { canPurge: !config.isProd && (!config.stripeKey || isTestKey()),
       msg, tenants, expenses, aiCost, aiCalls: ai.calls,
-      counts: { active: count('active'), trial: count('trial'), pastDue: count('past_due') }, terrFilter,
+      counts: { active: count('active'), trial: count('trial'), pastDue: count('past_due') }, terrFilter, countryFilter, cityFilter, recentTotal, byPlan, cities, countries, updatedAt: Date.now(),
       trialsEnding: clientCount("t.status='trial' AND t.trial_ends_at BETWEEN ? AND ?", Date.now(), Date.now() + 3 * 864e5), openTickets: db.one("SELECT COUNT(*) n FROM tickets WHERE status='open'").n,
       mrr: terr.totals.mrr, terr, recent,
       revenueMonth: db.one("SELECT COALESCE(SUM(amount_cents),0) c FROM invoices WHERE status='paid' AND paid_at>=?", start).c / 100,
@@ -550,6 +559,11 @@ export function createApp(db) {
     if (c.form.confirm !== '1') { const d = clientDetail(db, id); if (!d) throw HttpError(404, 'Entreprise introuvable'); return html(c.res, V.adminClient(csrfToken(c), d, '', 'Cochez « Je confirme » pour valider l’action.'), 400); }
     try { const msg = clientAction(db, id, c.params.action, c.form, { adminId: c.session.user_id, issueToken, enqueue }); redirect(c.res, `/admin/clients/${id}?m=${encodeURIComponent(msg)}`); }
     catch (e) { const d = clientDetail(db, id); if (!d) throw HttpError(404, 'Entreprise introuvable'); html(c.res, V.adminClient(csrfToken(c), d, '', e.message), 400); }
+  });
+  // Indicateurs en temps réel (actualisés par la page toutes les 60 secondes)
+  on('GET', '/admin/live.json', (c) => {
+    requireAdmin(c); const d = adminData(c);
+    json(c.res, { at: d.updatedAt, active: d.counts.active, trial: d.counts.trial, pastDue: d.counts.pastDue, mrr: d.mrr, revenue: d.revenueMonth, expenses: d.expensesMonth, result: Math.round((d.revenueMonth - d.expensesMonth) * 100) / 100, signupsMonth: d.terr.totals.inscritsMois, alerts: d.incidents.length + d.openTickets + d.counts.pastDue + d.trialsEnding, byPlan: d.byPlan });
   });
   on('GET', '/admin', (c) => { requireAdmin(c); html(c.res, V.adminDashboard(csrfToken(c), adminData(c, c.url.searchParams.get('m') === 'ok' ? 'Enregistré.' : ''))); });
   // Bilan d'une période : inscriptions, abonnements, revenus, dépenses, canaux, territoires, avis

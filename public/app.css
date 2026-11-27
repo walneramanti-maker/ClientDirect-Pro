@@ -163,3 +163,10 @@ body.admin{background:#f3f5fa}
 @media (max-width:380px){.kgrid,.kgrid.three{grid-template-columns:1fr}}
 .kgrid .kc strong{font-size:clamp(1.15rem,1.55vw,1.7rem)}
 @media (max-width:900px){.kgrid .kc strong{font-size:clamp(1.05rem,4.6vw,1.35rem)}}
+.live{margin:-8px 0 14px}.pos{color:#15803d;font-weight:800}td.neg{color:#b91c1c;font-weight:800}
+.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.pl{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-radius:14px;text-decoration:none;color:var(--ink);border:1px solid rgba(0,0,0,.05)}.pl b{font-size:1.1rem}.pl strong{font-size:1.3rem}
+.pl-essentiel{background:#eef4ff}.pl-pro{background:#f2ecff}.pl-premium{background:#fff4e0}
+.geo{flex-wrap:wrap}.geof{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;width:100%;margin-top:4px}.geof label{display:flex;flex-direction:column;font-size:.85rem;font-weight:700;gap:4px;flex:1;min-width:150px}.geof select,.geof input{min-height:40px}
+tr.go{cursor:pointer}tr.go:hover td{background:#f7f9ff}
+.kc.flash-up{box-shadow:0 0 0 3px rgba(31,94,255,.35);transition:box-shadow .3s}
+@media (max-width:900px){.plans{grid-template-columns:1fr}.geof label{min-width:100%}}
