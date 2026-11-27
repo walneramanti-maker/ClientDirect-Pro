@@ -49,6 +49,8 @@ if (process.env.ADMIN_LOGIN && process.env.ADMIN_PASSWORD && process.env.ADMIN_T
   console.log('Compte administrateur créé à partir des variables d’environnement.');
 }
 import('./bootops.js').then(({ approveAutoCampaign }) => approveAutoCampaign(db)).catch((e) => console.error('Validation de campagne :', e.message));
+import('./bootops.js').then(({ renameCampaign }) => renameCampaign(db)).catch((e) => console.error('Campagne :', e.message));
+if (process.env.CAMPAIGN_CONTROL_COPY) setTimeout(() => Promise.all([import('./bootops.js'), import('./smtp.js')]).then(([B, M]) => B.campaignControlCopy(db, process.env, { send: M.sendMail, buildMessage: M.buildMessage, config })).catch((e) => console.error('Copie de contrôle :', e.message)), 20000).unref?.();
 { const { markInternal } = await import('./bootops.js'); try { markInternal(db); } catch (e) { console.error('Comptes internes :', e.message); } }
 { const { syncFixedCosts } = await import('./bootops.js'); try { syncFixedCosts(db); } catch (e) { console.error('Dépenses fixes :', e.message); } }
 if (process.env.CLEAN_STRIPE_TEST_DATA === '1') import('./bootops.js').then(async ({ cleanStripeTestData }) => { const { stripe } = await import('./billing.js'); return cleanStripeTestData(db, process.env, { stripeGet: (p) => stripe(p, null, 'GET'), liveKey: /^(sk|rk)_live_/.test(config.stripeKey || '') }); }).catch((e) => console.error('Nettoyage Stripe :', e.message));

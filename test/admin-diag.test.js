@@ -91,3 +91,15 @@ test('APPROVE_CAMPAIGN : valide le brouillon e-mail le plus récent, une seule f
   const c = mk('Préparée automatiquement : e-mails (J3)');
   assert.deepEqual(await B.approveAutoCampaign(db, { APPROVE_CAMPAIGN: 'v1' }, () => {}), { deja: 'v1' }); assert.equal(db.one('SELECT status FROM campaigns WHERE id=?', c).status, 'draft', 'pas de validation des brouillons suivants');
 });
+
+test('renommage de campagne et copie de contrôle (administrateur seul, liens personnels neutralisés, une fois)', async () => {
+  const B = await import('../src/bootops.js'); const { db } = app; const now = Date.now();
+  const cid = Number(db.run("INSERT INTO campaigns(name,channel,size,status,created_at) VALUES('Préparée automatiquement : e-mails','email',1,'approved',?)", now).lastInsertRowid);
+  db.run("INSERT INTO prospects(siren,name,created_at) VALUES('900000001','TEST',?)", now);
+  db.run("INSERT INTO campaign_items(campaign_id,prospect_id,to_addr,message,subject,status,sent_at) VALUES(?,(SELECT id FROM prospects WHERE siren='900000001'),'pro@exemple.fr','Voir https://clientdirectpro.fr/demo/abc123 et https://x.fr/inscription?claim=abc123&formule=pro ou https://clientdirectpro.fr/stop/zz9','Objet','sent',?)", cid, now);
+  assert.equal(B.renameCampaign(db, { RENAME_CAMPAIGN: `${cid}=Campagne n° 1 — e-mails` }, () => {}), 'Campagne n° 1 — e-mails'); assert.equal(B.renameCampaign(db, { RENAME_CAMPAIGN: `${cid}=Campagne n° 1 — e-mails` }, () => {}), null);
+  const sent = []; const deps = { send: async (o) => { sent.push(o); return '250 OK'; }, buildMessage: (m) => JSON.stringify(m), config: { adminEmail: 'boss@cdp.fr', smtp: { from: 'contact@clientdirectpro.fr' } } };
+  await B.campaignControlCopy(db, { CAMPAIGN_CONTROL_COPY: 't1' }, deps, () => {}); await B.campaignControlCopy(db, { CAMPAIGN_CONTROL_COPY: 't1' }, deps, () => {});
+  assert.equal(sent.length, 1, 'une seule copie'); assert.equal(sent[0].to, 'boss@cdp.fr', 'uniquement à l’administrateur');
+  const m = JSON.parse(sent[0].data); assert.match(m.subject, /^\[Copie de contrôle\] Objet/); assert.doesNotMatch(m.text, /abc123|zz9/, 'liens personnels neutralisés');
+});

@@ -228,3 +228,27 @@ export async function approveAutoCampaign(db, env = process.env, log = console.l
   log(`Campagne ${c.id} validée par l’administrateur : ${n} e-mail(s) prêts (oppositions retirées)`);
   return { validee: c.id, prets: n };
 }
+
+/** RENAME_CAMPAIGN=<id>=<nom> : renomme une campagne (affichage seulement). Idempotent. */
+export function renameCampaign(db, env = process.env, log = console.log) {
+  const m = /^(\d+)=(.{3,80})$/.exec(String(env.RENAME_CAMPAIGN || '').trim()); if (!m) return null;
+  const c = db.one('SELECT name FROM campaigns WHERE id=?', Number(m[1])); if (!c || c.name === m[2]) return null;
+  db.run('UPDATE campaigns SET name=? WHERE id=?', m[2], Number(m[1])); log(`Campagne ${m[1]} renommée : ${m[2]}`); return m[2];
+}
+
+/**
+ * CAMPAIGN_CONTROL_COPY=<jeton> : envoie UNE copie de contrôle, à l'administrateur uniquement, du premier e-mail de campagne
+ * réellement parti (même texte, même serveur d'envoi) pour vérifier sa livraison de façon indépendante. Une fois par jeton.
+ */
+export async function campaignControlCopy(db, env = process.env, { send, config, buildMessage }, log = console.log) {
+  const tok = String(env.CAMPAIGN_CONTROL_COPY || '').trim(); if (!tok || !config.adminEmail) return null;
+  if (db.one("SELECT v FROM meta WHERE k='campaign_control_copy'")?.v === tok) return { deja: tok };
+  const it = db.one("SELECT i.*, p.name FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.status='sent' ORDER BY i.sent_at LIMIT 1");
+  if (!it) { log('Copie de contrôle : aucun e-mail de campagne encore envoyé'); return { aucun: true }; }
+  db.run("INSERT INTO meta(k,v) VALUES('campaign_control_copy',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", tok);
+  const S = config.smtp;
+  const data = buildMessage({ from: S.from, fromName: S.fromName, to: config.adminEmail, subject: `[Copie de contrôle] ${it.subject || 'campagne'}`, text: `Copie de contrôle du message envoyé le ${new Date(it.sent_at).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' })} (heure de Paris) à ${mask(it.to_addr)}. Les liens personnels de ce prospect ont été neutralisés.\n\n----------\n\n${it.message.replace(/https?:\/\/\S+\/(demo|stop)\/[\w-]+/g, '[lien personnel]').replace(/claim=[\w-]+/g, 'claim=[lien personnel]')}` });
+  const r = await send({ ...S, to: config.adminEmail, data });
+  log(`Copie de contrôle envoyée à l’administrateur (${mask(config.adminEmail)}) : ${String(r).slice(0, 80)}`);
+  return { envoyee: true };
+}
