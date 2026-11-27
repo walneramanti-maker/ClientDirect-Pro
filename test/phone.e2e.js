@@ -16,7 +16,7 @@ const errorsOf = (p) => { const e = []; p.on('pageerror', (x) => e.push(x.messag
 let n = 0;
 async function signupIn(p, { phone, before = async () => {} }) {
   n++; await p.goto(app.base + '/inscription'); await before(p);
-  await p.fill('#business', `Entreprise Nav ${n}`); await p.fill('#city', 'Ville'); await p.fill('#phone', phone);
+  await p.fill('#business', `Entreprise Nav ${n}`); await p.selectOption('#activity', 'artisan'); await p.fill('#city', 'Ville'); await p.fill('#phone', phone);
   await p.fill('#name', 'Pro'); await p.fill('#email', `nav${n}@tel.test`); await p.fill('#password', 'Navigateur2026ok'); await p.check('input[name=cgu]');
   await Promise.all([p.waitForURL(/\/pro/), p.click('#signup button[type=submit]')]);
   return app.db.one('SELECT * FROM tenants WHERE name=?', `Entreprise Nav ${n}`);

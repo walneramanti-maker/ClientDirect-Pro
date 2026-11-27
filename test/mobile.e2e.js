@@ -36,7 +36,7 @@ test('mobile : page d’accueil lisible, sans débordement, bouton d’inscripti
 test('mobile : inscription complète depuis un téléphone', { skip }, async () => {
   const { p, errors } = await open('/inscription');
   await noOverflow(p, 'inscription');
-  await p.fill('#business', 'Garage Mobile Kourou'); await p.selectOption('#tpl', 'garage'); await p.fill('#city', 'Kourou'); await p.fill('#phone', '0694 55 66 77');
+  await p.fill('#business', 'Garage Mobile Kourou'); await p.selectOption('#activity', 'garage'); await p.fill('#city', 'Kourou'); await p.fill('#phone', '0694 55 66 77');
   await p.fill('#name', 'Patron Mobile'); await p.fill('#email', 'mobile@test.fr'); await p.fill('#password', 'Mobile2026ok'); await p.check('input[name=cgu]');
   await Promise.all([p.waitForURL(/\/pro/), p.click('button[type=submit]')]);
   assert.ok(await p.isVisible('text=Votre site est en ligne'));

@@ -47,7 +47,9 @@ for (const dev of Object.keys(DEVICES)) {
   test(`${dev} : inscription, site créé automatiquement, confirmation d’un rendez-vous`, { skip }, async () => {
     const ctx = await ctxFor(dev); const p = await ctx.newPage(); const errs = errorsOf(p);
     await p.goto(app.base + '/inscription'); await check(p, `${dev}-inscription`);
-    await p.fill('#business', `Garage ${dev}`); await p.fill('#city', 'Ville'); await p.fill('#phone', '0612345678');
+    await p.fill('#business', `Garage ${dev}`);
+    await p.fill('#activity_search', 'garage'); await p.locator('#activity_results li[data-key="garage"]').click(); assert.equal(await p.inputValue('#activity'), 'garage');
+    await p.fill('#city', 'Ville'); await p.fill('#phone', '0612345678');
     await p.fill('#name', 'Pro'); await p.fill('#email', `${dev}@devices.test`); await p.fill('#password', 'Appareil2026ok'); await p.check('input[name=cgu]');
     await Promise.all([p.waitForURL(/\/pro/), p.click('#signup button[type=submit]')]); await check(p, `${dev}-tableau-de-bord`);
     const tn = app.db.one('SELECT * FROM tenants WHERE name=?', `Garage ${dev}`); assert.ok(tn.tz, 'fuseau horaire détecté');
