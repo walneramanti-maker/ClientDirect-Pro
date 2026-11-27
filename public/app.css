@@ -91,3 +91,7 @@ input[type=checkbox]{width:auto;min-height:0;margin-right:6px}input[type=color]{
 pre.msg{white-space:pre-wrap;font:inherit;font-size:.9rem;background:var(--bg);border-radius:8px;padding:10px;margin:6px 0 0}
 
 .lang-float{display:flex;justify-content:flex-end;max-width:1100px;margin:0 auto;padding:6px 18px 0;font-size:.85rem}.lang-float .langs a{color:var(--blue)}
+.pw-wrap{position:relative;display:block}
+.pw-wrap input{width:100%;padding-right:3rem}
+.pw-eye{position:absolute;right:.35rem;top:50%;transform:translateY(-50%);width:2.6rem;height:2.6rem;display:flex;align-items:center;justify-content:center;background:none;border:0;color:inherit;opacity:.7;cursor:pointer;padding:0;margin:0}
+.pw-eye:hover,.pw-eye:focus-visible{opacity:1}
