@@ -31,6 +31,9 @@ export async function probeNetwork() {
   { const t0 = Date.now();
     try { const res = await http.fetch(`${config.sireneApi}/search?q=garage&per_page=1`, { headers: { accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B ; contact@clientdirectpro.fr)' }, signal: AbortSignal.timeout(15000) }); r.sirene = `HTTP ${res.status} en ${Date.now() - t0} ms`; }
     catch (e) { r.sirene = `échec : ${e.cause?.code || e.cause?.message || e.name || e.message} en ${Date.now() - t0} ms`; } }
+  if (config.sireneFallback) { const t0 = Date.now();
+    try { const res = await http.fetch(`${config.sireneFallback}?limit=1`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) }); r.sirene_secours = `HTTP ${res.status} en ${Date.now() - t0} ms`; }
+    catch (e) { r.sirene_secours = `échec : ${e.cause?.code || e.cause?.message || e.name || e.message} en ${Date.now() - t0} ms`; } }
   // Même API en IPv4 puis en IPv6 forcés : distingue un blocage d'adresse d'un problème de famille d'adresses
   for (const family of [4, 6]) {
     r[`sirene_ipv${family}`] = await new Promise((ok) => {

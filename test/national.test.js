@@ -159,3 +159,20 @@ test('prospection : panne réseau = pages non perdues (curseur immobile), arrêt
   try { await P.runNationalCampaign(db, { quota: 1, maxCalls: 1 }); assert.equal(cur(), 3); await P.runNationalCampaign(db, { quota: 1, maxCalls: 1 }); assert.equal(cur(), 4, 'pas réappliquée'); }
   finally { delete process.env.PROSPECT_CURSOR_RESET; }
 });
+
+test('prospection : API principale refusée → copie publique du registre (gratuite, sans clé) prend le relais', async () => {
+  const seen = [];
+  app.net.setFetch(async (url) => {
+    const u = String(url); seen.push(u);
+    if (u.includes('recherche-entreprises') || u.includes('/search')) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+    return jsonResponse({ total_count: 2, results: [
+      { siren: '912345678', siret: '91234567800011', denominationunitelegale: null, prenomusuelunitelegale: 'JEAN', nomunitelegale: 'NUMA', enseigne1etablissement: 'GARAGE DU FLEUVE', activiteprincipaleetablissement: '45.20A', codepostaletablissement: '97351', libellecommuneetablissement: 'MATOURY', adresseetablissement: '17 Rue SAPOTILLE', datecreationetablissement: '2025-04-07', trancheeffectifsetablissement: 'Etablissement non employeur' },
+      { siren: '912345679', siret: '91234567900011', denominationunitelegale: 'AUTO PLUS', activiteprincipaleetablissement: '45.20A', codepostaletablissement: '97300', libellecommuneetablissement: 'CAYENNE', trancheeffectifsetablissement: '3 à 5 salariés' }] });
+  });
+  const r = await P.searchSirene({ tpl: 'garage', departement: '973', page: 1, withMeta: true });
+  assert.equal(r.source, 'secours'); assert.equal(r.list.length, 2);
+  assert.equal(r.list[0].name, 'JEAN NUMA (GARAGE DU FLEUVE)'); assert.equal(P.displayName(r.list[0].name), 'Garage du Fleuve'); assert.equal(r.list[0].dept, '973'); assert.equal(r.list[0].tpl, 'garage');
+  const ods = seen.find((u) => u.includes('opendatasoft')); assert.ok(ods); const w = decodeURIComponent(ods);
+  assert.match(w, /statutdiffusionetablissement="O"/, 'entreprises non diffusibles exclues'); assert.match(w, /etatadministratifetablissement="Actif"/); assert.match(w, /codedepartementetablissement="973"/);
+  const n0 = db.one('SELECT COUNT(*) n FROM prospects').n; P.importProspects(db, r.list); assert.equal(db.one('SELECT COUNT(*) n FROM prospects').n, n0 + 2);
+});

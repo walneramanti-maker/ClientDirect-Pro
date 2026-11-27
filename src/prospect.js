@@ -33,15 +33,41 @@ export async function searchSirene({ tpl, commune = null, departement = null, pa
   else { if (!COMMUNES[commune]) throw new Error('Commune inconnue'); where = `code_commune=${commune}`; }
   const url = `${config.sireneApi}/search?activite_principale=${encodeURIComponent(T.naf.join(','))}&${where}&etat_administratif=A&per_page=25&page=${page}`;
   let res;
+  // API principale injoignable (connexions refusées depuis l'hébergeur) : la copie publique du registre prend le relais
+  const viaFallback = async (err) => { if (!config.sireneFallback || !departement) throw err; let r; try { r = await searchSireneFallback({ tpl, departement, page }); } catch (fe) { throw Object.assign(new Error(`${err.message} ; ${fe.message}`), { network: !!(err.network || fe.network), rateLimited: fe.rateLimited }); } return withMeta ? r : r.list; };
   // Échec réseau : cause exacte (DNS, connexion refusée, TLS, délai) au lieu du seul « fetch failed »
   try { res = await net.fetch(url, { headers: { accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B ; contact@clientdirectpro.fr)' }, signal: AbortSignal.timeout(20000) }); }
-  catch (e) { const c = e.cause?.code || e.cause?.message || e.name; throw Object.assign(new Error(`${e.message}${c && c !== e.message ? ` (${c})` : ''}`), { network: true }); }
+  catch (e) { const c = e.cause?.code || e.cause?.message || e.name; const err = Object.assign(new Error(`${e.message}${c && c !== e.message ? ` (${c})` : ''}`), { network: true }); return viaFallback(err); }
+  if (res.status >= 500) return viaFallback(new Error(`API Recherche d'entreprises ${res.status}`));
   if (res.status === 429) throw Object.assign(new Error("L'API publique limite le nombre de requêtes, réessayez dans une minute."), { rateLimited: true });
   if (!res.ok) throw new Error(`API Recherche d'entreprises ${res.status}`);
   const j = await res.json();
   // Les grandes entreprises (plus de 20 salariés) ne sont pas la cible
   const list = (j.results || []).map((r) => fromSirene(r, tpl, commune, departement)).filter((p) => p && ['NN', '00', '01', '02', '03', '11'].includes(p.staff));
   return withMeta ? { list, totalPages: Number(j.total_pages) || 0, raw: (j.results || []).length } : list;
+}
+const STAFF_ODS = { 'Etablissement non employeur': 'NN', '0 salarié': '00', '1 ou 2 salariés': '01', '3 à 5 salariés': '02', '6 à 9 salariés': '03', '10 à 19 salariés': '11' };
+/** Copie publique du registre SIRENE (OpenDataSoft, gratuite, sans clé) : mêmes critères que l'API principale. */
+export async function searchSireneFallback({ tpl, departement, page = 1 }) {
+  const T = TEMPLATES[tpl]; if (!T || !DEPARTEMENTS[departement]) throw new Error('Critères inconnus');
+  const where = `activiteprincipaleetablissement in (${T.naf.map((n) => `"${n}"`).join(',')}) and codedepartementetablissement="${departement}" and etatadministratifetablissement="Actif" and statutdiffusionetablissement="O" and (trancheeffectifsetablissementtriable is null or trancheeffectifsetablissementtriable<=10)`;
+  const url = `${config.sireneFallback}?where=${encodeURIComponent(where)}&order_by=siret&limit=25&offset=${(page - 1) * 25}`;
+  let res;
+  try { res = await net.fetch(url, { headers: { accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B ; contact@clientdirectpro.fr)' }, signal: AbortSignal.timeout(20000) }); }
+  catch (e) { const c = e.cause?.code || e.cause?.message || e.name; throw Object.assign(new Error(`secours : ${e.message}${c && c !== e.message ? ` (${c})` : ''}`), { network: true }); }
+  if (res.status === 429) throw Object.assign(new Error('Source de secours : limite de requêtes atteinte'), { rateLimited: true });
+  if (!res.ok) throw Object.assign(new Error(`Source de secours ${res.status}`), { network: res.status >= 500 });
+  const j = await res.json(); const rows = j.results || [];
+  const list = rows.map((r) => {
+    const legal = r.denominationunitelegale || [r.prenomusuelunitelegale || r.prenom1unitelegale, r.nomusageunitelegale || r.nomunitelegale].filter(Boolean).join(' ');
+    const ens = r.enseigne1etablissement || r.denominationusuelleetablissement || r.denominationusuelle1unitelegale;
+    const name = clampStr(`${legal || ens || ''}${ens && legal && ens !== legal ? ` (${ens})` : ''}`.toUpperCase(), 120);
+    if (!name || /\[ND\]/.test(name)) return null;
+    const postal = r.codepostaletablissement || '';
+    return { siren: r.siren, siret: r.siret || '', name, naf: r.activiteprincipaleetablissement || '', tpl: tplFromNaf(r.activiteprincipaleetablissement) || tpl, city: r.libellecommuneetablissement || '', postal,
+      address: clampStr([r.adresseetablissement, postal, r.libellecommuneetablissement].filter(Boolean).join(' '), 200), created_on: r.datecreationetablissement || null, staff: STAFF_ODS[r.trancheeffectifsetablissement] || 'NN', dept: deptOf(postal) || departement };
+  }).filter(Boolean);
+  return { list, totalPages: Math.ceil((Number(j.total_count) || 0) / 25), raw: rows.length, source: 'secours' };
 }
 /** Recherche une entreprise précise par son SIREN. */
 export async function sireneBySiren(siren) {
