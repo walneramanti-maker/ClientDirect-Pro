@@ -210,3 +210,21 @@ export function markInternal(db, env = process.env, log = console.log) {
   if (out.length) log(`Comptes internes : ${out.join(' ; ')}`);
   return out;
 }
+
+/**
+ * APPROVE_CAMPAIGN=<jeton> : validation par l'administrateur de la campagne e-mail préparée automatiquement la plus récente.
+ * Appliquée UNE seule fois par jeton (les brouillons des jours suivants ne sont jamais validés par ce moyen). Journalisée.
+ */
+export async function approveAutoCampaign(db, env = process.env, log = console.log, now = Date.now()) {
+  const tok = String(env.APPROVE_CAMPAIGN || '').trim(); if (!tok) return null;
+  if (db.one("SELECT v FROM meta WHERE k='campaign_approval_token'")?.v === tok) return { deja: tok };
+  const { approveCampaign, AUTO_PREFIX } = await import('./campaigns.js');
+  const c = db.one("SELECT id, name, size FROM campaigns WHERE channel='email' AND status='draft' AND name LIKE ? ORDER BY id DESC LIMIT 1", `${AUTO_PREFIX}%`);
+  if (!c) { log('Validation de campagne : aucun brouillon e-mail à valider'); return { aucune: true }; }
+  approveCampaign(db, c.id, now);
+  db.run("INSERT INTO meta(k,v) VALUES('campaign_approval_token',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", tok);
+  db.run("INSERT INTO audit(action,detail,created_at) VALUES('campagne.validee',?,?)", `campagne ${c.id} « ${c.name} » validée par l’administrateur (${tok})`, now);
+  const n = db.one("SELECT COUNT(*) n FROM campaign_items WHERE campaign_id=? AND status='ready'", c.id).n;
+  log(`Campagne ${c.id} validée par l’administrateur : ${n} e-mail(s) prêts (oppositions retirées)`);
+  return { validee: c.id, prets: n };
+}

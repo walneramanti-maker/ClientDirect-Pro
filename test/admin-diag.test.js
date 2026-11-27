@@ -80,3 +80,14 @@ test('MARK_INTERNAL : classement réversible, idempotent, journalisé, sans supp
   assert.deepEqual(B.markInternal(db, { MARK_INTERNAL: 'popx' }, () => {}), []);
   const t = db.one("SELECT internal, status FROM tenants WHERE slug='popx'"); assert.equal(t.internal, 1); assert.equal(t.status, 'trial');
 });
+
+test('APPROVE_CAMPAIGN : valide le brouillon e-mail le plus récent, une seule fois par jeton', async () => {
+  const B = await import('../src/bootops.js'); const { db } = app; const now = Date.now();
+  const mk = (name, ch = 'email') => Number(db.run("INSERT INTO campaigns(name,channel,size,status,created_at) VALUES(?,?,1,'draft',?)", name, ch, now).lastInsertRowid);
+  const a = mk('Préparée automatiquement : e-mails (J1)'); mk('Préparée automatiquement : appels', 'appel'); const b = mk('Préparée automatiquement : e-mails (J2)');
+  assert.equal(await B.approveAutoCampaign(db, {}, () => {}), null);
+  assert.equal((await B.approveAutoCampaign(db, { APPROVE_CAMPAIGN: 'v1' }, () => {})).validee, b);
+  assert.equal(db.one('SELECT status FROM campaigns WHERE id=?', b).status, 'approved'); assert.equal(db.one('SELECT status FROM campaigns WHERE id=?', a).status, 'draft');
+  const c = mk('Préparée automatiquement : e-mails (J3)');
+  assert.deepEqual(await B.approveAutoCampaign(db, { APPROVE_CAMPAIGN: 'v1' }, () => {}), { deja: 'v1' }); assert.equal(db.one('SELECT status FROM campaigns WHERE id=?', c).status, 'draft', 'pas de validation des brouillons suivants');
+});

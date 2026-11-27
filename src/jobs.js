@@ -125,6 +125,7 @@ export async function runJobs(db, now = Date.now()) {
   }
   // Les réponses sont lues AVANT tout envoi : un STOP reçu n'est jamais suivi d'une relance
   { const { sendNext } = await import('./campaigns.js'); const { imapReady } = await import('./imap.js'); r.campaign = r.replies?.error || (config.campaignSending && !imapReady()) ? { skipped: r.replies?.error ? 'réponses illisibles : envoi suspendu' : 'boîte de réception non lue : envoi suspendu' } : await sendNext(db, { now }).catch((e) => ({ error: e.message })); }
+  if (r.campaign?.sent || r.campaign?.error) console.log('Campagne :', JSON.stringify(r.campaign));
   // 14 ter. Disque presque plein : incident (alerte e-mail à l'administrateur quand les e-mails sont configurés)
   { const { diskUsage } = await import('./disk.js'); const d = diskUsage(); r.disque = d && d.utilisePct;
     if (d?.alerte) recordIncident(db, { kind: 'disk', severity: d.utilisePct >= 95 ? 'critical' : 'warning', message: `Disque de la base rempli à ${d.utilisePct} % (${d.libreMo} Mo libres) : augmenter la taille du disque dans Render` }); }
