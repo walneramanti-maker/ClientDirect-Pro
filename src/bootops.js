@@ -181,5 +181,16 @@ export function syncFixedCosts(db, env = process.env, log = console.log, now = D
 
 /** Clôture des incidents passagers qui ne se reproduisent plus (réseau, enrichissement, prospection) depuis 24 h. */
 export function autoResolveIncidents(db, now = Date.now()) {
-  return Number(db.run("UPDATE incidents SET resolved_at=? WHERE resolved_at IS NULL AND kind IN ('enrichissement','prospection','prospection_reseau','netprobe') AND severity!='critical' AND last_at<?", now, now - 864e5).changes);
+  // Ancien format : un incident par métier et département pour une même panne réseau. Désormais une panne réseau
+  // produit un seul incident « prospection_reseau » : les doublons de l'ancien format sont clos (remplacés).
+  const dup = Number(db.run("UPDATE incidents SET resolved_at=? WHERE resolved_at IS NULL AND kind='prospection' AND message LIKE 'Campagne nationale (%) : fetch failed%'", now).changes);
+  return dup + Number(db.run("UPDATE incidents SET resolved_at=? WHERE resolved_at IS NULL AND kind IN ('enrichissement','prospection','prospection_reseau','netprobe') AND severity!='critical' AND last_at<?", now, now - 864e5).changes);
+}
+
+/** Aperçu de la campagne e-mail préparée (pour validation) : entreprises, besoin constaté, objet. Adresses masquées. */
+export function campaignPreview(db, log = console.log) {
+  const c = db.one("SELECT id, name, size, status FROM campaigns WHERE channel='email' AND status IN ('draft','approved') ORDER BY id DESC LIMIT 1");
+  if (!c) return log('Aperçu campagne : aucune campagne e-mail préparée');
+  const rows = db.all('SELECT p.name, p.city, p.dept, p.postal, p.tpl, p.site_status, p.site_flags, p.potential, p.email, i.subject FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC, i.id', c.id);
+  log(`Aperçu campagne ${c.id} (${c.status}, ${rows.length} entreprises) : ${JSON.stringify(rows.map((r) => ({ ...r, email: mask(r.email) })))}`);
 }

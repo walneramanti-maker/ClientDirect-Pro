@@ -67,6 +67,8 @@ test('nettoyage Stripe : seules les données inexistantes sur le compte réel so
   db.run("INSERT INTO incidents(fingerprint,kind,severity,message,first_at,last_at) VALUES('f2','enrichissement','info','fetch failed',?,?)", now - 3 * 864e5, now - 2 * 864e5);
   db.run("INSERT INTO incidents(fingerprint,kind,severity,message,first_at,last_at) VALUES('f3','prospection','info','fetch failed',?,?)", now - 3600e3, now - 3600e3);
   db.run("INSERT INTO incidents(fingerprint,kind,severity,message,first_at,last_at) VALUES('f4','backup','critical','sauvegarde',?,?)", now - 3 * 864e5, now - 2 * 864e5);
-  assert.equal(B.autoResolveIncidents(db, now), 1);
+  db.run("INSERT INTO incidents(fingerprint,kind,severity,message,first_at,last_at) VALUES('f5','prospection','info','Campagne nationale (garage, 95) : fetch failed',?,?)", now - 3600e3, now - 3600e3);
+  assert.equal(B.autoResolveIncidents(db, now), 2, 'ancien passager + doublon réseau de l’ancien format');
+  assert.equal(db.one("SELECT resolved_at FROM incidents WHERE fingerprint='f3'").resolved_at, null, 'incident récent d’un autre type : reste ouvert');
   assert.equal(db.one("SELECT resolved_at FROM incidents WHERE fingerprint='f4'").resolved_at, null);
 });
