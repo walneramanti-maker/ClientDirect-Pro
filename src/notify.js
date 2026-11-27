@@ -147,10 +147,13 @@ export function renderEmail(template, p) {
 }
 /** Mise en page HTML sobre, lisible sur téléphone (une colonne, 560 px max), liens en boutons, pied de page légal. */
 export function htmlEmail({ subject, text, brand = 'ClientDirect Pro', color = '#14161a', lang = 'fr' }) {
+  // Texte lisible sur la couleur du professionnel : foncé sur une couleur claire (ex. jaune par défaut), blanc sinon
+  const lum = (() => { const m = /^#([0-9a-f]{6})$/i.exec(color); if (!m) return 0; const n = parseInt(m[1], 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; })();
+  const ink = lum > 0.6 ? '#14161a' : '#ffffff';
   const URL_RE = /(https?:\/\/[^\s<>"')]+)/g;
   const line = (l) => {
     const m = /^(.*?)\s*:?\s*(https?:\/\/\S+)\s*$/.exec(l);
-    if (m && m[2].length > 8) return `${m[1] ? `<p style="margin:16px 0 8px">${esc(m[1].replace(/\s*:$/, ''))}</p>` : ''}<p style="margin:0 0 16px"><a href="${esc(m[2])}" style="display:inline-block;background:${color};color:#ffffff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:8px">${esc(lang === 'en' ? 'Open' : 'Ouvrir')}</a><br><span style="font-size:12px;color:#6b7280;word-break:break-all">${esc(m[2])}</span></p>`;
+    if (m && m[2].length > 8) return `${m[1] ? `<p style="margin:16px 0 8px">${esc(m[1].replace(/\s*:$/, ''))}</p>` : ''}<p style="margin:0 0 16px"><a href="${esc(m[2])}" style="display:inline-block;background:${color};color:${ink};text-decoration:none;font-weight:600;padding:12px 20px;border-radius:8px">${esc(lang === 'en' ? 'Open' : 'Ouvrir')}</a><br><span style="font-size:12px;color:#6b7280;word-break:break-all">${esc(m[2])}</span></p>`;
     return l.trim() ? `<p style="margin:0 0 12px">${esc(l).replace(URL_RE, (u) => `<a href="${u}" style="color:${color}">${u}</a>`)}</p>` : '';
   };
   const L = config.legal;
@@ -158,7 +161,7 @@ export function htmlEmail({ subject, text, brand = 'ClientDirect Pro', color = '
 <body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#14161a">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden">
-<tr><td style="background:${color};color:#ffffff;padding:18px 24px;font-size:18px;font-weight:800">${esc(brand)}</td></tr>
+<tr><td style="background:${color};color:${ink};padding:18px 24px;font-size:18px;font-weight:800">${esc(brand)}</td></tr>
 <tr><td style="padding:24px;font-size:16px;line-height:1.5">${String(text || '').split('\n').map(line).join('')}</td></tr>
 <tr><td style="padding:16px 24px;background:#fafafa;font-size:12px;line-height:1.5;color:#6b7280">${esc(brand !== 'ClientDirect Pro' ? (lang === 'en' ? `Message sent by ${brand} via ClientDirect Pro.` : `Message envoyé par ${brand} via ClientDirect Pro.`) : 'ClientDirect Pro')}<br>${esc(L.name)}${L.email ? ` · <a href="mailto:${esc(L.email)}" style="color:#6b7280">${esc(L.email)}</a>` : ''} · <a href="${esc(config.baseUrl)}" style="color:#6b7280">${esc(config.baseUrl.replace(/^https?:\/\//, ''))}</a></td></tr>
 </table></td></tr></table></body></html>`;

@@ -24,6 +24,8 @@ test('mise en forme : HTML pour téléphone, texte brut, expéditeur et réponse
   assert.deepEqual(rdv.replyTo, { email: 'garage@kourou.fr' }, 'le client répond au professionnel');
   assert.match(rdv.htmlContent, /<meta name="viewport"/); assert.match(rdv.htmlContent, /max-width:560px/); assert.match(rdv.htmlContent, /background:#c81e1e/);
   assert.match(rdv.htmlContent, /href="https:\/\/clientdirectpro\.fr\/annuler\/x"/); assert.match(rdv.textContent, /Pour annuler/);
+  assert.match(N.htmlEmail({ subject: 's', text: 'x', brand: 'G', color: '#ffcf33' }), /background:#ffcf33;color:#14161a/, 'texte foncé sur jaune');
+  assert.match(N.htmlEmail({ subject: 's', text: 'x', brand: 'G', color: '#14161a' }), /background:#14161a;color:#ffffff/, 'texte blanc sur foncé');
   assert.equal(bienvenue.sender.name, 'ClientDirect Pro'); assert.deepEqual(bienvenue.replyTo, { email: 'contact@clientdirectpro.fr' });
   assert.match(bienvenue.htmlContent, /contact@clientdirectpro\.fr/, 'pied de page légal');
   assert.doesNotMatch(JSON.stringify(calls), /xkeysib/, 'la clé ne figure jamais dans le contenu');
