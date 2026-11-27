@@ -78,6 +78,8 @@ test('mobile : demande de devis et erreurs de saisie affichées', { skip }, asyn
 });
 test('mobile : l’assistant répond sur téléphone', { skip }, async () => {
   const { p, errors } = await open(`/s/${T.slug}`);
+  // Sur téléphone, l'assistant s'ouvre depuis la barre d'actions (panneau glissant)
+  await p.tap('.mbar .open-chat'); await p.waitForSelector('#q', { state: 'visible' });
   await p.fill('#q', 'Quels sont vos horaires ?'); await p.tap('#ask button');
   await p.waitForFunction(() => document.querySelectorAll('#msgs .m').length >= 3 && !/^…$/.test(document.querySelector('#msgs .m:last-child').textContent));
   assert.match(await p.textContent('#msgs .m:last-child'), /horaires/i);

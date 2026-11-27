@@ -49,3 +49,16 @@
   Array.prototype.forEach.call(document.querySelectorAll('.admbody td[data-l]'), function (td) { if (RE.test(td.getAttribute('data-l'))) tone(td, td.textContent); });
   Array.prototype.forEach.call(document.querySelectorAll('.admbody .kpis .k'), function (k) { var s = k.querySelector('span'), n = k.querySelector('strong'); if (s && n && RE.test(s.textContent)) tone(n, n.textContent); });
 })();
+// Téléphone : une ligne de liste montre l'essentiel ; un toucher déplie le détail (les lignes « fiche » ouvrent la fiche)
+(function () {
+  var phone = window.matchMedia('(max-width: 699px)');
+  document.addEventListener('click', function (e) {
+    if (!phone.matches) return;
+    var tr = e.target.closest && e.target.closest('.admbody table.cards tbody tr:not(.go)');
+    if (!tr || e.target.closest('a,button,input,select,textarea,label,form')) return;
+    if (!tr.querySelector('td:nth-child(4)')) return;
+    tr.classList.toggle('open'); tr.setAttribute('aria-expanded', tr.classList.contains('open') ? 'true' : 'false');
+  });
+  // Fermer le panneau « Plus » en touchant à côté
+  document.addEventListener('click', function (e) { var d = document.querySelector('.tabmore[open]'); if (d && !d.contains(e.target)) d.removeAttribute('open'); });
+})();

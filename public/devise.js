@@ -9,3 +9,9 @@
   try { if (sessionStorage.getItem('cdp_devise')) return; sessionStorage.setItem('cdp_devise', '1'); } catch (e) { /* stockage indisponible : on corrige quand même une fois */ }
   q.set('pays', pays); location.replace(location.pathname + '?' + q.toString() + location.hash);
 })();
+// Téléphone : le carrousel des formules s'ouvre sur la formule recommandée
+(function () {
+  if (!window.matchMedia('(max-width: 699px)').matches) return;
+  var row = document.querySelector('.plans'), best = row && row.querySelector('.plan.best'); if (!best) return;
+  row.scrollLeft = best.offsetLeft - (row.clientWidth - best.clientWidth) / 2;
+})();

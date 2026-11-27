@@ -40,6 +40,7 @@ for (const dev of Object.keys(DEVICES)) {
     await p.waitForSelector('#b-slots .chip'); await check(p, `${dev}-exemple`);
     await p.click('#b-slots .chip >> nth=0'); await p.fill('#b-name', 'Test'); await p.fill('#b-phone', '0612345678'); await p.click('#book button[type=submit]');
     await p.waitForSelector('#b-ok:not(:empty)'); assert.match(await p.textContent('#b-ok'), /Démonstration|Demo/);
+    if (await p.locator('.mbar .open-chat').isVisible()) { await p.click('.mbar .open-chat'); await p.waitForSelector('#q', { state: 'visible' }); }
     await p.fill('#q', dev === 'android' ? 'What are your opening hours?' : 'Vos horaires ?'); await p.click('#ask button');
     await p.waitForFunction(() => document.querySelectorAll('#msgs .m').length >= 3 && !/^…$/.test(document.querySelector('#msgs .m:last-child').textContent));
     assert.deepEqual(errs, []); await ctx.close();

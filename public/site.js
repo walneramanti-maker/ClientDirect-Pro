@@ -81,10 +81,14 @@
   var f = function (on) { return function (e) { if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) document.body.classList.toggle('typing', on); }; };
   document.addEventListener('focusin', f(true)); document.addEventListener('focusout', f(false));
 })();
-// La barre d'actions ne s'affiche que lorsqu'aucun formulaire n'est à l'écran : elle ne recouvre jamais un bouton d'envoi
+
+// Téléphone : l'assistant s'ouvre dans un panneau glissant depuis le bas (comme une application)
 (function () {
-  var bar = document.querySelector('.mbar'); if (!bar || !('IntersectionObserver' in window)) return;
-  var seen = new Set();
-  var io = new IntersectionObserver(function (list) { list.forEach(function (e) { if (e.isIntersecting) seen.add(e.target); else seen.delete(e.target); }); document.body.classList.toggle('form-on-screen', seen.size > 0); }, { threshold: 0 });
-  ['rdv', 'devis', 'chat'].forEach(function (id) { var el = document.getElementById(id); if (el) io.observe(el); });
+  var chat = document.getElementById('chat'); var veil = document.querySelector('.chat-veil'); if (!chat) return;
+  var open = function () { document.body.classList.add('chat-open'); if (veil) veil.hidden = false; setTimeout(function () { var q = document.getElementById('q'); if (q) q.focus({ preventScroll: true }); }, 260); };
+  var close = function () { document.body.classList.remove('chat-open'); if (veil) veil.hidden = true; };
+  Array.prototype.forEach.call(document.querySelectorAll('.open-chat'), function (b) { b.addEventListener('click', open); });
+  Array.prototype.forEach.call(document.querySelectorAll('.chat-x'), function (b) { b.addEventListener('click', close); });
+  if (veil) veil.addEventListener('click', close);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
 })();

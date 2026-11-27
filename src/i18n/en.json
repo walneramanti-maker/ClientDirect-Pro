@@ -645,5 +645,11 @@
  "{p} HT/mois": "{p}/month excl. tax",
  "Rien à payer pendant l’essai. Ensuite, mise en service unique : {l} HT.": "Nothing to pay during the trial. Then a one-time setup fee: {l} excl. tax.",
  "Actions rapides": "Quick actions",
- "Devis": "Quote"
+ "Devis": "Quote",
+ "Navigation principale": "Main navigation",
+ "Mon site": "My site",
+ "Menu": "Menu",
+ "Formules et tarifs": "Plans and pricing",
+ "Assistant": "Assistant",
+ "Fermer": "Close"
 }

@@ -32,18 +32,21 @@ export const icon = (k, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24
 let ADMIN = { name: 'Administrateur', alerts: 0 };
 export const setAdminContext = (c) => { ADMIN = { name: c.name || 'Administrateur', alerts: Number(c.alerts) || 0 }; };
 const NAV = [['/admin', 'Tableau de bord', 'home', 'home'], ['/admin/clients', 'Entreprises', 'clients', 'clients'], ['/admin/prospection', 'Prospection', 'pros', 'pros'], ['/admin/campagnes', 'Campagnes', 'camp', 'camp'], ['/admin/paiements', 'Paiements', 'pay', 'pay'], ['/admin/tickets', 'Tickets', 'tick', 'tick'], ['/admin/rentabilite', 'Rentabilité', 'profit', 'profit'], ['/admin/bilan', 'Bilan', 'bilan', 'bilan'], ['/admin/partenaires', 'Partenaires', 'partners', 'partners'], ['/admin/journal', 'Quotidien', 'jour', 'jour'], ['/admin/parametres', 'Paramètres', 'set', 'set']];
+const TAB_SHORT = { home: 'Accueil', clients: 'Entreprises', pros: 'Prospects', camp: 'Campagnes' };
 function adminShell(csrf, active, body) {
   const act = active === 'pret' ? 'set' : active;
   const nav = NAV.map(([h, l, k, ic]) => `<a href="${h}"${act === k ? ' aria-current="page"' : ''}>${icon(ic)}<span>${l}</span></a>`).join('');
   const initials = ADMIN.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || 'A';
   return layout('Administration', `<div class="adm">
-  <aside class="side"><a class="brand" href="/admin">${icon('chart', 'logo-ico')}<span>ClientDirect Pro<br><small>Admin</small></span></a><nav aria-label="Administration">${nav}</nav></aside>
+  <aside class="side"><a class="brand" href="/admin">${icon('chart', 'logo-ico')}<span>ClientDirect Pro<br><small>Admin</small></span></a><nav aria-label="Administration">${NAV.map(([h, l, k, ic]) => `<a href="${h}"${act === k ? ' aria-current="page"' : ''} title="${l}">${icon(ic)}<span>${l}</span></a>`).join('')}</nav></aside>
   <div class="admmain"><header class="topbar">
     <details class="mnav"><summary aria-label="Menu">${icon('menu')}</summary><nav aria-label="Menu">${nav}</nav></details>
     <form class="gsearch" method="get" action="/admin/clients" role="search"><input type="hidden" name="kind" value="tous">${icon('search')}<input name="q" type="search" placeholder="Rechercher…" title="Rechercher une entreprise, un contact, un e-mail" aria-label="Rechercher"></form>
     <a class="bell" href="/admin#alertes" aria-label="Alertes : ${ADMIN.alerts}">${icon('bell')}${ADMIN.alerts ? `<b>${ADMIN.alerts}</b>` : ''}</a>
     <details class="me"><summary><span class="av">${esc(initials)}</span><span class="nm">${esc(ADMIN.name)}</span></summary><div class="pop"><a href="/admin/parametres">${icon('set')} Paramètres</a><form method="post" action="/deconnexion">${csrfField(csrf)}<button type="submit">${icon('out')} Déconnexion</button></form></div></details>
-  </header><main class="admbody">${body}</main></div></div><script src="/static/admin.js" defer></script>`, { bodyClass: 'appbody admin', langs: false });
+  </header><main class="admbody">${body}</main></div></div>
+  <nav class="tabbar" aria-label="Navigation principale">${NAV.slice(0, 4).map(([h, l, k, ic]) => `<a href="${h}"${act === k ? ' aria-current="page"' : ''}>${icon(ic)}<span>${TAB_SHORT[k] || l}</span></a>`).join('')}<details class="tabmore"><summary${NAV.slice(4).some(([, , k]) => k === act) ? ' aria-current="page"' : ''}>${icon('dots')}<span>Plus</span></summary><div class="sheet"><b class="sheet-t">Toutes les rubriques</b><nav aria-label="Autres rubriques">${NAV.slice(4).map(([h, l, k, ic]) => `<a href="${h}"${act === k ? ' aria-current="page"' : ''}>${icon(ic)}<span>${l}</span></a>`).join('')}<form method="post" action="/deconnexion">${csrfField(csrf)}<button type="submit">${icon('out')}<span>Déconnexion</span></button></form></nav></div></details></nav>
+  <script src="/static/admin.js" defer></script>`, { bodyClass: 'appbody admin', langs: false });
 }
 const TERR_CLS = { GF: 't-gf', FR: 't-fr', MQ: 't-mq', GP: 't-gp', RE: 't-re', YT: 't-yt', XX: 't-xx' };
 const terrBadge = (country) => { const c = territoryCode(country); return `<span class="tb ${TERR_CLS[c]}">${esc(c === 'XX' ? (COUNTRIES[country]?.fr || 'Autre pays') : TERRITORIES[c])}</span>`; };
