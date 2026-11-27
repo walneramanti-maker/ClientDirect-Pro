@@ -143,3 +143,14 @@ test('tous les indicateurs sont des liens filtrés qui répondent, même à zér
   assert.match(d.text, /<a class="cnt" href="\/admin\/clients\?terr=GF&amp;status=trial"|<a class="cnt" href="\/admin\/clients\?terr=GF&status=trial"/, 'compteurs du tableau par territoire cliquables');
   for (const u of ['/admin/paiements', '/admin/parametres']) assert.match((await admin.get(u)).text, /class="kc glass/);
 });
+
+test('fichiers statiques versionnés : une mise à jour est vue immédiatement, sans vider le cache', async () => {
+  const d = await admin.get('/admin');
+  const css = /href="\/static\/app\.css\?v=([0-9a-f]{10})"/.exec(d.text); assert.ok(css, 'feuille de style versionnée');
+  assert.match(d.text, /src="\/static\/admin\.js\?v=[0-9a-f]{10}"/);
+  const r = await fetch(`${app.base}/static/app.css?v=${css[1]}`); assert.equal(r.status, 200); assert.match(r.headers.get('cache-control'), /immutable/);
+  const r2 = await fetch(`${app.base}/static/app.css`); assert.match(r2.headers.get('cache-control'), /max-age=300/, 'sans version : cache court');
+  const crypto = await import('node:crypto'); const fs = await import('node:fs');
+  assert.equal(css[1], crypto.createHash('sha256').update(fs.readFileSync(new URL('../public/app.css', import.meta.url))).digest('hex').slice(0, 10), 'version = empreinte du contenu');
+  const home = await app.client().get('/'); assert.match(home.text, /\/static\/app\.css\?v=/);
+});

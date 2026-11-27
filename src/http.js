@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
@@ -31,13 +32,24 @@ export function send(res, status, body, headers = {}) {
   if (config.baseUrl.startsWith('https://')) h['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains';
   res.writeHead(status, h); res.end(body);
 }
-export const html = (res, body, status = 200, headers = {}) => send(res, status, body, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
+export const html = (res, body, status = 200, headers = {}) => send(res, status, typeof body === 'string' ? versionAssets(body) : body, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
 export const json = (res, obj, status = 200, headers = {}) => send(res, status, JSON.stringify(obj), { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
 export const redirect = (res, to, headers = {}) => send(res, 303, '', { Location: to, ...headers });
 
 const PUB = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../public');
 const TYPES = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webm': 'video/webm', '.mp4': 'video/mp4', '.ico': 'image/x-icon' };
+// Version de chaque fichier statique (empreinte de son contenu) : un fichier modifié change d'adresse,
+// le navigateur le recharge aussitôt ; un fichier inchangé reste en cache longtemps.
+const VERSIONS = new Map();
+export function assetVersion(rel) {
+  if (VERSIONS.has(rel)) return VERSIONS.get(rel);
+  let v = ''; try { v = crypto.createHash('sha256').update(fs.readFileSync(path.resolve(PUB, rel))).digest('hex').slice(0, 10); } catch { v = ''; }
+  VERSIONS.set(rel, v); return v;
+}
+export const versionAssets = (html) => html.replace(/(["'])\/static\/([\w.\/-]+\.(?:css|js))\1/g, (m, q, rel) => { const v = assetVersion(rel); return v ? `${q}/static/${rel}?v=${v}${q}` : m; });
 export function serveStatic(res, rel, req = null) {
+  const versioned = /[?&]v=[0-9a-f]{6,}/.test(req?.url || '');
+  const cache = versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=300';
   const file = path.resolve(PUB, rel.replace(/^\/+/, ''));
   if (!file.startsWith(PUB + path.sep)) return false;
   let stat; try { stat = fs.statSync(file); if (!stat.isFile()) return false; } catch { return false; }
@@ -51,6 +63,6 @@ export function serveStatic(res, rel, req = null) {
     send(res, 206, buf, { 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges': 'bytes', 'Cache-Control': 'public, max-age=3600' });
     return true;
   }
-  send(res, 200, fs.readFileSync(file), { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'public, max-age=3600' });
+  send(res, 200, fs.readFileSync(file), { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': /\.(css|js)$/.test(file) ? cache : 'public, max-age=3600' });
   return true;
 }
