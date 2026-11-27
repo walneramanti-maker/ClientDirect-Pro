@@ -33,7 +33,7 @@ export function clientFilters(sp) {
 function where(f) {
   const w = []; const a = [];
   if (f.kind !== 'tous') { w.push(`(${KIND_SQL})=?`); a.push(f.kind); }
-  if (f.q) { w.push("(t.name LIKE ? ESCAPE '\\' OR t.slug LIKE ? ESCAPE '\\' OR t.city LIKE ? ESCAPE '\\' OR t.phone LIKE ? ESCAPE '\\' OR t.email LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\' OR u.name LIKE ? ESCAPE '\\')"); a.push(...Array(7).fill(like(f.q))); }
+  if (f.q) { w.push("(t.name LIKE ? ESCAPE '\\' OR t.slug LIKE ? ESCAPE '\\' OR t.city LIKE ? ESCAPE '\\' OR t.phone LIKE ? ESCAPE '\\' OR t.email LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\' OR u.name LIKE ? ESCAPE '\\' OR t.metier LIKE ? ESCAPE '\\')"); a.push(...Array(8).fill(like(f.q))); }
   if (f.tpl) { w.push('t.tpl=?'); a.push(f.tpl); }
   if (f.city) { w.push("t.city LIKE ? ESCAPE '\\'"); a.push(like(f.city)); }
   if (f.country) { w.push('t.country=?'); a.push(f.country); }

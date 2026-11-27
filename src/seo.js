@@ -1,6 +1,8 @@
 // Référencement : adresse canonique, balises, données structurées, sitemap et robots.txt.
 import { config } from './config.js';
-import { esc, DAYS } from './util.js';
+import { esc, DAYS, pricesShown } from './util.js';
+import { ACTIVITIES } from './activities.js';
+const SCHEMA_OF = (t) => ACTIVITIES[t.activity]?.sch || SCHEMA_TYPE[t.tpl] || 'LocalBusiness';
 
 const SCHEMA_TYPE = { garage: 'AutoRepair', coiffeur: 'HairSalon', beaute: 'BeautySalon', restaurant: 'Restaurant', securite: 'ProfessionalService', location: 'AutoRental', artisan: 'HomeAndConstructionBusiness' };
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -13,22 +15,23 @@ export function siteUrl(t) {
 }
 export function description(t) {
   const svc = t.services.slice(0, 3).map((s) => s.name).join(', ');
-  return `${t.name}, ${t.metier.toLowerCase()}${t.city ? ` à ${t.city}` : ''}. ${svc}. Prise de rendez-vous en ligne, devis gratuit et contact WhatsApp.`.slice(0, 158);
+  const en = t.lang === 'en';
+  return (en ? `${t.name}, ${t.metier.toLowerCase()}${t.city ? ` in ${t.city}` : ''}. ${svc}. Online booking, quote requests and WhatsApp contact.` : `${t.name}, ${t.metier.toLowerCase()}${t.city ? ` à ${t.city}` : ''}. ${svc}. Prise de rendez-vous en ligne, devis gratuit et contact WhatsApp.`).slice(0, 158);
 }
 /** Balises <head> d'un site d'entreprise. Les démos ne sont jamais indexées. */
-export function siteHead(t, { mode = 'live' } = {}) {
-  const url = siteUrl(t); const desc = description(t);
+export function siteHead(t, { mode = 'live', path = null } = {}) {
+  const url = mode === 'live' ? siteUrl(t) : `${config.baseUrl}${path || ''}`; const desc = description(t);
   const ld = {
-    '@context': 'https://schema.org', '@type': SCHEMA_TYPE[t.tpl] || 'LocalBusiness', name: t.name, url, description: desc,
+    '@context': 'https://schema.org', '@type': SCHEMA_OF(t), name: t.name, url, description: desc,
     telephone: t.phone ? `+${t.phone}` : undefined,
-    address: { '@type': 'PostalAddress', streetAddress: t.address || undefined, addressLocality: t.city || undefined, addressCountry: 'FR' },
+    address: { '@type': 'PostalAddress', streetAddress: t.address || undefined, addressLocality: t.city || undefined, addressCountry: ['GF', 'MQ', 'GP', 'RE', 'YT', 'FR'].includes(t.country) ? 'FR' : (t.country && t.country !== 'OTHER' ? t.country : undefined) },
     openingHoursSpecification: Object.entries(t.hours).map(([d, h]) => ({ '@type': 'OpeningHoursSpecification', dayOfWeek: DOW[d], opens: h[0], closes: h[1] })),
-    makesOffer: t.services.slice(0, 10).map((s) => ({ '@type': 'Offer', name: s.name, price: s.price > 0 ? String(s.price) : undefined, priceCurrency: 'EUR' }))
+    makesOffer: t.services.slice(0, 10).map((s) => ({ '@type': 'Offer', name: s.name, price: pricesShown(t) && s.price > 0 ? String(s.price) : undefined, priceCurrency: pricesShown(t) && s.price > 0 ? (t.currency || 'EUR') : undefined }))
   };
   const json = JSON.stringify(ld).replace(/</g, '\\u003c');
   const robots = mode === 'live' && config.isProd && !config.sitemapExclude.includes(String(t.slug).toLowerCase()) ? 'index, follow' : 'noindex, nofollow';
   return `<meta name="description" content="${esc(desc)}"><meta name="robots" content="${robots}"><link rel="canonical" href="${esc(url)}">
-<meta property="og:type" content="website"><meta property="og:title" content="${esc(t.name)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(url)}"><meta property="og:locale" content="fr_FR">
+<meta property="og:type" content="website"><meta property="og:title" content="${esc(t.name)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(url)}"><meta property="og:locale" content="${t.lang === 'en' ? 'en_US' : 'fr_FR'}">
 <script type="application/ld+json">${json}</script>`;
 }
 const xmlEsc = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]);

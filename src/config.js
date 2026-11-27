@@ -61,6 +61,7 @@ export const config = {
   // Ajoutez rdv,devis si votre forfait Make le permet.
   makeEvents: (env.MAKE_EVENTS || 'inscription,paiement_recu,paiement_echoue,incident,ticket,demo_vue').split(',').map((x) => x.trim()).filter(Boolean),
   // Prospection : API publique Recherche d'entreprises (gratuite, sans clé)
+  prospectExtension: env.PROSPECT_EXTENSION !== '0',
   sireneApi: env.SIRENE_API || 'https://recherche-entreprises.api.gouv.fr',
   // Source de secours gratuite, sans clé (copie publique du registre SIRENE) si l'API principale refuse nos connexions
   sireneFallback: env.SIRENE_FALLBACK === '0' ? '' : (env.SIRENE_FALLBACK || 'https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/economicref-france-sirene-v3/records'),

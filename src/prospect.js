@@ -3,6 +3,7 @@ import { refreshPotentials } from './potential.js';
 import { config } from './config.js';
 import { net } from './net.js';
 import { TEMPLATES, tplFromNaf } from './templates.js';
+import { ACTIVITIES, activityFromNaf, extensionTargets } from './activities.js';
 import { createTenant } from './tenants.js';
 import { clampStr, sha256, hmac } from './util.js';
 import { recordIncident } from './incidents.js';
@@ -22,19 +23,19 @@ export function fromSirene(r, fallbackTpl = null, commune = null, dept = null) {
   const e = (commune && m.find((x) => x.commune === commune)) || (dept && m.find((x) => deptOf(x.code_postal) === dept)) || r.siege || {};
   if (/\[ND\]/.test(e.adresse || '')) return null;
   return { siren: r.siren, siret: e.siret || '', name: clampStr(r.nom_complet || r.nom_raison_sociale || '', 120), naf: r.activite_principale || '',
-    tpl: tplFromNaf(r.activite_principale) || fallbackTpl || 'artisan', city: e.libelle_commune || COMMUNES[commune] || '', postal: e.code_postal || '', address: clampStr(e.adresse || '', 200),
+    tpl: tplFromNaf(r.activite_principale) || activityFromNaf(r.activite_principale)?.base || fallbackTpl || 'artisan', city: e.libelle_commune || COMMUNES[commune] || '', postal: e.code_postal || '', address: clampStr(e.adresse || '', 200),
     created_on: r.date_creation || null, staff: r.tranche_effectif_salarie || 'NN', dept: deptOf(e.code_postal) };
 }
 /** Interroge l'API publique Recherche d'entreprises (gratuite, sans clé) : activité principale + commune OU département. */
-export async function searchSirene({ tpl, commune = null, departement = null, page = 1, withMeta = false }) {
-  const T = TEMPLATES[tpl]; if (!T) throw new Error('Métier inconnu');
+export async function searchSirene({ tpl, naf = null, commune = null, departement = null, page = 1, withMeta = false }) {
+  const T = naf ? { naf } : TEMPLATES[tpl]; if (!T) throw new Error('Métier inconnu');
   let where;
   if (departement) { if (!DEPARTEMENTS[departement]) throw new Error('Département inconnu'); where = `departement=${departement}`; }
   else { if (!COMMUNES[commune]) throw new Error('Commune inconnue'); where = `code_commune=${commune}`; }
   const url = `${config.sireneApi}/search?activite_principale=${encodeURIComponent(T.naf.join(','))}&${where}&etat_administratif=A&per_page=25&page=${page}`;
   let res;
   // API principale injoignable (connexions refusées depuis l'hébergeur) : la copie publique du registre prend le relais
-  const viaFallback = async (err) => { if (!config.sireneFallback || !departement) throw err; let r; try { r = await searchSireneFallback({ tpl, departement, page }); } catch (fe) { throw Object.assign(new Error(`${err.message} ; ${fe.message}`), { network: !!(err.network || fe.network), rateLimited: fe.rateLimited }); } return withMeta ? r : r.list; };
+  const viaFallback = async (err) => { if (!config.sireneFallback || !departement) throw err; let r; try { r = await searchSireneFallback({ tpl, naf, departement, page }); } catch (fe) { throw Object.assign(new Error(`${err.message} ; ${fe.message}`), { network: !!(err.network || fe.network), rateLimited: fe.rateLimited }); } return withMeta ? r : r.list; };
   // Échec réseau : cause exacte (DNS, connexion refusée, TLS, délai) au lieu du seul « fetch failed »
   try { res = await net.fetch(url, { headers: { accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B ; contact@clientdirectpro.fr)' }, signal: AbortSignal.timeout(20000) }); }
   catch (e) { const c = e.cause?.code || e.cause?.message || e.name; const err = Object.assign(new Error(`${e.message}${c && c !== e.message ? ` (${c})` : ''}`), { network: true }); return viaFallback(err); }
@@ -48,8 +49,8 @@ export async function searchSirene({ tpl, commune = null, departement = null, pa
 }
 const STAFF_ODS = { 'Etablissement non employeur': 'NN', '0 salarié': '00', '1 ou 2 salariés': '01', '3 à 5 salariés': '02', '6 à 9 salariés': '03', '10 à 19 salariés': '11' };
 /** Copie publique du registre SIRENE (OpenDataSoft, gratuite, sans clé) : mêmes critères que l'API principale. */
-export async function searchSireneFallback({ tpl, departement, page = 1 }) {
-  const T = TEMPLATES[tpl]; if (!T || !DEPARTEMENTS[departement]) throw new Error('Critères inconnus');
+export async function searchSireneFallback({ tpl, naf = null, departement, page = 1 }) {
+  const T = naf ? { naf } : TEMPLATES[tpl]; if (!T || !DEPARTEMENTS[departement]) throw new Error('Critères inconnus');
   const where = `activiteprincipaleetablissement in (${T.naf.map((n) => `"${n}"`).join(',')}) and codedepartementetablissement="${departement}" and etatadministratifetablissement="Actif" and statutdiffusionetablissement="O" and (trancheeffectifsetablissementtriable is null or trancheeffectifsetablissementtriable<=10)`;
   const url = `${config.sireneFallback}?where=${encodeURIComponent(where)}&order_by=siret&limit=25&offset=${(page - 1) * 25}`;
   let res;
@@ -64,7 +65,7 @@ export async function searchSireneFallback({ tpl, departement, page = 1 }) {
     const name = clampStr(`${legal || ens || ''}${ens && legal && ens !== legal ? ` (${ens})` : ''}`.toUpperCase(), 120);
     if (!name || /\[ND\]/.test(name)) return null;
     const postal = r.codepostaletablissement || '';
-    return { siren: r.siren, siret: r.siret || '', name, naf: r.activiteprincipaleetablissement || '', tpl: tplFromNaf(r.activiteprincipaleetablissement) || tpl, city: r.libellecommuneetablissement || '', postal,
+    return { siren: r.siren, siret: r.siret || '', name, naf: r.activiteprincipaleetablissement || '', tpl: tplFromNaf(r.activiteprincipaleetablissement) || activityFromNaf(r.activiteprincipaleetablissement)?.base || tpl, city: r.libellecommuneetablissement || '', postal,
       address: clampStr([r.adresseetablissement, postal, r.libellecommuneetablissement].filter(Boolean).join(' '), 200), created_on: r.datecreationetablissement || null, staff: STAFF_ODS[r.trancheeffectifsetablissement] || 'NN', dept: deptOf(postal) || departement };
   }).filter(Boolean);
   return { list, totalPages: Math.ceil((Number(j.total_count) || 0) / 25), raw: rows.length, source: 'secours' };
@@ -91,8 +92,11 @@ export function scoreProspect(p, today = new Date()) {
 export function importProspects(db, list) {
   let added = 0;
   for (const p of list) {
+    const act = p.activity || activityFromNaf(p.naf)?.key || null;
+    if (act && ACTIVITIES[act]?.np) continue; // professions réglementées : jamais prospectées
     if (!p.siren || db.one('SELECT 1 FROM prospects WHERE siren=?', p.siren) || isSuppressed(db, { siren: p.siren })) continue;
     db.run('INSERT INTO prospects(siren,siret,name,naf,tpl,city,postal,address,created_on,score,created_at,dept,demo_token_hash,optout_token_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', p.siren, p.siret, p.name, p.naf, p.tpl, p.city, p.postal, p.address, p.created_on, scoreProspect(p), Date.now(), p.dept || deptOf(p.postal), sha256(demoTokenFor(p.siren)), sha256(hmac(config.secret, 'stop:' + p.siren).slice(0, 32)));
+    if (act) db.run('UPDATE prospects SET activity=? WHERE siren=?', act, p.siren);
     added++;
   }
   return added;
@@ -128,7 +132,7 @@ export function prepareDemo(db, prospectId, { stable = false } = {}) {
   if (p.status === 'optout') throw new Error("Cette entreprise a demandé à ne plus être contactée.");
   if (p.demo_tenant_id && db.one("SELECT 1 FROM tenants WHERE id=? AND status='demo'", p.demo_tenant_id) && stable) return { tenantId: p.demo_tenant_id, demoUrl: `${config.baseUrl}/demo/${demoTokenFor(p.siren)}`, demoToken: demoTokenFor(p.siren) };
   const name = displayName(p.name);
-  const r = createTenant(db, { name, tpl: p.tpl, city: displayName(p.city), address: p.address, country: territoryOf(p.postal), lang: 'fr', status: 'demo', prospectId: p.id, demoToken: stable ? demoTokenFor(p.siren) : null });
+  const r = createTenant(db, { name, tpl: p.tpl, activity: p.activity || null, city: displayName(p.city), address: p.address, country: territoryOf(p.postal), lang: 'fr', status: 'demo', prospectId: p.id, demoToken: stable ? demoTokenFor(p.siren) : null });
   db.run("UPDATE prospects SET status=CASE WHEN status IN ('new','contacted') THEN 'demo' ELSE status END, demo_tenant_id=? WHERE id=?", r.id, p.id);
   return { tenantId: r.id, demoUrl: `${config.baseUrl}/demo/${r.demoToken}`, demoToken: r.demoToken };
 }
@@ -246,8 +250,25 @@ export async function runNationalCampaign(db, { quota = prospectDaily(db), pause
   // Recherche rétablie : les incidents de panne réseau de la prospection sont clôturés
   if ((r.ok || 0) > 0 && !r.failed) db.run("UPDATE incidents SET resolved_at=? WHERE resolved_at IS NULL AND kind IN ('prospection','prospection_reseau') AND (message LIKE '%fetch failed%' OR message LIKE '%injoignable%')", now);
   db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.prospect',?,?)", JSON.stringify({ added: r.added, calls: r.calls, ok: r.ok || 0, failed: r.failed || 0 }), now);
+  // Nouvelles activités : un tiers des recherches en plus, sans toucher à la progression de la campagne principale
+  if (!r.stopped && config.prospectExtension && limitCalls >= 3) { try { r.extension = await runExtensionCampaign(db, { calls: Math.max(1, Math.floor(limitCalls / 3)), pause, now }); } catch (e) { r.extension = { error: e.message }; } }
   refreshPotentials(db);
   return { ...r, cursor, coverage: Math.min(1, cursor / U) };
+}
+/** Nouvelles activités : une file de prospection distincte, parcourue progressivement (un tiers des recherches du jour). */
+export const EXT_TARGETS = extensionTargets(Object.values(TEMPLATES).flatMap((t) => t.naf));
+export const EXT_UNITS = EXT_TARGETS.flatMap((x, k) => DEPT_CODES.map((d, i) => ({ d, ...EXT_TARGETS[(k + i) % EXT_TARGETS.length] })));
+export async function runExtensionCampaign(db, { calls = 5, pause = config.prospectPauseMs, now = Date.now() } = {}) {
+  const U = EXT_UNITS.length; let cursor = Number(db.one("SELECT v FROM meta WHERE k='prospect_cursor_ext'")?.v || 0);
+  const r = { added: 0, calls: 0, ok: 0, failed: 0 }; let fails = 0;
+  while (r.calls < calls) {
+    const pass = Math.floor(cursor / U); const u = EXT_UNITS[cursor % U]; if (pass >= 20) break;
+    try { const { list } = await searchSirene({ tpl: u.base, naf: u.naf, departement: u.d, page: pass + 1, withMeta: true }); r.calls++; r.ok++; fails = 0; r.added += importProspects(db, list.map((p) => ({ ...p, activity: u.naf.includes(p.naf) ? u.activity : (activityFromNaf(p.naf)?.key || u.activity) }))); }
+    catch (e) { r.calls++; r.failed++; if (e.rateLimited) break; if (e.network && ++fails >= 3) break; if (e.network) continue; }
+    cursor++; if (pause) await new Promise((ok) => setTimeout(ok, pause));
+  }
+  db.run("INSERT INTO meta(k,v) VALUES('prospect_cursor_ext',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(cursor));
+  return { ...r, cursor, units: U };
 }
 /** Avancement de la campagne pour l'administration. */
 export function campaignStatus(db) {

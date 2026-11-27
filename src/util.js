@@ -56,3 +56,6 @@ export const safeEq = (a, b) => { const x = Buffer.from(String(a)); const y = Bu
 export const clampStr = (s, n = 200) => String(s ?? '').trim().slice(0, n);
 export const euros = (n) => `${Math.round(Number(n) * 100) / 100} €`.replace('.', ',');
 export const nowMs = () => Date.now();
+
+/** Les tarifs ne sont publiés qu'une fois confirmés par le professionnel (les démonstrations et exemples sont signalés comme tels). */
+export const pricesShown = (t) => !!(t && (t.prices_confirmed || t.status === 'demo' || t.example));

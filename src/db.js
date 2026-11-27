@@ -112,7 +112,12 @@ const MIGRATIONS = [
   `ALTER TABLE tenants ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''`,
   `CREATE INDEX IF NOT EXISTS tenants_admin ON tenants(status, created_at)`,
   `CREATE INDEX IF NOT EXISTS invoices_tenant ON invoices(tenant_id, status, paid_at)`,
-  `CREATE INDEX IF NOT EXISTS audit_tenant ON audit(tenant_id, id)`
+  `CREATE INDEX IF NOT EXISTS audit_tenant ON audit(tenant_id, id)`,
+  // Catalogue élargi des activités ; tarifs affichés seulement après confirmation par le professionnel
+  `ALTER TABLE tenants ADD COLUMN activity TEXT`,
+  `ALTER TABLE tenants ADD COLUMN activity_other TEXT`,
+  `ALTER TABLE tenants ADD COLUMN prices_confirmed INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE prospects ADD COLUMN activity TEXT`
 ];
 
 export function openDb(file, { appEnv = null } = {}) {

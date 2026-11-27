@@ -253,3 +253,10 @@ body.admin .admmain{background:radial-gradient(1200px 600px at 85% -10%,rgba(99,
 .admbody .btn:disabled,.admbody .btn[disabled]{background:#e8ebf2;color:#6b7280;border-color:#dde2ec}
 .admbody table.list td[data-l="Entreprise"]{min-width:150px}
 .admbody td.pos,.admbody strong.pos{color:#15803d}.admbody td.neg,.admbody strong.neg{color:#b91c1c}
+/* Choix de l'activité à l'inscription */
+.actpick{position:relative}.act-search{width:100%;margin-bottom:8px}
+.act-results{list-style:none;margin:-4px 0 10px;padding:6px;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 12px 30px rgba(0,0,0,.12);max-height:320px;overflow:auto}
+.act-results li{padding:10px 12px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}.act-results li span{color:var(--muted);font-size:.85rem;text-align:right}
+.act-results li:hover,.act-results li:focus{background:#eef4ff;outline:none}.act-results li.act-other{font-weight:700;color:var(--blue);border-top:1px solid var(--line);border-radius:0 0 8px 8px}
+.other-wrap{margin-top:6px}
+.cat-h{font-size:1.15rem;margin:26px 0 10px}.cat-links{display:flex;flex-wrap:wrap;gap:8px}.cat-links a{padding:8px 14px;border:1px solid var(--line);border-radius:999px;text-decoration:none;color:var(--ink);background:#fff;font-weight:600}.cat-links a:hover{border-color:var(--blue);color:var(--blue)}

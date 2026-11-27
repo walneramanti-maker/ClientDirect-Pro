@@ -3,6 +3,7 @@
 // origine des données indiquée, opposition simple et gratuite (lien + réponse STOP) à chaque message.
 import { config, PLANS } from './config.js';
 import { isPersonName, displayName } from './prospect.js';
+import { ACTIVITIES, PROFILES } from './activities.js';
 
 /** Séquence : premier message, relance à J+4, dernière relance à J+10 ; jamais plus de 3 messages par entreprise. */
 export const SEQUENCE = [{ step: 0, label: 'Premier message', delayDays: 0 }, { step: 1, label: 'Relance 1 (J+4)', delayDays: 4 }, { step: 2, label: 'Dernière relance (J+10)', delayDays: 6 }];
@@ -54,7 +55,14 @@ export const TRADES = {
     plan: 'essentiel', subject: (n) => `${n} : recevoir vos demandes de devis même sur le chantier`
   }
 };
-const tradeOf = (p) => TRADES[p.tpl] || TRADES.artisan;
+// Nouvelles activités : arguments du profil (rendez-vous, devis, commande…) avec le nom réel du métier
+const SUBJECT = { rdv: 'vos clients peuvent-ils prendre rendez-vous en ligne ?', devis: 'recevoir vos demandes de devis même en intervention', table: 'la réservation en ligne, sans commission', commande: 'vos clients peuvent commander ou réserver en ligne', sejour: 'des demandes de réservation en ligne', cours: 'des réservations de séances en ligne', conseil: 'des prises de rendez-vous en ligne' };
+const tradeOf = (p) => {
+  const a = p.activity && ACTIVITIES[p.activity];
+  if (!a || (TRADES[a.key] && !a.services)) return TRADES[p.tpl] || TRADES.artisan;
+  const P = PROFILES[a.profile];
+  return { metier: a.label.toLowerCase(), clients: 'vos clients', need: P.need, does: P.does, plan: P.plan, subject: (n) => `${n} : ${SUBJECT[a.profile]}` };
+};
 
 /** Constat sur la présence en ligne : formulé prudemment, jamais affirmé sans vérification. */
 export function needLine(p) {

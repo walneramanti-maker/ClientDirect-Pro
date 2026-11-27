@@ -9,6 +9,8 @@ import { config, PLANS, planHas } from './config.js';
 import { parseCookies, cookie, readBody, parseForm, html, json, redirect, serveStatic, send } from './http.js';
 import * as V from './views.js';
 import { TEMPLATES } from './templates.js';
+import { ACTIVITIES } from './activities.js';
+const BOOT_AT = Date.now();
 import { emailOk, randomId, safeEq, clampStr, nowIn, intlPhone, phoneOk } from './util.js';
 import { isDial, toE164, domCountryOf, phoneValid } from './phone.js';
 import { hashPassword, passwordProblem, createSession, readSession, destroySession, destroyUserSessions, csrfOk, issueToken, useToken, totpOk, rateLimit, login, audit } from './security.js';
@@ -141,7 +143,7 @@ export function createApp(db) {
   // ---------- pages par métier (référencement naturel) ----------
   on('GET', '/metiers', (c) => html(c.res, V.metiersIndex()));
   on('GET', '/metiers/:tpl', (c) => {
-    if (!TEMPLATES[c.params.tpl]) throw HttpError(404, 'Page introuvable');
+    if (!TEMPLATES[c.params.tpl] && !ACTIVITIES[c.params.tpl]) throw HttpError(404, 'Page introuvable');
     const cur = countryOf(guessCountry(c)).cur; html(c.res, V.metierPage(c.params.tpl, { cur: PRICES[cur] ? cur : 'EUR' }));
   });
   // ---------- exemples à tester sans inscription ----------
@@ -155,7 +157,10 @@ export function createApp(db) {
   on('GET', '/sitemap.xml', (c) => {
     // Seules les adresses du même domaine sont acceptées par Google dans un sitemap ; les domaines propres ont le leur.
     const own = publicTenants(db).filter((t) => !(t.custom_domain && t.domain_status === 'verified'));
-    const entries = [{ loc: `${config.baseUrl}/`, lastmod: Date.now() }, { loc: `${config.baseUrl}/annuaire`, lastmod: Date.now() }, { loc: `${config.baseUrl}/metiers`, lastmod: Date.now() }, ...Object.keys(TEMPLATES).map((k) => ({ loc: `${config.baseUrl}/metiers/${k}`, lastmod: Date.now() }))];
+    // lastmod = date de dernière mise en production (pas « aujourd'hui » à chaque passage du robot). Annuaire seulement s'il contient des sites.
+    const B = config.baseUrl, R = BOOT_AT;
+    const entries = [{ loc: `${B}/`, lastmod: R }, { loc: `${B}/metiers`, lastmod: R }, { loc: `${B}/partenaires`, lastmod: R }, ...[...new Set([...Object.keys(TEMPLATES), ...Object.keys(ACTIVITIES)])].map((k) => ({ loc: `${B}/metiers/${k}`, lastmod: R }))];
+    if (own.length) entries.push({ loc: `${B}/annuaire`, lastmod: Math.max(...own.map((t) => t.updated_at || t.created_at || 0)) || R });
     if (!config.rootDomain) for (const t of own) entries.push({ loc: `${config.baseUrl}/s/${t.slug}`, lastmod: t.updated_at || t.created_at });
     send(c.res, 200, sitemap(entries), { 'Content-Type': 'application/xml; charset=utf-8' });
   });
@@ -205,7 +210,8 @@ export function createApp(db) {
     const claim = c.url.searchParams.get('claim'); const demo = claim ? demoTenantByToken(db, claim) : null;
     if (claim && !demo) return html(c.res, V.messagePage('Lien expiré', 'Cette démonstration a déjà été activée ou n’existe plus.', ['Créer un site', '/inscription']), 404);
     const plan = c.url.searchParams.get('formule'); const tpl = c.url.searchParams.get('tpl');
-    html(c.res, V.signupPage({ csrf: csrfToken(c), f: { plan: PLANS[plan] ? plan : 'pro', tpl: demo?.tpl || (TEMPLATES[tpl] ? tpl : undefined), country: demo?.country || guessCountry(c), lang: c.lang }, claim: demo ? claim : null, demo }));
+    const act = c.url.searchParams.get('activite');
+    html(c.res, V.signupPage({ csrf: csrfToken(c), f: { plan: PLANS[plan] ? plan : 'pro', activity: ACTIVITIES[act] ? act : (ACTIVITIES[tpl] ? tpl : undefined), tpl: demo?.tpl || (TEMPLATES[tpl] ? tpl : undefined), country: demo?.country || guessCountry(c), lang: c.lang }, claim: demo ? claim : null, demo }));
   });
   on('POST', '/inscription', (c) => {
     checkCsrf(c); limit(c, 'signup', 10, 3600e3);
@@ -213,7 +219,8 @@ export function createApp(db) {
     const demo = f.claim ? demoTenantByToken(db, f.claim) : null;
     if (f.claim && !demo) errors.push(tr('Cette démonstration a déjà été activée.'));
     const email = clampStr(f.email, 190).toLowerCase(); const name = clampStr(f.name, 80);
-    if (!demo) { if (!clampStr(f.business, 80)) errors.push(tr("Indiquez le nom de l'entreprise.")); if (!TEMPLATES[f.tpl]) errors.push(tr('Choisissez un métier.')); if (f.country && !COUNTRIES[f.country]) errors.push(tr('Pays inconnu.')); }
+    if (!demo && !f.activity && ACTIVITIES[f.tpl]) f.activity = f.tpl; // compatibilité : anciens formulaires (champ « tpl »)
+    if (!demo) { if (!clampStr(f.business, 80)) errors.push(tr("Indiquez le nom de l'entreprise.")); if (!ACTIVITIES[f.activity] && f.activity !== 'autre') errors.push(tr('Choisissez votre activité.')); if (f.activity === 'autre' && clampStr(f.activity_other, 60).length < 2) errors.push(tr('Précisez votre activité.')); if (f.country && !COUNTRIES[f.country]) errors.push(tr('Pays inconnu.')); }
     if (!demo && f.phone) { const { phoneCc } = signupCountry(f, guessCountry(c)); if (!phoneOk(f.phone, phoneCc)) errors.push(tr('Numéro WhatsApp invalide.')); }
     if (!name) errors.push(tr('Indiquez votre nom.'));
     if (!emailOk(email)) errors.push(tr('Adresse e-mail invalide.'));
@@ -235,7 +242,7 @@ export function createApp(db) {
       tenantId = demo.id;
     } else {
       const { country: ctry, phoneCc } = signupCountry(f, guessCountry(c));
-      tenantId = createTenant(db, { name: f.business, tpl: f.tpl, city: f.city, phone: f.phone, phoneCc, email, country: ctry, tz: validTz(f.tz) ? f.tz : null, lang: ulang, plan: f.plan, status: 'trial', ownerId: userId }).id;
+      tenantId = createTenant(db, { name: f.business, tpl: ACTIVITIES[f.activity]?.base || 'artisan', activity: f.activity, activityOther: clampStr(f.activity_other, 60), city: f.city, phone: f.phone, phoneCc, email, country: ctry, tz: validTz(f.tz) ? f.tz : null, lang: ulang, plan: f.plan, status: 'trial', ownerId: userId }).id;
       db.run('UPDATE tenants SET source=? WHERE id=?', c.source || 'direct', tenantId);
       // Inscription directe d'une entreprise prospectée (même adresse e-mail) : comptée comme conversion de la campagne
       { const pr = db.one("SELECT id FROM prospects WHERE email=? AND status NOT IN ('optout','converted')", email); if (pr) { db.run("UPDATE tenants SET prospect_id=?, source=CASE WHEN source IN ('','direct') THEN 'prospection' ELSE source END WHERE id=?", pr.id, tenantId); db.run("UPDATE prospects SET status='converted' WHERE id=?", pr.id); } }
@@ -326,7 +333,7 @@ export function createApp(db) {
   function renderSite(c, t, base, mode, demoClaim = null) {
     c.setLang(t.lang || 'fr');
     if (mode === 'live' && !isBot(c.req.headers['user-agent'])) track(db, t, 'views');
-    html(c.res, V.tenantSite(t, { base, mode, days: openDays(db, t, 10, firstSvc(t)), aiMode: mode === 'live' && aiAvailable(t) ? 'ia' : 'simple', demoClaim, head: siteHead(t, { mode }) }));
+    html(c.res, V.tenantSite(t, { base, mode, days: openDays(db, t, 10, firstSvc(t)), aiMode: mode === 'live' && aiAvailable(t) ? 'ia' : 'simple', demoClaim, head: siteHead(t, { mode, path: base }) }));
   }
   function liveTenant(slug, c = null) {
     const t = loadTenant(db, 'slug', slug);

@@ -5,6 +5,7 @@ import { config } from './config.js';
 import { net } from './net.js';
 import { recordIncident } from './incidents.js';
 import { TEMPLATES } from './templates.js';
+import { ACTIVITIES } from './activities.js';
 import { displayName, fromSirene, importProspects, sireneBySiren } from './prospect.js';
 import { tplFromNaf } from './templates.js';
 import { isSuppressed } from './suppression.js';
@@ -201,11 +202,11 @@ export async function enrichBatch(db, { maxSearches = 20, now = Date.now(), emai
     db.run("UPDATE prospects SET email=COALESCE(email,?), site_checked_at=COALESCE(site_checked_at,?) WHERE id=?", e, now, p.id);
   }
   // Répartition nationale : d'abord les départements les moins couverts, pour ne pas privilégier un territoire
-  const groups = db.all(`SELECT tpl, postal, MIN(city) city, MIN(dept) dept, COUNT(*) n FROM prospects p WHERE status='new' AND enriched_at IS NULL AND postal!='' GROUP BY tpl, postal ORDER BY (SELECT COUNT(*) FROM prospects q WHERE q.dept=MIN(p.dept) AND q.enriched_at IS NOT NULL) ASC, MAX(score) DESC, n DESC LIMIT ?`, maxSearches);
+  const groups = db.all(`SELECT tpl, COALESCE(activity,'') activity, postal, MIN(city) city, MIN(dept) dept, COUNT(*) n FROM prospects p WHERE status='new' AND enriched_at IS NULL AND postal!='' GROUP BY tpl, COALESCE(activity,''), postal ORDER BY (SELECT COUNT(*) FROM prospects q WHERE q.dept=MIN(p.dept) AND q.enriched_at IS NOT NULL) ASC, MAX(score) DESC, n DESC LIMIT ?`, maxSearches);
   for (const g of groups) {
     if (creditsUsed(db, now) + 10 > cap) { r.stopped = cap < enrichCap(db) ? 'quota du jour atteint (crédits répartis sur le mois)' : 'plafond mensuel atteint'; break; }
-    const pending = db.all("SELECT * FROM prospects WHERE status='new' AND enriched_at IS NULL AND tpl=? AND postal=?", g.tpl, g.postal);
-    const label = (TEMPLATES[g.tpl]?.metier || g.tpl).toLowerCase();
+    const pending = db.all("SELECT * FROM prospects WHERE status='new' AND enriched_at IS NULL AND tpl=? AND COALESCE(activity,'')=? AND postal=?", g.tpl, g.activity, g.postal);
+    const label = (ACTIVITIES[g.activity]?.label || TEMPLATES[g.tpl]?.metier || g.tpl).toLowerCase();
     let places = [];
     try { places = await searchPlaces(db, { query: `${label} ${g.postal} ${g.city}`, postal: g.postal }, now); r.searches++; }
     catch (e) { r.searches++; if (e.stop) { r.stopped = e.message; break; } recordIncident(db, { kind: 'enrichissement', severity: 'info', message: String(e.message).slice(0, 160) }); }

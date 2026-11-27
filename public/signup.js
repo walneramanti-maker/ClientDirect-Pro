@@ -20,3 +20,26 @@
   if (c) c.addEventListener('change', function () { c.dataset.touched = '1'; if (set) set.value = '1'; syncCc(); });
   if (cc) cc.addEventListener('change', function () { cc.dataset.touched = '1'; });
 })();
+// Recherche d'activité : suggestions au fil de la frappe ; « Autre activité » si rien ne correspond.
+(function () {
+  'use strict';
+  var sel = document.getElementById('activity'); var q = document.getElementById('activity_search'); var ul = document.getElementById('activity_results');
+  var other = document.getElementById('activity_other'); var wrap = document.getElementById('other_wrap');
+  if (!sel || !q || !ul) return;
+  var fold = function (s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); };
+  var items = Array.prototype.map.call(sel.querySelectorAll('option[value]'), function (o) { return { v: o.value, l: o.textContent, g: o.parentNode.label || '', h: fold(o.textContent + ' ' + (o.getAttribute('data-kw') || '') + ' ' + (o.parentNode.label || '')) }; }).filter(function (x) { return x.v && x.v !== 'autre'; });
+  var toggle = function () { var on = sel.value === 'autre'; wrap.hidden = !on; if (other) other.required = on; };
+  q.hidden = false; toggle();
+  var pick = function (v, text) { sel.value = v; if (v === 'autre' && other) { other.value = text || other.value; } ul.hidden = true; ul.innerHTML = ''; q.value = v === 'autre' ? '' : (sel.options[sel.selectedIndex] || {}).textContent || ''; toggle(); if (v === 'autre' && other) other.focus(); };
+  q.addEventListener('input', function () {
+    var words = fold(q.value).split(/\s+/).filter(function (w) { return w.length >= 2; });
+    ul.innerHTML = '';
+    if (!words.length) { ul.hidden = true; return; }
+    var res = items.filter(function (x) { return words.every(function (w) { return x.h.indexOf(w) >= 0 || x.h.indexOf(w.slice(0, Math.max(3, w.length - 2))) >= 0; }); }).slice(0, 8);
+    res.forEach(function (x) { var li = document.createElement('li'); li.setAttribute('role', 'option'); li.tabIndex = 0; li.dataset.key = x.v; li.innerHTML = '<b></b><span></span>'; li.firstChild.textContent = x.l; li.lastChild.textContent = x.g; li.addEventListener('click', function () { pick(x.v); }); li.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); pick(x.v); } }); ul.appendChild(li); });
+    var li = document.createElement('li'); li.className = 'act-other'; li.dataset.key = 'autre'; li.tabIndex = 0; li.textContent = 'Autre activité : « ' + q.value.trim() + ' »'; li.addEventListener('click', function () { pick('autre', q.value.trim()); }); li.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); pick('autre', q.value.trim()); } }); ul.appendChild(li);
+    ul.hidden = false;
+  });
+  q.addEventListener('keydown', function (e) { if (e.key === 'ArrowDown' && ul.firstChild) { e.preventDefault(); ul.firstChild.focus(); } });
+  sel.addEventListener('change', function () { toggle(); q.value = sel.value && sel.value !== 'autre' ? sel.options[sel.selectedIndex].textContent : ''; });
+})();

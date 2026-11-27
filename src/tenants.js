@@ -1,3 +1,4 @@
+import { ACTIVITIES, activityTemplate } from './activities.js';
 import { TEMPLATES } from './templates.js';
 import { slugify, randomId, sha256, phoneOk, intlPhone, isTime, toMin, clampStr } from './util.js';
 import { isDial } from './phone.js';
@@ -16,12 +17,14 @@ export function uniqueSlug(db, name) {
 }
 
 /** Crée une entreprise complète (prestations, postes, horaires) à partir d'un modèle de métier. */
-export function createTenant(db, { name, tpl, city = '', phone = '', email = '', cc = null, tz = null, country = 'GF', lang = null, currency = null, example = 0, plan = 'pro', status = 'trial', ownerId = null, prospectId = null, address = '', demoToken: forcedToken = null, slug: forcedSlug = null, name2 = null, phoneCc = null }) {
+export function createTenant(db, { name, tpl, activity = null, activityOther = '', city = '', phone = '', email = '', cc = null, tz = null, country = 'GF', lang = null, currency = null, example = 0, plan = 'pro', status = 'trial', ownerId = null, prospectId = null, address = '', demoToken: forcedToken = null, slug: forcedSlug = null, name2 = null, phoneCc = null }) {
   const C = countryOf(country); const ctry = COUNTRIES[country] ? country : 'OTHER';
   lang = LANGS[lang] ? lang : C.lang; currency = PRICES[currency] ? currency : (PRICES[C.cur] ? C.cur : 'EUR');
   // Indicatif par défaut des clients : celui du pays (pour « Autre pays », celui choisi par le professionnel)
   cc = cc || C.dial || (isDial(phoneCc) ? phoneCc : ''); tz = tz && validTz(tz) ? tz : C.tz;
-  const T = templateFor(tpl, lang); const now = Date.now();
+  // Activité du catalogue ou saisie libre : textes, prestations, horaires adaptés ; sinon modèle historique
+  const T = activity ? activityTemplate(activity, activityOther, lang, Object.fromEntries(Object.keys(TEMPLATES).map((k) => [k, templateFor(k, lang)]))) : templateFor(tpl, lang); const now = Date.now();
+  if (activity) tpl = ACTIVITIES[T.activity]?.base || (TEMPLATES[tpl] ? tpl : 'artisan');
   const slug = forcedSlug || uniqueSlug(db, name);
   let demoToken = null;
   return db.tx(() => {
@@ -32,6 +35,7 @@ export function createTenant(db, { name, tpl, city = '', phone = '', email = '',
       plan in PLANS ? plan : 'pro', status, status === 'trial' ? now + config.trialDays * 864e5 : null, ownerId, prospectId,
       status === 'demo' && (forcedToken || !forcedSlug) ? sha256(demoToken = forcedToken || randomId(18)) : null, now, lang, ctry, currency, example ? 1 : 0);
     const id = Number(r.lastInsertRowid);
+    db.run('UPDATE tenants SET activity=?, activity_other=?, prices_confirmed=? WHERE id=?', activity ? T.activity : null, activity === 'autre' ? clampStr(activityOther, 60) : null, status === 'demo' || example ? 1 : 0, id);
     T.services.forEach((s, i) => db.run('INSERT INTO services(tenant_id,name,price,dur,descr,pos) VALUES(?,?,?,?,?,?)', id, s[0], s[1], s[2], s[3], i));
     T.staff.forEach((n) => db.run('INSERT INTO staff(tenant_id,name) VALUES(?,?)', id, n));
     for (const [d, h] of Object.entries(T.hours)) if (h) db.run('INSERT INTO hours(tenant_id,dow,open,close) VALUES(?,?,?,?)', id, Number(d), h[0], h[1]);
@@ -110,6 +114,8 @@ export function updateSettings(db, tenantId, f) {
     db.run(`UPDATE staff SET active=0 WHERE tenant_id=? AND id NOT IN (${keepT.map(() => '?').join(',')})`, tenantId, ...keepT);
     db.run('DELETE FROM hours WHERE tenant_id=?', tenantId);
     for (const [d, h] of Object.entries(hours)) db.run('INSERT INTO hours(tenant_id,dow,open,close) VALUES(?,?,?,?)', tenantId, Number(d), h[0], h[1]);
+    // Le professionnel a relu et enregistré ses prestations : ses tarifs peuvent désormais être publiés
+    db.run('UPDATE tenants SET prices_confirmed=1 WHERE id=?', tenantId);
   });
   return [];
 }
