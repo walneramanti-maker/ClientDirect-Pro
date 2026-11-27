@@ -127,6 +127,19 @@ test('accueil : filtres pays / territoire / ville, lignes cliquables, formules, 
   for (const k of ['active', 'trial', 'pastDue', 'mrr', 'revenue', 'expenses', 'result', 'byPlan', 'at']) assert.ok(k in j, k);
   assert.equal(j.byPlan.length, 3); assert.deepEqual(j.byPlan.map((p) => p.plan), ['essentiel', 'pro', 'premium']);
   assert.equal(j.result, Math.round((j.revenue - j.expenses) * 100) / 100);
-  assert.match(d.text, j.result < 0 ? /kc c-neg" data-k="result"/ : /kc c-pos" data-k="result"/, 'résultat rouge si négatif, vert sinon');
+  assert.match(d.text, j.result < 0 ? /kc glass c-neg" href="[^"]+" data-k="result"/ : /kc glass c-pos" href="[^"]+" data-k="result"/, 'résultat rouge si négatif, vert sinon');
   assert.notEqual((await app.client().get('/admin/live.json')).status, 200, 'réservé à l’administrateur');
+});
+
+test('tous les indicateurs sont des liens filtrés qui répondent, même à zéro', async () => {
+  const d = await admin.get('/admin');
+  const hrefs = [...d.text.matchAll(/<a class="(?:kc|mk|k|pl) glass[^"]*" href="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(hrefs.length >= 6 + 5 + 3 + 3, `liens trouvés : ${hrefs.length}`);
+  for (const k of ['active', 'trial', 'mrr', 'revenue', 'expenses', 'result', 'prospects', 'pastDue', 'signupsMonth', 'incidents', 'tickets']) assert.match(d.text, new RegExp(`href="[^"#]*(#\\w+)?"[^>]*data-k="${k}"|data-k="${k}"`), k);
+  assert.match(d.text, /<a class="mk glass[^"]*" href="\/admin\/tickets\?statut=open" data-k="tickets">/); assert.match(d.text, /href="\/admin\/clients\?status=past_due" data-k="pastDue"/);
+  assert.match(d.text, /id="depenses"/); assert.match(d.text, /id="alertes"/);
+  for (const h of new Set(hrefs)) { const r = await admin.get(h.replace(/#.*$/, '')); assert.equal(r.status, 200, h); }
+  const per = await admin.get('/admin/clients?periode=mois'); assert.match(per.text, /Inscrits ce mois-ci/);
+  assert.match(d.text, /<a class="cnt" href="\/admin\/clients\?terr=GF&amp;status=trial"|<a class="cnt" href="\/admin\/clients\?terr=GF&status=trial"/, 'compteurs du tableau par territoire cliquables');
+  for (const u of ['/admin/paiements', '/admin/parametres']) assert.match((await admin.get(u)).text, /class="kc glass/);
 });

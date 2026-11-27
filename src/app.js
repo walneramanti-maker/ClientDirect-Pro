@@ -563,7 +563,7 @@ export function createApp(db) {
   // Indicateurs en temps réel (actualisés par la page toutes les 60 secondes)
   on('GET', '/admin/live.json', (c) => {
     requireAdmin(c); const d = adminData(c);
-    json(c.res, { at: d.updatedAt, active: d.counts.active, trial: d.counts.trial, pastDue: d.counts.pastDue, mrr: d.mrr, revenue: d.revenueMonth, expenses: d.expensesMonth, result: Math.round((d.revenueMonth - d.expensesMonth) * 100) / 100, signupsMonth: d.terr.totals.inscritsMois, alerts: d.incidents.length + d.openTickets + d.counts.pastDue + d.trialsEnding, byPlan: d.byPlan });
+    json(c.res, { at: d.updatedAt, active: d.counts.active, trial: d.counts.trial, pastDue: d.counts.pastDue, mrr: d.mrr, revenue: d.revenueMonth, expenses: d.expensesMonth, result: Math.round((d.revenueMonth - d.expensesMonth) * 100) / 100, signupsMonth: d.terr.totals.inscritsMois, prospects: d.terr.prospects.n || 0, incidents: d.incidents.length, tickets: d.openTickets, alerts: d.incidents.length + d.openTickets + d.counts.pastDue + d.trialsEnding, byPlan: d.byPlan });
   });
   on('GET', '/admin', (c) => { requireAdmin(c); html(c.res, V.adminDashboard(csrfToken(c), adminData(c, c.url.searchParams.get('m') === 'ok' ? 'Enregistré.' : ''))); });
   // Bilan d'une période : inscriptions, abonnements, revenus, dépenses, canaux, territoires, avis

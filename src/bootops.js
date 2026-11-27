@@ -252,3 +252,12 @@ export async function campaignControlCopy(db, env = process.env, { send, config,
   log(`Copie de contrôle envoyée à l’administrateur (${mask(config.adminEmail)}) : ${String(r).slice(0, 80)}`);
   return { envoyee: true };
 }
+
+/** Avis de non-distribution reçus dans contact@ (lecture seule, 2 derniers jours) : expéditeur, objet, codes d'erreur. Adresses masquées. */
+export async function bounceDiagnostic(db, { fetchSince, imap }, log = console.log) {
+  const msgs = await fetchSince({ ...imap, lastUid: 0, sinceDays: 2, max: 60 });
+  const bounces = msgs.filter((m) => /mailer-daemon|postmaster|mail delivery/i.test(m.from) || /undeliver|non remis|delivery status|[ée]chec|returned mail|failure notice|delay/i.test(m.subject));
+  const maskAll = (s) => String(s).replace(/([\w.+-])[\w.+-]*@([\w-]+(\.[\w-]+)+)/g, '$1***@$2');
+  log(`Boîte contact@ (2 jours) : ${msgs.length} message(s), dont ${bounces.length} avis de non-distribution${bounces.length ? ' : ' + JSON.stringify(bounces.map((m) => ({ de: maskAll(m.from), objet: maskAll(m.subject).slice(0, 90), codes: maskAll((String(m.text).match(/^.*(\b[245]\.\d{1,3}\.\d{1,3}\b|\b5[05]\d\b|blocked|spam|refus|rejected|policy|not accepted|quota).*$/gim) || []).slice(0, 4).join(' | ')).slice(0, 400) }))) : ''}`);
+  return { total: msgs.length, rebonds: bounces.length };
+}

@@ -23,10 +23,11 @@ export const PER_PAGE = 50;
 /** Filtres reconnus : q (nom, responsable, e-mail, téléphone, ville, site), tpl, city, country, terr, plan, status, kind, sort. */
 export function clientFilters(sp) {
   const g = (k) => String(sp.get?.(k) ?? sp[k] ?? '').trim().slice(0, 80);
-  const f = { q: g('q'), tpl: g('tpl'), city: g('city'), country: g('country'), terr: g('terr'), plan: g('plan'), status: g('status'), kind: g('kind') || 'client', sort: g('sort') || 'recent', page: Math.max(1, Math.floor(Number(g('page')) || 1)) };
+  const f = { q: g('q'), tpl: g('tpl'), city: g('city'), country: g('country'), terr: g('terr'), plan: g('plan'), status: g('status'), kind: g('kind') || 'client', periode: g('periode'), sort: g('sort') || 'recent', page: Math.max(1, Math.floor(Number(g('page')) || 1)) };
   if (!TEMPLATES[f.tpl]) f.tpl = ''; if (!PLANS[f.plan]) f.plan = ''; if (!STATUS[f.status]) f.status = ''; if (!TERRITORIES[f.terr]) f.terr = '';
   if (!COUNTRIES[f.country]) f.country = ''; if (!KINDS[f.kind] && f.kind !== 'tous') f.kind = 'client';
   if (!['recent', 'ancien', 'nom', 'essai', 'paiement'].includes(f.sort)) f.sort = 'recent';
+  if (!['mois', '7j', '30j'].includes(f.periode)) f.periode = '';
   return f;
 }
 function where(f) {
@@ -39,6 +40,7 @@ function where(f) {
   if (f.terr) { w.push(`${TERR_SQL}=?`); a.push(f.terr); }
   if (f.plan) { w.push('t.plan=?'); a.push(f.plan); }
   if (f.status) { w.push('t.status=?'); a.push(f.status); }
+  if (f.periode) { const now = new Date(); const since = f.periode === 'mois' ? Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) : Date.now() - (f.periode === '7j' ? 7 : 30) * 864e5; w.push('t.created_at>=?'); a.push(since); }
   return { sql: w.length ? `WHERE ${w.join(' AND ')}` : '', args: a };
 }
 const ORDER = { recent: 't.created_at DESC, t.id DESC', ancien: 't.created_at ASC, t.id ASC', nom: 't.name COLLATE NOCASE ASC', essai: "CASE WHEN t.status='trial' THEN t.trial_ends_at ELSE 9e15 END ASC", paiement: 'COALESCE(t.current_period_end, 9e15) ASC' };

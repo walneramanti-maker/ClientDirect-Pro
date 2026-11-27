@@ -50,6 +50,7 @@ if (process.env.ADMIN_LOGIN && process.env.ADMIN_PASSWORD && process.env.ADMIN_T
 }
 import('./bootops.js').then(({ approveAutoCampaign }) => approveAutoCampaign(db)).catch((e) => console.error('Validation de campagne :', e.message));
 import('./bootops.js').then(({ renameCampaign }) => renameCampaign(db)).catch((e) => console.error('Campagne :', e.message));
+setTimeout(() => Promise.all([import('./bootops.js'), import('./imap.js')]).then(([B, I]) => I.imapReady() && B.bounceDiagnostic(db, { fetchSince: I.fetchSince, imap: config.imap })).catch((e) => console.error('Boîte contact@ :', e.message)), 15000).unref?.();
 if (process.env.CAMPAIGN_CONTROL_COPY) setTimeout(() => Promise.all([import('./bootops.js'), import('./smtp.js')]).then(([B, M]) => B.campaignControlCopy(db, process.env, { send: M.sendMail, buildMessage: M.buildMessage, config })).catch((e) => console.error('Copie de contrôle :', e.message)), 20000).unref?.();
 { const { markInternal } = await import('./bootops.js'); try { markInternal(db); } catch (e) { console.error('Comptes internes :', e.message); } }
 { const { syncFixedCosts } = await import('./bootops.js'); try { syncFixedCosts(db); } catch (e) { console.error('Dépenses fixes :', e.message); } }

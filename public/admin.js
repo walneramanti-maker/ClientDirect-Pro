@@ -13,6 +13,7 @@
     fetch(live.getAttribute('data-live'), { credentials: 'same-origin', headers: { accept: 'application/json' } }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
       if (!d) return;
       set('active', String(d.active)); set('trial', String(d.trial)); set('mrr', eur(d.mrr)); set('revenue', eur(d.revenue)); set('expenses', eur(d.expenses)); set('result', eur(d.result));
+      ['prospects', 'pastDue', 'signupsMonth', 'incidents', 'tickets'].forEach(function (k) { var m = document.querySelector('.mk[data-k="' + k + '"]'); if (!m || d[k] == null) return; var st = m.querySelector('strong'); if (st.textContent !== String(d[k])) { st.textContent = d[k]; m.classList.add('flash-up'); setTimeout(function () { m.classList.remove('flash-up'); }, 1200); } m.classList.toggle('has', d[k] > 0); if (k === 'pastDue') m.classList.toggle('warn', d[k] > 0); });
       var rc = document.querySelector('.kc[data-k="result"]'); if (rc) { rc.classList.toggle('c-neg', d.result < 0); rc.classList.toggle('c-pos', d.result >= 0); var l = rc.querySelector('.kl'); if (l) l.textContent = d.result < 0 ? 'Perte du mois' : 'Bénéfice du mois'; }
       (d.byPlan || []).forEach(function (p) { var el = document.querySelector('[data-plan="' + p.plan + '"]'); if (!el) return; el.querySelector('[data-p="payants"]').textContent = p.payants; el.querySelector('[data-p="essais"]').textContent = p.essais; el.querySelector('[data-p="mrr"]').textContent = eur(p.payants * p.monthly); });
       var at = live.querySelector('[data-k="at"]'); if (at) at.textContent = new Date(d.at).toLocaleTimeString('fr-FR', { timeZone: 'America/Cayenne', hour: '2-digit', minute: '2-digit' });
@@ -20,4 +21,13 @@
     }).catch(function () {});
   }
   setInterval(tick, 60000); document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
+})();
+// Effet de pression au toucher (iPhone, Android) : classe ajoutée dès l'appui, retirée au relâchement.
+(function () {
+  var SEL = '.glass, .qa a, .chip, .tab, .btn, .more, .side nav a, .mnav nav a, a.cnt';
+  var cur = null;
+  var up = function () { if (cur) { cur.classList.remove('pressed'); cur = null; } };
+  document.addEventListener('pointerdown', function (e) { var el = e.target.closest && e.target.closest(SEL); if (!el) return; cur = el; el.classList.add('pressed'); }, { passive: true });
+  ['pointerup', 'pointercancel', 'pointerleave', 'dragstart', 'scroll'].forEach(function (t) { document.addEventListener(t, up, { passive: true, capture: true }); });
+  document.addEventListener('touchstart', function () {}, { passive: true }); // active :active sur Safari iOS
 })();
