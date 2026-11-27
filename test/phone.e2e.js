@@ -63,6 +63,8 @@ test('réservation sur téléphone : indicatif modifiable, champ lisible, numér
   assert.equal(await p.inputValue('#b-cc'), '594', 'indicatif du professionnel par défaut');
   const w = await p.evaluate(() => ({ doc: document.documentElement.scrollWidth, vw: window.innerWidth, cc: document.getElementById('b-cc').getBoundingClientRect(), ph: document.getElementById('b-phone').getBoundingClientRect() }));
   assert.ok(w.doc <= w.vw + 1, 'pas de débordement'); assert.ok(w.cc.height >= 36 && w.ph.height >= 36, 'assez grands pour le doigt'); assert.ok(w.ph.width >= 120, 'numéro lisible');
+  // Jour suivant (pas aujourd'hui) : le test ne dépend pas de l'heure à laquelle il est lancé
+  await p.tap('#b-days .chip >> nth=1'); await p.waitForSelector('#b-slots .chip');
   for (const [cc, raw, want] of [['32', '0470 12 34 56', '32470123456'], ['594', '06 12 34 56 78', '33612345678'], ['594', '0694 11 22 33', '594694112233']]) {
     await p.tap('#b-slots .chip >> nth=0'); await p.selectOption('#b-cc', cc);
     const name = `Client ${want}`; await p.fill('#b-name', name); await p.fill('#b-phone', raw); await p.tap('#book button[type=submit]');

@@ -76,3 +76,15 @@
     });
   }
 })();
+// Clavier du téléphone ouvert : retirer la barre d'actions flottante pour ne jamais masquer le champ en cours de saisie
+(function () {
+  var f = function (on) { return function (e) { if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) document.body.classList.toggle('typing', on); }; };
+  document.addEventListener('focusin', f(true)); document.addEventListener('focusout', f(false));
+})();
+// La barre d'actions ne s'affiche que lorsqu'aucun formulaire n'est à l'écran : elle ne recouvre jamais un bouton d'envoi
+(function () {
+  var bar = document.querySelector('.mbar'); if (!bar || !('IntersectionObserver' in window)) return;
+  var seen = new Set();
+  var io = new IntersectionObserver(function (list) { list.forEach(function (e) { if (e.isIntersecting) seen.add(e.target); else seen.delete(e.target); }); document.body.classList.toggle('form-on-screen', seen.size > 0); }, { threshold: 0 });
+  ['rdv', 'devis', 'chat'].forEach(function (id) { var el = document.getElementById(id); if (el) io.observe(el); });
+})();

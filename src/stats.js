@@ -15,7 +15,7 @@ export function summary(db, t, from, to) {
   const s = db.one('SELECT COALESCE(SUM(views),0) views, COALESCE(SUM(bookings),0) bookings, COALESCE(SUM(quotes),0) quotes, COALESCE(SUM(chats),0) chats, COALESCE(SUM(wa_clicks),0) wa_clicks FROM stats_daily WHERE tenant_id=? AND day BETWEEN ? AND ?', t.id, from, to);
   const appt = db.one("SELECT COUNT(*) n, COALESCE(SUM(price),0) value FROM appointments WHERE tenant_id=? AND status IN ('confirmed','done') AND date BETWEEN ? AND ?", t.id, from, to);
   const requests = s.bookings + s.quotes + s.wa_clicks;
-  return { ...s, requests, confirmed: appt.n, value: appt.value, conversion: s.views ? Math.round((requests / s.views) * 1000) / 10 : 0 };
+  return { ...s, requests, confirmed: appt.n, value: appt.value, conversion: s.views ? Math.min(100, Math.round((requests / s.views) * 1000) / 10) : 0 };
 }
 export function last30(db, t) { const to = nowIn(t.tz).date; return { from: addDays(to, -29), to, ...summary(db, t, addDays(to, -29), to) }; }
 /** Courbe jour par jour (pour le graphique de l'espace pro). */
