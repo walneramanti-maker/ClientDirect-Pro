@@ -2,7 +2,7 @@
 // doit voir des euros). Une seule correction par visite ; un choix explicite (?devise= ou ?pays=) est toujours respecté.
 (function () {
   var s = document.getElementById('formules'); if (!s) return;
-  var q = new URLSearchParams(location.search); if (q.has('devise') || q.has('pays')) return;
+  var q = new URLSearchParams(location.search); if (q.has('devise') || q.has('pays') || /(^|; )pays=/.test(document.cookie)) return;
   var tz = ''; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return; }
   var EUR = { 'America/Cayenne': 'GF', 'Europe/Paris': 'FR', 'America/Martinique': 'MQ', 'America/Guadeloupe': 'GP', 'Indian/Reunion': 'RE', 'Indian/Mayotte': 'YT', 'Europe/Brussels': 'BE', 'Europe/Luxembourg': 'LU', 'Europe/Monaco': 'MC' };
   var pays = EUR[tz]; if (!pays || s.getAttribute('data-cur') === 'EUR') return;

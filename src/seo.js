@@ -1,5 +1,5 @@
 // Référencement : adresse canonique, balises, données structurées, sitemap et robots.txt.
-import { config } from './config.js';
+import { config, planHas } from './config.js';
 import { esc, DAYS, pricesShown } from './util.js';
 import { ACTIVITIES } from './activities.js';
 const SCHEMA_OF = (t) => ACTIVITIES[t.activity]?.sch || SCHEMA_TYPE[t.tpl] || 'LocalBusiness';
@@ -15,8 +15,11 @@ export function siteUrl(t) {
 }
 export function description(t) {
   const svc = t.services.slice(0, 3).map((s) => s.name).join(', ');
-  const en = t.lang === 'en';
-  return (en ? `${t.name}, ${t.metier.toLowerCase()}${t.city ? ` in ${t.city}` : ''}. ${svc}. Online booking, quote requests and WhatsApp contact.` : `${t.name}, ${t.metier.toLowerCase()}${t.city ? ` à ${t.city}` : ''}. ${svc}. Prise de rendez-vous en ligne, devis gratuit et contact WhatsApp.`).slice(0, 158);
+  const en = t.lang === 'en'; const rdv = planHas(t.plan, 'rdv');
+  const tail = en ? (rdv ? 'Online booking, quotes and WhatsApp.' : 'Quote requests and WhatsApp contact.') : (rdv ? 'Rendez-vous en ligne, devis et WhatsApp.' : 'Demande de devis et contact WhatsApp.');
+  const head = en ? `${t.name}, ${t.metier.toLowerCase()}${t.city ? ` in ${t.city}` : ''}.` : `${t.name}, ${t.metier.toLowerCase()}${t.city ? ` à ${t.city}` : ''}.`;
+  let d = `${head} ${svc}. ${tail}`; if (d.length > 158) d = `${head} ${tail}`;
+  return d.length > 158 ? d.slice(0, 157).replace(/\s+\S*$/, '') + '…' : d;
 }
 /** Balises <head> d'un site d'entreprise. Les démos ne sont jamais indexées. */
 export function siteHead(t, { mode = 'live', path = null } = {}) {
@@ -41,7 +44,7 @@ export function sitemap(entries) {
 }
 export function robots(sitemapUrl, { allow = true } = {}) {
   if (!allow) return 'User-agent: *\nDisallow: /\n';
-  return `User-agent: *\nDisallow: /pro\nDisallow: /admin\nDisallow: /demo/\nDisallow: /connexion\nDisallow: /inscription\nDisallow: /annuler/\nDisallow: /stop/\nAllow: /\n\nSitemap: ${sitemapUrl}\n`;
+  return `User-agent: *\nDisallow: /pro\nDisallow: /admin\nDisallow: /demo/\nDisallow: /annuler/\nDisallow: /stop/\nAllow: /\n\nSitemap: ${sitemapUrl}\n`;
 }
 /** Sites publiés (essai en cours, actifs ou en délai de grâce) pour le sitemap et l'annuaire. */
 export function publicTenants(db, now = Date.now()) {

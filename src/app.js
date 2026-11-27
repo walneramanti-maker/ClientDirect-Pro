@@ -11,6 +11,7 @@ import * as V from './views.js';
 import { TEMPLATES } from './templates.js';
 import { ACTIVITIES } from './activities.js';
 const BOOT_AT = Date.now();
+const dirCheck = { at: 0 };
 import { emailOk, randomId, safeEq, clampStr, nowIn, intlPhone, phoneOk, phoneFmt, sha256, csvCell } from './util.js';
 import { isDial, toE164, domCountryOf, phoneValid } from './phone.js';
 import { hashPassword, passwordProblem, createSession, readSession, destroySession, destroyUserSessions, csrfOk, issueToken, useToken, totpOk, rateLimit, login, audit } from './security.js';
@@ -27,7 +28,7 @@ import { createCampaign, campaignDetail, approveCampaign, cancelCampaign } from 
 import { applyPartner, approvePartner, partnerByToken, partnerStats, referralStats, PROGRAM } from './rewards.js';
 import { supportAnswer, openTicket, replyTicket } from './support.js';
 import { recordIncident, openIncidents, resolveIncident } from './incidents.js';
-import { t as tr, withLang, detectLang, regionFromAccept, LANGS, setLang, currentLang } from './i18n.js';
+import { t as tr, withLang, detectLang, regionFromAccept, LANGS, setLang, currentLang, setQuery } from './i18n.js';
 import { COUNTRIES, country as countryOf, billingOpen, validTz, PRICES, countryByTz, countryFromDial } from './markets.js';
 import { exampleTenant, exampleDashboardData, EXAMPLE_TPLS } from './examples.js';
 import { siteHead, siteUrl, sitemap, robots, publicTenants } from './seo.js';
@@ -117,7 +118,7 @@ export function createApp(db) {
 
   // ---------- site public ClientDirect Pro ----------
   /** Pays probable du visiteur : choix explicite, région du navigateur, sinon France. */
-  const guessCountry = (c) => { const q = c.url.searchParams.get('pays'); if (COUNTRIES[q]) return q; const r = regionFromAccept(c.req.headers['accept-language']); return COUNTRIES[r] ? r : (c.lang === 'en' ? 'US' : 'FR'); };
+  const guessCountry = (c) => { const q = c.url.searchParams.get('pays'); if (COUNTRIES[q]) return q; if (COUNTRIES[c.cookies.pays]) return c.cookies.pays; const r = regionFromAccept(c.req.headers['accept-language']); return COUNTRIES[r] ? r : (c.lang === 'en' ? 'US' : 'FR'); };
   /**
    * Pays et indicatif à l'inscription. Un choix explicite (différent de la proposition affichée) est toujours respecté.
    * Sinon : territoire d'Outre-mer du numéro WhatsApp, puis fuseau horaire de l'appareil, puis langue du navigateur.
@@ -167,8 +168,12 @@ export function createApp(db) {
   on('GET', '/exemple/espace-pro', (c) => { const d = exampleDashboardData(db, c.lang); html(c.res, V.proDashboard(d.tenant, d.user, '', { ...d, example: true })); });
   on('GET', '/exemple/:tpl', (c) => {
     if (!EXAMPLE_TPLS.includes(c.params.tpl)) throw HttpError(404, 'Page introuvable');
-    const tn = exampleTenant(db, c.params.tpl, c.lang); renderSite(c, tn, `/exemple/${c.params.tpl}`, 'example');
+    const tn = exampleTenant(db, c.params.tpl, c.lang);
+    { const cur = countryOf(guessCountry(c)).cur; if (PRICES[cur]) tn.currency = cur; } // devise du pays du visiteur (affichage seulement)
+    renderSite(c, tn, `/exemple/${c.params.tpl}`, 'example');
   });
+  on('GET', '/favicon.svg', (c) => { if (!serveStatic(c.res, 'favicon.svg', c.req)) throw HttpError(404, 'Page introuvable'); });
+  on('GET', '/favicon.ico', (c) => send(c.res, 301, '', { Location: '/favicon.svg', 'Cache-Control': 'public, max-age=86400' }));
   on('GET', '/robots.txt', (c) => send(c.res, 200, robots(`${config.baseUrl}/sitemap.xml`, { allow: config.isProd }), { 'Content-Type': 'text/plain; charset=utf-8' }));
   on('GET', '/sitemap.xml', (c) => {
     // Seules les adresses du même domaine sont acceptées par Google dans un sitemap ; les domaines propres ont le leur.
@@ -850,10 +855,12 @@ export function createApp(db) {
     const session = readSession(db, cookies[SESSION]);
     const qLang = url.searchParams.get('lang');
     const lang = detectLang({ query: qLang, cookie: cookies.lang, accept: req.headers['accept-language'] });
+    if (Date.now() - dirCheck.at > 5 * 60e3) { dirCheck.at = Date.now(); try { V.setDirectoryHasSites(publicTenants(db).length > 0); } catch { /* base indisponible */ } }
     const c = { req, res, url, cookies, session, ip: clientIp(req), base, form: {}, raw: '', lang, setLang: (l) => { setLang(l); c.lang = currentLang(); } };
     const extra = [];
     if (!session) { c.pre = cookies[PRE] && /^[\w-]{20,}$/.test(cookies[PRE]) ? cookies[PRE] : randomId(18); if (c.pre !== cookies[PRE]) extra.push(cookie(PRE, c.pre, { maxAge: 86400 })); }
     if (qLang && LANGS[qLang] && qLang !== cookies.lang) extra.push(cookie('lang', qLang, { maxAge: 365 * 86400, httpOnly: false }));
+    { const qp = url.searchParams.get('pays'); if (qp && COUNTRIES[qp] && qp !== cookies.pays) extra.push(cookie('pays', qp, { maxAge: 365 * 86400, httpOnly: false })); }
     // Origine du visiteur (premier contact, 90 jours) : sert uniquement à mesurer les canaux d'acquisition, sans pistage tiers
     const newSrc = !siteSlug && method0(req) === 'GET' ? sourceFrom(url, path) : '';
     c.source = cookies.cdp_src && /^[\w:.-]{1,60}$/.test(cookies.cdp_src) ? cookies.cdp_src : newSrc;
@@ -861,6 +868,7 @@ export function createApp(db) {
     if (newSrc && (path === '/' || path.startsWith('/metiers/'))) countVisit(db, newSrc);
     if (extra.length) { const orig = res.writeHead.bind(res); res.writeHead = (st, h = {}) => { const sc = h['Set-Cookie']; h['Set-Cookie'] = [...extra, ...(sc ? [].concat(sc) : [])]; return orig(st, h); }; }
     return withLang(lang, async () => {
+      { const q = new URLSearchParams(url.search); q.delete('lang'); setQuery(q.toString()); }
     try {
       const method = req.method === 'HEAD' ? 'GET' : req.method;
       let found = null, methodMismatch = false;

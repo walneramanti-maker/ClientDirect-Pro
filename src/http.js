@@ -22,7 +22,7 @@ export function parseForm(raw, type = '') {
   const out = {}; for (const [k, v] of new URLSearchParams(raw)) out[k] = v; return out;
 }
 export const SECURITY_HEADERS = {
-  'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com https://billing.stripe.com",
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com https://billing.stripe.com",
   'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()', 'Cross-Origin-Opener-Policy': 'same-origin'
 };
@@ -37,7 +37,7 @@ export const json = (res, obj, status = 200, headers = {}) => send(res, status, 
 export const redirect = (res, to, headers = {}) => send(res, 303, '', { Location: to, ...headers });
 
 const PUB = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../public');
-const TYPES = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webm': 'video/webm', '.mp4': 'video/mp4', '.ico': 'image/x-icon' };
+const TYPES = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
 // Version de chaque fichier statique (empreinte de son contenu) : un fichier modifié change d'adresse,
 // le navigateur le recharge aussitôt ; un fichier inchangé reste en cache longtemps.
 const VERSIONS = new Map();
@@ -46,10 +46,10 @@ export function assetVersion(rel) {
   let v = ''; try { v = crypto.createHash('sha256').update(fs.readFileSync(path.resolve(PUB, rel))).digest('hex').slice(0, 10); } catch { v = ''; }
   VERSIONS.set(rel, v); return v;
 }
-export const versionAssets = (html) => html.replace(/(["'])\/static\/([\w.\/-]+\.(?:css|js))\1/g, (m, q, rel) => { const v = assetVersion(rel); return v ? `${q}/static/${rel}?v=${v}${q}` : m; });
+export const versionAssets = (html) => html.replace(/(["'])\/static\/([\w.\/-]+\.(?:css|js|jpg|webp|png|svg|mp4))\1/g, (m, q, rel) => { const v = assetVersion(rel); return v ? `${q}/static/${rel}?v=${v}${q}` : m; });
 export function serveStatic(res, rel, req = null) {
   const versioned = /[?&]v=[0-9a-f]{6,}/.test(req?.url || '');
-  const cache = versioned ? 'public, max-age=31536000, immutable' : 'public, max-age=300';
+  const cache = versioned ? 'public, max-age=31536000, immutable' : (/\.(css|js)$/.test(rel) ? 'public, max-age=300' : /\.woff2$/.test(rel) ? 'public, max-age=31536000, immutable' : 'public, max-age=3600');
   const file = path.resolve(PUB, rel.replace(/^\/+/, ''));
   if (!file.startsWith(PUB + path.sep)) return false;
   let stat; try { stat = fs.statSync(file); if (!stat.isFile()) return false; } catch { return false; }
@@ -60,9 +60,9 @@ export function serveStatic(res, rel, req = null) {
     let start = range[1] === '' ? stat.size - Number(range[2]) : Number(range[1]); let end = range[1] !== '' && range[2] !== '' ? Number(range[2]) : stat.size - 1;
     if (!(start >= 0 && start <= end && end < stat.size)) { send(res, 416, '', { 'Content-Range': `bytes */${stat.size}` }); return true; }
     const fd = fs.openSync(file, 'r'); const buf = Buffer.alloc(end - start + 1); fs.readSync(fd, buf, 0, buf.length, start); fs.closeSync(fd);
-    send(res, 206, buf, { 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges': 'bytes', 'Cache-Control': 'public, max-age=3600' });
+    send(res, 206, buf, { 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges': 'bytes', 'Cache-Control': cache });
     return true;
   }
-  send(res, 200, fs.readFileSync(file), { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': /\.(css|js)$/.test(file) ? cache : 'public, max-age=3600' });
+  send(res, 200, fs.readFileSync(file), { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': cache });
   return true;
 }

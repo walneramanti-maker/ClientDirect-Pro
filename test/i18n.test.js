@@ -77,7 +77,7 @@ test('exemples : sites fictifs testables sans inscription, rien n’est enregist
 });
 test('formules : les trois formules et leurs différences sont clairement affichées', async () => {
   const p = (await app.client().get('/')).text;
-  assert.match(p, /Le plus choisi/);
+  assert.match(p, /Recommandé/);
   for (const n of ['Essentiel', 'Pro', 'Premium']) assert.match(p, new RegExp(`<h3>${n}</h3>`));
   assert.match(p, /<table class="compare">/);
   const rows = p.match(/<tr><th scope="row">/g).length; assert.ok(rows >= 9, 'comparatif ligne par ligne');

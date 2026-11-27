@@ -46,4 +46,7 @@ export function fmtDay(date, lang = currentLang()) {
 export const dayName = (dow, lang = currentLang()) => new Intl.DateTimeFormat(lang === 'fr' ? 'fr-FR' : 'en-US', { weekday: 'long', timeZone: 'UTC' }).format(new Date(Date.UTC(2023, 0, 1 + dow))).replace(/^./, (c) => c.toUpperCase());
 export const fmtDate = (ms, lang = currentLang()) => new Date(ms).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-US');
 /** Change la langue de la requête en cours (ex. un site d'entreprise s'affiche dans la langue de l'entreprise). */
+/** Paramètres de l'adresse courante (hors langue), conservés par le sélecteur de langue. */
+export const setQuery = (q) => { const s = als.getStore(); if (s) s.query = q; };
+export const currentQuery = () => als.getStore()?.query || '';
 export const setLang = (l) => { const s = als.getStore(); if (s && LANGS[l]) s.lang = l; };

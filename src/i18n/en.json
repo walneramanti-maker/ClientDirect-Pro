@@ -46,7 +46,7 @@
  "Espace pro": "Business login",
  "Choisir {p}": "Choose {p}",
  "Essayer gratuitement": "Try it free",
- "Le plus choisi": "Most popular",
+ "Recommandé": "Recommended",
  "HT / mois": "/ month excl. tax",
  "+ {s} HT de mise en service, une seule fois": "+ {s} one-time setup fee (excl. tax)",
  "Inclus": "Included",
@@ -636,5 +636,9 @@
  "Une question ? Répondez simplement à cet e-mail.": "Any question? Just reply to this email.",
  "Appeler": "Call",
  "Vous êtes le professionnel ?": "Are you the business owner?",
- "Connectez-vous pour remettre votre site en ligne.": "Log in to put your site back online."
+ "Connectez-vous pour remettre votre site en ligne.": "Log in to put your site back online.",
+ "ClientDirect Pro : site professionnel, rendez-vous et devis en ligne": "ClientDirect Pro: professional website, online booking and quotes",
+ "Plus de 120 métiers : site professionnel, rendez-vous, devis et réservations en ligne adaptés à votre activité. Essai gratuit 14 jours.": "Over 120 trades: professional website, appointments, quotes and online bookings tailored to your business. 14-day free trial.",
+ "Testez gratuitement des sites créés avec ClientDirect Pro : réservation, devis, WhatsApp et assistant, comme vos clients les verront.": "Try websites built with ClientDirect Pro for free: booking, quotes, WhatsApp and assistant, just as your customers will see them.",
+ "Programme partenaires ClientDirect Pro : recommandez nos sites professionnels aux entreprises et touchez une commission.": "ClientDirect Pro partner program: recommend our professional websites to businesses and earn a commission."
 }
