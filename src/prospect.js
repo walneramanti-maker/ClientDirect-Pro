@@ -74,13 +74,26 @@ export function importProspects(db, list) {
 
 /** Prépare un site de démonstration au nom de l'entreprise prospectée (non publié). */
 /** Nom commercial lisible : l'enseigne entre parenthèses plutôt que le nom de la personne (entreprise individuelle). */
+const LEGAL_FORMS = /^(SAS|SARL|SASU|EURL|SNC|SCB|SCI|SCM|SCP|SELARL|SELAS|EIRL|EI|SA|SCOP|SARLU)\s+/i;
 export function displayName(raw) {
   const m = /\(([^()]+)\)\s*$/.exec(raw || '');
   // « NOM (ENSEIGNE) » : l'enseigne est le nom connu des clients ; mais « NOM (SIGLE) » garde le nom complet, plus parlant
   const sigle = m && /^[A-Z0-9&.]{2,5}$/.test(m[1].trim());
-  let s = (m && !sigle ? m[1] : m ? raw.slice(0, m.index) : raw || '').replace(/^(SAS|SARL|SASU|EURL)\s+/i, '').trim();
-  if (s === s.toUpperCase()) s = s.toLowerCase().replace(/(^|[\s'’\-&.(])([a-zà-ÿ])/g, (x, a, b) => a + b.toUpperCase()).replace(/\b(Slm|Sas|Sarl|Snc)\b/g, (x) => x.toUpperCase()).replace(/(?<=\s)(De|Du|Des|La|Le|Les|Et|Aux?|En)(?=\s)/g, (x) => x.toLowerCase());
+  let s = (m && !sigle ? m[1] : m ? raw.slice(0, m.index) : raw || '').trim().replace(LEGAL_FORMS, '').trim();
+  if (s === s.toUpperCase()) {
+    s = s.toLowerCase().replace(/(^|[\s'’\-&.(])([a-zà-ÿ])/g, (x, a, b) => a + b.toUpperCase()).replace(/(?<=\s)(De|Du|Des|La|Le|Les|Et|Aux?|En|Sur|Sous)(?=\s)/g, (x) => x.toLowerCase()).replace(/(?<=\s)([LD])['’]/g, (x) => x.toLowerCase());
+    // Sigles : mots courts avec chiffre ou sans voyelle (« S2R », « PW », « IYB ») restent en capitales
+    s = s.replace(/(^|\s)([A-Za-z0-9]{1,4})(?=\s|$)/g, (x, a, w) => (/\d/.test(w) && /[a-z]/i.test(w)) || (!/[aeiouyàâéèêëîïôûù]/i.test(w) && w.length >= 2) || /^(Iyb|Cb|Bnb)$/i.test(w) ? a + w.toUpperCase() : x);
+  }
   return s;
+}
+// Prénoms français courants : un nom commercial « PRÉNOM NOM » est en fait le nom de l'exploitant (entreprise individuelle)
+const PRENOMS = new Set(('aline alain alexandre alexis alice amandine amelie anais andre angelique anne annie antoine arnaud arthur audrey aurelie baptiste beatrice benjamin benoit bernard brigitte bruno camille carine carole caroline catherine cecile celine chantal charles charlotte christelle christian christine christophe claire claude clement corinne cyril damien daniel david delphine denis didier dominique dylan eddy elodie emilie emma emmanuel eric estelle eva fabien fabienne fabrice florence florian francis franck francois francoise frederic gael gaelle gerard gilles gregory guillaume guy helene herve hugo isabelle jacques jean jeremy jerome jessica johan jonathan jordan joseph josiane julie julien justine karine kevin laetitia laura laurence laurent lea leo lionel louis lucas lucie ludovic magali manon marc marcel marie marine martine mathieu mathilde maxime melanie michel michele mickael monique nadia nathalie nicolas nicole noemie olivier pascal pascale patrice patricia patrick paul pauline philippe pierre quentin raphael regis remi renaud richard robert romain sabrina samuel sandrine sarah sebastien serge severine simon sophie stephane stephanie sylvain sylvie theo thierry thomas valentin valerie vanessa veronique victor vincent virginie xavier yannick yann yves').split(' '));
+const fold = (x) => String(x).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+/** Vrai si le nom affiché est celui d'une personne (« Rémi François ») plutôt qu'un nom commercial. */
+export function isPersonName(name) {
+  const w = String(name || '').trim().split(/\s+/);
+  return w.length >= 2 && w.length <= 3 && w.some((x) => PRENOMS.has(fold(x).replace(/[^a-z]/g, ''))) && !/\d|&|\b(garage|salon|coiffure|beaute|institut|restaurant|cafe|bar|pizza|auto|location|securite|bati|elec|plomberie)\b/i.test(fold(name));
 }
 /** Jeton de démonstration stable (le même lien survit à un redémarrage du serveur). */
 export const demoTokenFor = (siren) => hmac(config.secret, 'demo:' + siren).slice(0, 32);

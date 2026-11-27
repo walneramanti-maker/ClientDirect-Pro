@@ -170,3 +170,12 @@ test('inscription directe avec l’adresse prospectée : comptée comme conversi
   const p = db.one("SELECT id, status FROM prospects WHERE siren='830000001'"); assert.equal(p.status, 'converted');
   assert.equal(db.one('SELECT source FROM tenants WHERE prospect_id=?', p.id).source, 'prospection');
 });
+
+test('noms : formes juridiques retirées, sigles en capitales, nom de personne remplacé par « votre métier à ville »', async () => {
+  assert.equal(P.displayName('SARL S2R'), 'S2R'); assert.equal(P.displayName('SNC GAMARD'), 'Gamard'); assert.equal(P.displayName('IYB KEBAB'), 'IYB Kebab');
+  assert.equal(P.displayName('SCB DOLCE VITA'), 'Dolce Vita'); assert.equal(P.displayName("LE LYON DE L'ATLAS"), "Le Lyon de l'Atlas"); assert.equal(P.displayName('ALINE LUU (SAIGON)'), 'Saigon');
+  assert.equal(P.isPersonName('Remi Francois'), true); assert.equal(P.isPersonName('Garage du Maroni'), false); assert.equal(P.isPersonName('Mala Neva'), false);
+  const m = O.sequenceEmail({ tpl: 'coiffeur', city: 'ROUEN', site_status: 'aucun' }, { name: 'Remi Francois', demoUrl: 'd', token: 't', stopUrl: 's' });
+  assert.equal(m.subject, 'Votre salon de coiffure à Rouen : des réservations en ligne, même pendant vos coupes');
+  assert.match(m.text, /exemple de site pour votre salon de coiffure à Rouen\./); assert.doesNotMatch(m.text, /Remi|\u0000/);
+});

@@ -2,6 +2,7 @@
 // Prospection B2B par e-mail (CNIL) : message en rapport avec l'activité du destinataire, expéditeur identifié,
 // origine des données indiquée, opposition simple et gratuite (lien + réponse STOP) à chaque message.
 import { config, PLANS } from './config.js';
+import { isPersonName, displayName } from './prospect.js';
 
 /** Séquence : premier message, relance à J+4, dernière relance à J+10 ; jamais plus de 3 messages par entreprise. */
 export const SEQUENCE = [{ step: 0, label: 'Premier message', delayDays: 0 }, { step: 1, label: 'Relance 1 (J+4)', delayDays: 4 }, { step: 2, label: 'Dernière relance (J+10)', delayDays: 6 }];
@@ -86,7 +87,9 @@ function legalFooter(stopUrl) {
  * Retourne { subject, text }.
  */
 export function sequenceEmail(p, { name, demoUrl, token, stopUrl, step = 0 }) {
-  const T = tradeOf(p); const trial = trialUrl(p, token); const days = config.trialDays;
+  const T = tradeOf(p);
+  // Nom d'une personne (entreprise individuelle sans enseigne) : on parle de « votre salon de coiffure à Rouen »
+  if (isPersonName(name)) { const city = p.city ? displayName(p.city) : ''; const lieu = `votre ${T.metier}${city ? ` à ${city}` : ''}`; return personal(sequenceEmail({ ...p }, { name: '\u0000', demoUrl, token, stopUrl, step }), lieu); } const trial = trialUrl(p, token); const days = config.trialDays;
   const essai = `Essai gratuit de ${days} jours, sans carte bancaire : vous activez le site en 2 minutes, et s'il ne vous convient pas, vous n'avez rien à faire, rien ne vous sera facturé.`;
   if (step === 0) {
     const nl = needLine(p);
@@ -107,6 +110,11 @@ export function sequenceEmail(p, { name, demoUrl, token, stopUrl, step = 0 }) {
   };
 }
 
+/** Remplace le nom par « votre <métier> à <ville> », en début de phrase avec une majuscule. */
+function personal(m, lieu) {
+  const cap = lieu[0].toUpperCase() + lieu.slice(1);
+  return { subject: m.subject.replace(/^(Re: )?\u0000/, (x, re) => `${re || ''}${cap}`), text: m.text.replace(/\u0000/g, lieu) };
+}
 /** SMS (si un jour autorisé) : court, identifié, avec STOP. */
 export function sequenceSms(p, { name, demoUrl, stopUrl }) {
   return `Bonjour, ${config.legal.owner} de ClientDirect Pro. Exemple de site gratuit préparé pour ${name} : ${demoUrl} (démo non officielle). Essai ${config.trialDays} j gratuit, sans carte bancaire. Plus de message : STOP ou ${stopUrl}`;

@@ -115,7 +115,7 @@ export async function runJobs(db, now = Date.now()) {
   // … et immédiatement si l'adresse du site a changé (liens de démonstration à jour, ex. passage au nom de domaine)
   const staleDraft = db.one("SELECT 1 FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id WHERE c.status='draft' AND c.name LIKE 'Préparée automatiquement%' AND ((i.message LIKE '%/demo/%' AND i.message NOT LIKE ?) OR (c.channel='email' AND i.subject IS NULL)) LIMIT 1", `%${config.baseUrl}/demo/%`)
     // … ou si aucun brouillon e-mail n'existe encore au format personnalisé (objet par métier)
-    || (!db.one("SELECT 1 FROM meta WHERE k='drafts_v2'") && (db.run("INSERT OR IGNORE INTO meta(k,v) VALUES('drafts_v2','1')"), true));
+    || (!db.one("SELECT 1 FROM meta WHERE k='drafts_v3'") && (db.run("INSERT OR IGNORE INTO meta(k,v) VALUES('drafts_v3','1')"), true));
   if (staleDraft || now - lastRun(db, 'job.drafts') > 20 * 36e5) { const { prepareDrafts } = await import('./campaigns.js'); r.drafts = prepareDrafts(db, now); mark(db, 'job.drafts', now); console.log('Campagnes préparées (brouillons, rien n’est envoyé) :', JSON.stringify(r.drafts)); }
   // 14. Campagnes e-mail validées : un envoi espacé par passage, seulement si l'envoi a été autorisé (CAMPAIGN_SENDING=on)
   // 14 a. Réponses aux campagnes (boîte contact@, lecture seule), toutes les 10 minutes : STOP, refus, rebonds, relances arrêtées

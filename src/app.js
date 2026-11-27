@@ -188,6 +188,7 @@ export function createApp(db) {
     { const pot = db.all("SELECT CASE WHEN potential>=75 THEN 'A' WHEN potential>=50 THEN 'B' ELSE 'C' END cl, COUNT(*) n FROM prospects WHERE status='new' AND (phone IS NOT NULL OR email IS NOT NULL) GROUP BY cl"); ready.potentielJoignables = Object.fromEntries(pot.map((r) => [r.cl, r.n])); }
     ready.maintenance = maintenanceOn(db);
     ready.alertesEmail = !!(config.adminEmail && (config.brevoKey || config.smtp.host));
+    ready.incidentsOuverts = db.one('SELECT COUNT(*) n FROM incidents WHERE resolved_at IS NULL').n;
     ready.veille = { maintienEveil: config.keepAwake, dernierAppel: keepAwake.last ? { at: new Date(keepAwake.last.at).toISOString(), statut: keepAwake.last.status || keepAwake.last.error } : null };
     { const rd = readiness(db); ready.lancement = { faits: rd.done, total: rd.total, restants: rd.items.filter((i) => !i.ok).map((i) => i.key) }; }
     { const e = enrichStatus(db); ready.prospection = { prospects: db.one("SELECT COUNT(*) n FROM prospects WHERE status!='optout'").n, departements: db.one("SELECT COUNT(DISTINCT dept) n FROM prospects WHERE dept!=''").n, coordonnees: { actif: e.enabled, plafond: e.cap, creditsMois: e.used, joignablesMois: e.reachableMonth, creditsParJoignable: e.creditsPerReachable != null ? Math.round(e.creditsPerReachable * 100) / 100 : null, telephones: e.phones || 0, emails: e.emails || 0 } }; }
