@@ -1,6 +1,7 @@
 // Diagnostic réseau au démarrage : l'API Brevo (HTTPS) est-elle joignable ? Les ports SMTP sont-ils ouverts ?
 // Render bloque les ports SMTP 25, 465 et 587 sur les serveurs gratuits : seule l'API HTTPS de Brevo fonctionne alors.
 import net from 'node:net';
+import https from 'node:https';
 import { config } from './config.js';
 import { net as http } from './net.js';
 
@@ -30,6 +31,14 @@ export async function probeNetwork() {
   { const t0 = Date.now();
     try { const res = await http.fetch(`${config.sireneApi}/search?q=garage&per_page=1`, { headers: { accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B ; contact@clientdirectpro.fr)' }, signal: AbortSignal.timeout(15000) }); r.sirene = `HTTP ${res.status} en ${Date.now() - t0} ms`; }
     catch (e) { r.sirene = `échec : ${e.cause?.code || e.cause?.message || e.name || e.message} en ${Date.now() - t0} ms`; } }
+  // Même API en IPv4 puis en IPv6 forcés : distingue un blocage d'adresse d'un problème de famille d'adresses
+  for (const family of [4, 6]) {
+    r[`sirene_ipv${family}`] = await new Promise((ok) => {
+      const t0 = Date.now(); const u = new URL(`${config.sireneApi}/search?q=garage&per_page=1`);
+      const req = https.get({ host: u.hostname, path: u.pathname + u.search, family, timeout: 15000, headers: { accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B ; contact@clientdirectpro.fr)' } }, (res) => { res.resume(); ok(`HTTP ${res.statusCode} en ${Date.now() - t0} ms`); });
+      req.on('timeout', () => { req.destroy(); ok('délai dépassé'); }); req.on('error', (e) => ok(`échec : ${e.code || e.message} (${e.address || '?'}) en ${Date.now() - t0} ms`));
+    });
+  }
   r.smtp587 = await tcp('smtp-relay.brevo.com', 587);
   r.smtp465 = await tcp('smtp-relay.brevo.com', 465);
   return r;
