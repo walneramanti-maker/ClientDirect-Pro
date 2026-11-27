@@ -5,6 +5,7 @@ import { TEMPLATES } from './templates.js';
 import { COUNTRIES } from './markets.js';
 import { deptOf, DEPARTEMENTS } from './france.js';
 import { tenantCosts } from './costs.js';
+import { csvCell } from './util.js';
 
 /** Territoires suivis séparément ; tout autre pays est regroupé dans « Autres pays ». */
 export const TERRITORIES = { GF: 'Guyane', FR: 'France métropolitaine', MQ: 'Martinique', GP: 'Guadeloupe', RE: 'La Réunion', YT: 'Mayotte', XX: 'Autres pays' };
@@ -71,7 +72,7 @@ export function listClients(db, f) {
 export function clientsCsv(db, f) {
   const q = where(f);
   const rows = db.all(`SELECT t.*, u.name owner_name, u.email owner_email FROM tenants t LEFT JOIN users u ON u.id=t.owner_user_id ${q.sql} ORDER BY ${ORDER[f.sort]}`, ...q.args);
-  const c = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`; const d = (x) => (x ? new Date(x).toISOString().slice(0, 10) : '');
+  const c = (v) => csvCell(v); const d = (x) => (x ? new Date(x).toISOString().slice(0, 10) : '');
   const head = ['Entreprise', 'Responsable', 'Métier', 'Territoire', 'Département', 'Ville', 'E-mail', 'Téléphone', 'Site', 'Inscription', 'Formule', 'Statut', 'Jours d’essai restants', 'Prochaine échéance'];
   return '﻿' + [head.map(c).join(';'), ...rows.map((t) => [t.name, t.owner_name, t.metier, TERRITORIES[territoryCode(t.country)], deptOfTenant(t)?.code, t.city, t.owner_email || t.email, t.phone ? `+${t.cc} ${t.phone}` : '', `${config.baseUrl}/s/${t.slug}`, d(t.created_at), PLANS[t.plan]?.name, STATUS[t.status], trialDaysLeft(t) ?? '', d(nextPayment(t)?.at)].map(c).join(';'))].join('\r\n');
 }

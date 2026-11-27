@@ -130,8 +130,8 @@ export const config = {
 
 export const PLANS = {
   essentiel: { name: 'Essentiel', monthly: 79, setup: 199, features: ['site', 'whatsapp', 'devis'] },
-  pro: { name: 'Pro', monthly: 149, setup: 399, features: ['site', 'whatsapp', 'devis', 'rdv', 'dashboard', 'rappels'] },
-  premium: { name: 'Premium', monthly: 249, setup: 599, features: ['site', 'whatsapp', 'devis', 'rdv', 'dashboard', 'rappels', 'ia'] }
+  pro: { name: 'Pro', monthly: 149, setup: 399, features: ['site', 'whatsapp', 'devis', 'rdv', 'dashboard', 'rappels', 'domaine'] },
+  premium: { name: 'Premium', monthly: 249, setup: 599, features: ['site', 'whatsapp', 'devis', 'rdv', 'dashboard', 'rappels', 'domaine', 'ia'] }
 };
 export const planHas = (plan, f) => (PLANS[plan] || PLANS.pro).features.includes(f);
 
@@ -148,6 +148,7 @@ export function envProblems(c = config) {
   } else {
     if (live) p.push(`Clé Stripe RÉELLE interdite en environnement ${c.appEnv}`);
     if (c.appEnv === 'staging' && !c.baseUrl.startsWith('https://')) p.push('BASE_URL doit commencer par https://');
+    if (c.appEnv === 'staging' && (c.secret.startsWith('dev-secret') || c.secret.length < 32)) p.push('APP_SECRET doit faire au moins 32 caractères aléatoires (préproduction accessible sur Internet)');
   }
   return p;
 };

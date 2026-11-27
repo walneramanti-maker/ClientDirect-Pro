@@ -32,13 +32,29 @@ export async function setDomain(db, t, raw) {
   if (renderConfigured()) {
     const r = await render('POST', '', { name: domain });
     if (!r.ok && r.status !== 409) { recordIncident(db, { kind: 'domain', severity: 'warning', message: `Ajout du domaine ${domain} refusé par Render (${r.status})`, tenantId: t.id }); return { ok: false, msg: "L'hébergeur a refusé ce domaine pour le moment. L'équipe est prévenue." }; }
-  } else status = 'manual';
+  } else { status = 'manual'; recordIncident(db, { kind: 'domain', severity: 'info', message: `Domaine ${domain} demandé par ${t.name} : en attente du réglage DNS du client`, tenantId: t.id }); }
   db.run('UPDATE tenants SET custom_domain=?, domain_status=?, updated_at=? WHERE id=?', domain, status, Date.now(), t.id);
   return { ok: true, msg: 'Domaine enregistré. Configurez maintenant votre DNS comme indiqué ci-dessous.' };
 }
 /** Vérifie auprès de Render les domaines en attente (DNS configuré + certificat émis). */
+/** Le domaine pointe-t-il vers notre service ? (preuve que le demandeur contrôle bien ce domaine) */
+async function pointsToUs(domain) {
+  const { Resolver } = (await import('node:dns')).promises; const dns = new Resolver({ timeout: 4000, tries: 1 }); const target = String(config.renderHostname || '').toLowerCase();
+  const cn = await dns.resolveCname(domain).catch(() => []); if (target && cn.some((x) => x.toLowerCase() === target)) return true;
+  const a = await dns.resolve4(domain).catch(() => []); if (a.includes('216.24.57.1')) return true;
+  if (target) { const ours = await dns.resolve4(target).catch(() => []); if (ours.length && a.some((x) => ours.includes(x))) return true; }
+  return false;
+}
 export async function checkDomains(db) {
-  if (!renderConfigured()) return { checked: 0, verified: 0 };
+  if (!renderConfigured()) {
+    // Mode manuel : le domaine n'est servi qu'une fois le DNS pointé vers nous ; l'équipe est alors prévenue pour l'ajouter chez l'hébergeur
+    let checked = 0, verified = 0;
+    for (const t of db.all("SELECT id, name, custom_domain FROM tenants WHERE domain_status='manual' AND custom_domain IS NOT NULL LIMIT 50")) {
+      checked++;
+      if (await pointsToUs(t.custom_domain).catch(() => false)) { db.run("UPDATE tenants SET domain_status='verified', updated_at=? WHERE id=?", Date.now(), t.id); verified++; recordIncident(db, { kind: 'domain', severity: 'warning', message: `Domaine ${t.custom_domain} (${t.name}) pointé vers ClientDirect Pro : à ajouter dans Render (Custom Domains) pour le certificat https`, tenantId: t.id }); }
+    }
+    return { checked, verified };
+  }
   let checked = 0, verified = 0;
   for (const t of db.all("SELECT id, custom_domain FROM tenants WHERE domain_status='pending' AND custom_domain IS NOT NULL LIMIT 50")) {
     checked++;
@@ -49,4 +65,4 @@ export async function checkDomains(db) {
   return { checked, verified };
 }
 /** Entreprise correspondant au nom d'hôte de la requête (domaine propre vérifié). */
-export const tenantByDomain = (db, host) => db.one("SELECT slug FROM tenants WHERE custom_domain=? AND domain_status IN ('verified','manual')", host);
+export const tenantByDomain = (db, host) => db.one("SELECT slug FROM tenants WHERE custom_domain=? AND domain_status='verified'", host);

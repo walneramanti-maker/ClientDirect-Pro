@@ -11,7 +11,7 @@ import * as V from './views.js';
 import { TEMPLATES } from './templates.js';
 import { ACTIVITIES } from './activities.js';
 const BOOT_AT = Date.now();
-import { emailOk, randomId, safeEq, clampStr, nowIn, intlPhone, phoneOk, phoneFmt } from './util.js';
+import { emailOk, randomId, safeEq, clampStr, nowIn, intlPhone, phoneOk, phoneFmt, sha256, csvCell } from './util.js';
 import { isDial, toE164, domCountryOf, phoneValid } from './phone.js';
 import { hashPassword, passwordProblem, createSession, readSession, destroySession, destroyUserSessions, csrfOk, issueToken, useToken, totpOk, rateLimit, login, audit } from './security.js';
 import { createTenant, loadTenant, siteState, updateSettings, userTenants } from './tenants.js';
@@ -44,9 +44,25 @@ const SESSION = 'cdp_s', PRE = 'cdp_pre';
 const month = () => new Date().toISOString().slice(0, 7);
 const HttpError = (status, msg) => Object.assign(new Error(msg), { status });
 
-function clientIp(req) {
-  const xf = req.headers['x-forwarded-for'];
-  return (config.env === 'production' && xf ? String(xf).split(',')[0] : req.socket.remoteAddress || '').trim();
+// Adresses de Cloudflare (https://www.cloudflare.com/ips/) : seul Cloudflare peut fournir l'adresse réelle du visiteur.
+const CF_V4 = ['173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22'];
+const CF_V6 = ['2400:cb00:', '2606:4700:', '2803:f800:', '2405:b500:', '2405:8100:', '2a06:98c', '2c0f:f248:'];
+const v4n = (ip) => ip.split('.').reduce((a, x) => a * 256 + Number(x), 0);
+export const isCloudflare = (ip) => /^\d+\.\d+\.\d+\.\d+$/.test(ip) ? CF_V4.some((r) => { const [b, m] = r.split('/'); const sz = 2 ** (32 - Number(m)); return Math.floor(v4n(ip) / sz) === Math.floor(v4n(b) / sz); }) : CF_V6.some((p) => ip.toLowerCase().startsWith(p));
+const privateIp = (ip) => /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1$|f[cd]|fe80)/i.test(ip);
+/**
+ * Adresse du visiteur. La valeur la plus à gauche de X-Forwarded-For est choisie par le client et donc falsifiable :
+ * on part de la droite (ajoutée par l'hébergeur), en sautant les relais internes, et on ne croit CF-Connecting-IP
+ * que si la connexion vient réellement de Cloudflare.
+ */
+export function clientIp(req, prod = config.env === 'production') {
+  const sock = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  if (!prod) return sock;
+  const chain = String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim().replace(/^::ffff:/, '')).filter(Boolean);
+  let i = chain.length - 1; while (i > 0 && privateIp(chain[i])) i--;
+  const hop = chain[i] || sock;
+  if (isCloudflare(hop)) { const cf = String(req.headers['cf-connecting-ip'] || '').trim(); return cf || chain[i - 1] || hop; }
+  return hop;
 }
 /** Les appels JSON publics doivent venir du site lui-même (protection contre les formulaires d'autres sites). */
 function sameOrigin(req) {
@@ -180,6 +196,9 @@ export function createApp(db) {
     db.one('SELECT 1 x');
     const hb = jobsHeartbeat.at;
     const jobsOk = config.disableJobs || !hb || Date.now() - hb < 15 * 60e3;
+    // En production, le détail interne n'est montré qu'à l'administrateur connecté (double authentification) ; la surveillance externe n'a besoin que du code 200/503
+    const local = !c.req.headers['x-forwarded-for'] && /^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(c.req.socket.remoteAddress || '');
+    if (config.isProd && !local && !(c.session?.role === 'superadmin' && c.session.totp_ok)) return json(c.res, { ok: jobsOk, time: new Date().toISOString() }, jobsOk ? 200 : 503);
     // État de la configuration (sans aucun secret) : permet de vérifier la mise en production
     const lastBackup = db.one("SELECT created_at FROM backups WHERE status='ok' ORDER BY id DESC LIMIT 1")?.created_at || null;
     const ready = { backups: !!(config.supabaseUrl && config.supabaseServiceKey), lastBackup: lastBackup ? new Date(lastBackup).toISOString() : null, restoredFrom: db.one("SELECT v FROM meta WHERE k='restored_from'")?.v || null, stripe: !!config.stripeKey, stripeWebhook: !!(config.stripeWebhookSecret || db.one("SELECT 1 FROM meta WHERE k='stripe_webhook_secret'")), firecrawl: !!config.firecrawlKey, emailSending: !!(config.campaignSending && config.smtp.host) };
@@ -266,7 +285,8 @@ export function createApp(db) {
   on('POST', '/connexion', (c) => {
     checkCsrf(c); limit(c, 'login', 20, 15 * 60e3);
     const email = clampStr(c.form.email, 190).toLowerCase();
-    if (!rateLimit(`login-mail:${email}`, 10, 15 * 60e3)) throw HttpError(429, 'Trop de tentatives pour ce compte. Patientez 15 minutes.');
+    // Par compte ET par adresse : un tiers ne peut pas bloquer la connexion d'un client en se trompant exprès
+    if (!rateLimit(`login-mail:${email}:${c.ip}`, 8, 15 * 60e3) || !rateLimit(`login-mail:${email}`, 100, 15 * 60e3)) throw HttpError(429, 'Trop de tentatives pour ce compte. Patientez 15 minutes.');
     const r = login(db, email, c.form.password);
     if (!r.ok) { audit(db, { action: 'connexion.echec', detail: email, ip: c.ip }); return html(c.res, V.loginPage({ csrf: csrfToken(c), email, error: tr(r.locked ? 'Compte verrouillé 15 minutes après plusieurs échecs.' : 'E-mail ou mot de passe incorrect.') }), 401); }
     if (c.session) destroySession(db, c.cookies[SESSION]);
@@ -282,10 +302,14 @@ export function createApp(db) {
   on('POST', '/connexion/2fa', (c) => {
     if (!c.session || c.session.role !== 'superadmin') return redirect(c.res, '/connexion');
     checkCsrf(c); limit(c, 'totp', 10, 15 * 60e3);
-    if (!totpOk(c.session.totp_secret, c.form.code)) { audit(db, { userId: c.session.user_id, action: '2fa.echec', ip: c.ip }); return html(c.res, V.totpPage({ csrf: csrfToken(c), error: tr('Code incorrect.') }), 401); }
-    db.run('UPDATE sessions SET totp_ok=1 WHERE id_hash=?', c.session.id_hash);
+    if (!rateLimit(`totp-user:${c.session.user_id}`, 10, 15 * 60e3)) throw HttpError(429, 'Trop de tentatives. Patientez 15 minutes.');
+    if (!totpOk(c.session.totp_secret, c.form.code, Date.now(), c.session.user_id)) { audit(db, { userId: c.session.user_id, action: '2fa.echec', ip: c.ip }); return html(c.res, V.totpPage({ csrf: csrfToken(c), error: tr('Code incorrect.') }), 401); }
+    // Nouvelle session après la double authentification (l'identifiant d'avant n'est plus valable), durée limitée à 7 jours
+    destroySession(db, c.cookies[SESSION]);
+    const s = createSession(db, c.session.user_id, { days: 7 });
+    db.run('UPDATE sessions SET totp_ok=1 WHERE id_hash=?', sha256(s.token));
     audit(db, { userId: c.session.user_id, action: '2fa.ok', ip: c.ip });
-    redirect(c.res, '/admin');
+    redirect(c.res, '/admin', { 'Set-Cookie': cookie(SESSION, s.token, { maxAge: 7 * 86400 }) });
   });
   on('POST', '/deconnexion', (c) => { if (c.session) { checkCsrf(c); destroySession(db, c.cookies[SESSION]); } redirect(c.res, '/connexion', { 'Set-Cookie': cookie(SESSION, '', { maxAge: 0 }) }); });
   on('GET', '/verifier/:token', (c) => {
@@ -453,7 +477,7 @@ export function createApp(db) {
   on('GET', '/pro/reglages', (c) => { requirePro(c); settingsPage(c, { saved: c.url.searchParams.get('m') === 'ok' }); });
   on('POST', '/pro/domaine', async (c) => {
     requirePro(c); checkCsrf(c); limit(c, 'domain', 10, 3600e3);
-    if (!planHas(c.tenant.plan, 'rdv')) throw HttpError(403, 'Disponible avec les formules Pro et Premium.');
+    if (!planHas(c.tenant.plan, 'domaine')) throw HttpError(403, 'Disponible avec les formules Pro et Premium.');
     const r = await setDomain(db, c.tenant, c.form.domain);
     audit(db, { userId: c.user.id, tenantId: c.tenant.id, action: 'domaine', detail: String(c.form.domain || '').slice(0, 120), ip: c.ip });
     c.tenant = loadTenant(db, 'id', c.tenant.id);
@@ -629,7 +653,7 @@ export function createApp(db) {
     requireAdmin(c); const id = Number(c.params.id);
     const cmp = db.one("SELECT * FROM campaigns WHERE id=? AND status='approved'", id); if (!cmp) throw HttpError(404, 'Campagne non validée');
     const rows = db.all("SELECT i.*, p.name, p.city, p.dept, p.siren FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? AND i.status='ready' AND p.status!='optout' ORDER BY i.id", id);
-    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const q = (v) => csvCell(v);
     send(c.res, 200, '\ufeff' + [['Entreprise', 'Ville', 'Département', 'SIREN', 'Destinataire', 'Message'].map(q).join(';'), ...rows.map((r) => [displayName(r.name), displayName(r.city), r.dept, r.siren, r.to_addr, r.message].map(q).join(';'))].join('\r\n'), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="campagne-${id}.csv"` });
   });
   on('GET', '/admin/partenaires', (c) => {
@@ -671,7 +695,7 @@ export function createApp(db) {
     redirect(c.res, '/admin/pret?msg=' + encodeURIComponent(msg));
   });
   on('POST', '/admin/test-email', async (c) => {
-    requireAdmin(c);
+    requireAdmin(c); checkCsrf(c);
     let msg;
     if (!config.adminEmail) msg = 'ADMIN_EMAIL absent : indiquez votre adresse dans Render.';
     else { try { const { sendTestEmail } = await import('./notify.js'); const r = await sendTestEmail(config.adminEmail); msg = r.ok ? `E-mail de test envoyé à ${config.adminEmail}${r.via === 'smtp' ? ' (SMTP)' : ' (Brevo)'}. Vérifiez votre boîte (et les indésirables).` : r.skipped; } catch (e) { msg = `Échec : ${String(e.message).slice(0, 200)}`; } }
@@ -770,7 +794,7 @@ export function createApp(db) {
     const st = PIPELINE[c.url.searchParams.get('statut')] ? c.url.searchParams.get('statut') : 'new';
     const dept = DEPARTEMENTS[c.url.searchParams.get('dept')] ? c.url.searchParams.get('dept') : '';
     const rows = db.all(`SELECT * FROM prospects WHERE status=?${dept ? ' AND dept=?' : ''} ORDER BY (phone IS NOT NULL OR email IS NOT NULL) DESC, potential DESC, score DESC, id LIMIT 5000`, ...(dept ? [st, dept] : [st]));
-    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const q = (v) => csvCell(v);
     const head = ['Entreprise', 'Métier', 'Ville', 'Département', 'Potentiel (0-100)', 'Pourquoi', 'SIREN', 'Téléphone', 'E-mail', 'Site', 'Source des coordonnées', 'Démo (non officielle)', "Lien d'opposition", 'Message proposé (NON ENVOYÉ)'];
     const lines = rows.map((p) => { const demoUrl = `${config.baseUrl}/demo/${demoTokenFor(p.siren)}`; const stop = optoutLink(db, p.id); return [displayName(p.name), TEMPLATES[p.tpl]?.label || p.naf, displayName(p.city), p.dept, p.potential, potentialOf(p).why.join(' ; '), p.siren, p.phone, p.email, p.website, p.contact_source, demoUrl, stop, outreachMessage(p, demoUrl, stop)].map(q).join(';'); });
     send(c.res, 200, '\ufeff' + [head.map(q).join(';'), ...lines].join('\r\n'), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="prospects-${st}${dept ? '-' + dept : ''}.csv"` });
@@ -787,7 +811,7 @@ export function createApp(db) {
   });
   on('GET', '/admin/bilan/contacts.csv', (c) => {
     requireAdmin(c);
-    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const q = (v) => csvCell(v);
     const rows = db.all('SELECT c.created_at, c.channel, c.outcome, c.note, p.name, p.tpl, p.dept, p.potential, p.phone FROM contacts c JOIN prospects p ON p.id=c.prospect_id ORDER BY c.id DESC LIMIT 20000');
     const lines = rows.map((r) => [new Date(r.created_at).toLocaleString('fr-FR', { timeZone: 'America/Cayenne' }), CONTACT_CHANNELS[r.channel] || r.channel, OUTCOMES[r.outcome]?.label || r.outcome, r.note, displayName(r.name), TEMPLATES[r.tpl]?.label || r.tpl, r.dept, r.potential, r.phone].map(q).join(';'));
     send(c.res, 200, '\ufeff' + [['Date (heure de Guyane)', 'Canal', 'Résultat', 'Note', 'Entreprise', 'Métier', 'Département', 'Potentiel', 'Téléphone'].map(q).join(';'), ...lines].join('\r\n'), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="contacts.csv"' });

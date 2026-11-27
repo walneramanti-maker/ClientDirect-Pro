@@ -60,3 +60,6 @@ export const nowMs = () => Date.now();
 
 /** Les tarifs ne sont publiés qu'une fois confirmés par le professionnel (les démonstrations et exemples sont signalés comme tels). */
 export const pricesShown = (t) => !!(t && (t.prices_confirmed || t.status === 'demo' || t.example));
+
+/** Cellule CSV sûre : guillemets doublés, et une formule (=, +, -, @) neutralisée pour Excel / LibreOffice. */
+export const csvCell = (v) => { let x = String(v ?? ''); if (/^[=+\-@\t\r]/.test(x) && !/^-?\d+([.,]\d+)?$/.test(x)) x = `'${x}`; return `"${x.replace(/"/g, '""')}"`; };

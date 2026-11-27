@@ -24,9 +24,9 @@ export const passwordProblem = (pw) => {
 
 // ---------- sessions ----------
 const SESSION_DAYS = 30;
-export function createSession(db, userId) {
+export function createSession(db, userId, { days = SESSION_DAYS } = {}) {
   const token = randomId(32); const csrf = randomId(24); const now = Date.now();
-  db.run('INSERT INTO sessions(id_hash,user_id,csrf,created_at,expires_at) VALUES(?,?,?,?,?)', sha256(token), userId, csrf, now, now + SESSION_DAYS * 864e5);
+  db.run('INSERT INTO sessions(id_hash,user_id,csrf,created_at,expires_at) VALUES(?,?,?,?,?)', sha256(token), userId, csrf, now, now + days * 864e5);
   return { token, csrf };
 }
 export function readSession(db, token) {
@@ -42,6 +42,8 @@ export const csrfOk = (session, sent) => !!session && !!sent && safeEq(session.c
 // ---------- jetons à usage unique (vérification e-mail, mot de passe, revendication de démo) ----------
 export function issueToken(db, type, { userId = null, tenantId = null, hours = 48 } = {}) {
   const t = randomId(24);
+  // Un nouveau lien remplace les précédents du même type (un ancien lien de réinitialisation ne sert plus)
+  if (userId) db.run('UPDATE tokens SET used_at=? WHERE user_id=? AND type=? AND used_at IS NULL', Date.now(), userId, type);
   db.run('INSERT INTO tokens(id_hash,type,user_id,tenant_id,expires_at) VALUES(?,?,?,?,?)', sha256(t), type, userId, tenantId, Date.now() + hours * 36e5);
   return t;
 }
@@ -63,9 +65,14 @@ export function totpCode(secret, at = Date.now(), step = 30) {
   const h = crypto.createHmac('sha1', unbase32(secret)).update(buf).digest(); const o = h[h.length - 1] & 15;
   return String(((h.readUInt32BE(o) & 0x7fffffff) % 1e6)).padStart(6, '0');
 }
-export function totpOk(secret, code, at = Date.now()) {
+const usedTotp = new Map(); // code déjà utilisé par compte : refusé s'il est rejoué dans sa fenêtre de validité
+export function totpOk(secret, code, at = Date.now(), userId = null) {
   if (!secret || !/^\d{6}$/.test(String(code))) return false;
-  return [-1, 0, 1].some((w) => safeEq(totpCode(secret, at + w * 30000), code));
+  const ok = [-1, 0, 1].some((w) => safeEq(totpCode(secret, at + w * 30000), code));
+  if (!ok || userId == null) return ok;
+  const k = `${userId}:${code}`; if ((usedTotp.get(k) || 0) > at) return false;
+  usedTotp.set(k, at + 120e3); if (usedTotp.size > 1000) for (const [x, v] of usedTotp) if (v < at) usedTotp.delete(x);
+  return true;
 }
 
 // ---------- limitation de débit (mémoire du processus) ----------
@@ -86,7 +93,8 @@ export function login(db, email, password) {
   if (u.locked_until > Date.now()) return { ok: false, locked: true };
   if (!verifyPassword(password, u.pass_hash)) {
     const fails = u.failed_logins + 1;
-    db.run('UPDATE users SET failed_logins=?, locked_until=? WHERE id=?', fails, fails >= 8 ? Date.now() + 15 * 60e3 : 0, u.id);
+    // Verrou global du compte seulement après de très nombreux échecs (attaque distribuée) ; le blocage courant est par adresse IP
+    db.run('UPDATE users SET failed_logins=?, locked_until=? WHERE id=?', fails, fails >= 50 ? Date.now() + 15 * 60e3 : 0, u.id);
     return { ok: false };
   }
   db.run('UPDATE users SET failed_logins=0, locked_until=0 WHERE id=?', u.id);

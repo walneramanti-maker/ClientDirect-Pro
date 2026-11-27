@@ -30,9 +30,11 @@ test('double authentification TOTP (vecteur RFC 6238)', () => {
   assert.equal(totpOk(s, 'abcdef', now), false);
 });
 
-test('verrouillage du compte après 8 échecs', () => {
+test('verrouillage global du compte seulement après 50 échecs (le blocage courant est par compte et par adresse IP)', () => {
   app.db.run("INSERT INTO users(email,pass_hash,role,created_at) VALUES('lock@test.fr',?,'pro',?)", hashPassword('BonMotDePasse1'), Date.now());
   for (let i = 0; i < 8; i++) assert.equal(login(app.db, 'lock@test.fr', 'mauvais').ok, false);
+  assert.equal(login(app.db, 'lock@test.fr', 'BonMotDePasse1').ok, true, '8 erreurs d’un tiers ne bloquent pas le titulaire');
+  for (let i = 0; i < 50; i++) assert.equal(login(app.db, 'lock@test.fr', 'mauvais').ok, false);
   const r = login(app.db, 'lock@test.fr', 'BonMotDePasse1');
   assert.equal(r.ok, false); assert.equal(r.locked, true);
 });
