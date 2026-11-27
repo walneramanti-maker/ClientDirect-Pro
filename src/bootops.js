@@ -197,3 +197,16 @@ export function campaignPreview(db, log = console.log) {
   const rows = db.all('SELECT p.name, p.city, p.dept, p.postal, p.tpl, p.site_status, p.site_flags, p.potential, p.email, i.subject FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC, i.id', c.id);
   log(`Aperçu campagne ${c.id} (${c.status}, ${rows.length} entreprises) : ${JSON.stringify(rows.map((r) => ({ ...r, email: mask(r.email) })))}`);
 }
+
+/** MARK_INTERNAL=<site>[,<site>] : classe en compte interne (exclu des statistiques clients). Réversible depuis la fiche. */
+export function markInternal(db, env = process.env, log = console.log) {
+  const slugs = String(env.MARK_INTERNAL || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean); if (!slugs.length) return null;
+  const out = [];
+  for (const s of slugs) {
+    const t = db.one('SELECT id, internal FROM tenants WHERE slug=?', s); if (!t) { out.push(`${s} introuvable`); continue; }
+    if (t.internal) continue;
+    db.run('UPDATE tenants SET internal=1 WHERE id=?', t.id); db.run("INSERT INTO audit(tenant_id,action,detail,created_at) VALUES(?,'admin.interne','classé compte interne (compte d’essai du propriétaire, exclu des statistiques clients)',?)", t.id, Date.now()); out.push(`${s} classé interne`);
+  }
+  if (out.length) log(`Comptes internes : ${out.join(' ; ')}`);
+  return out;
+}

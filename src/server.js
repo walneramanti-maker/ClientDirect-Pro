@@ -48,6 +48,7 @@ if (process.env.ADMIN_LOGIN && process.env.ADMIN_PASSWORD && process.env.ADMIN_T
   db.run("INSERT INTO users(email,pass_hash,name,role,email_verified,totp_secret,created_at) VALUES(?,?,'Administrateur','superadmin',1,?,?)", process.env.ADMIN_LOGIN.trim().toLowerCase(), hashPassword(process.env.ADMIN_PASSWORD), process.env.ADMIN_TOTP_SECRET.trim().toUpperCase(), Date.now());
   console.log('Compte administrateur créé à partir des variables d’environnement.');
 }
+{ const { markInternal } = await import('./bootops.js'); try { markInternal(db); } catch (e) { console.error('Comptes internes :', e.message); } }
 { const { syncFixedCosts } = await import('./bootops.js'); try { syncFixedCosts(db); } catch (e) { console.error('Dépenses fixes :', e.message); } }
 if (process.env.CLEAN_STRIPE_TEST_DATA === '1') import('./bootops.js').then(async ({ cleanStripeTestData }) => { const { stripe } = await import('./billing.js'); return cleanStripeTestData(db, process.env, { stripeGet: (p) => stripe(p, null, 'GET'), liveKey: /^(sk|rk)_live_/.test(config.stripeKey || '') }); }).catch((e) => console.error('Nettoyage Stripe :', e.message));
 { const { auditReport, campaignPreview } = await import('./bootops.js'); try { auditReport(db); campaignPreview(db); } catch (e) { console.error('Audit :', e.message); } }

@@ -72,3 +72,11 @@ test('nettoyage Stripe : seules les données inexistantes sur le compte réel so
   assert.equal(db.one("SELECT resolved_at FROM incidents WHERE fingerprint='f3'").resolved_at, null, 'incident récent d’un autre type : reste ouvert');
   assert.equal(db.one("SELECT resolved_at FROM incidents WHERE fingerprint='f4'").resolved_at, null);
 });
+
+test('MARK_INTERNAL : classement réversible, idempotent, journalisé, sans suppression', async () => {
+  const B = await import('../src/bootops.js'); const { db } = app;
+  db.run("INSERT INTO tenants(slug,name,tpl,metier,status,created_at) VALUES('popx','Popx','garage','G','trial',?)", Date.now());
+  assert.deepEqual(B.markInternal(db, { MARK_INTERNAL: 'popx, absent' }, () => {}), ['popx classé interne', 'absent introuvable']);
+  assert.deepEqual(B.markInternal(db, { MARK_INTERNAL: 'popx' }, () => {}), []);
+  const t = db.one("SELECT internal, status FROM tenants WHERE slug='popx'"); assert.equal(t.internal, 1); assert.equal(t.status, 'trial');
+});
