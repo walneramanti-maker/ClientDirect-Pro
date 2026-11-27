@@ -261,3 +261,12 @@ export async function bounceDiagnostic(db, { fetchSince, imap }, log = console.l
   log(`Boîte contact@ (2 jours) : ${msgs.length} message(s), dont ${bounces.length} avis de non-distribution${bounces.length ? ' : ' + JSON.stringify(bounces.map((m) => ({ de: maskAll(m.from), objet: maskAll(m.subject).slice(0, 90), codes: maskAll((String(m.text).match(/^.*(\b[245]\.\d{1,3}\.\d{1,3}\b|\b5[05]\d\b|blocked|spam|refus|rejected|policy|not accepted|quota).*$/gim) || []).slice(0, 4).join(' | ')).slice(0, 400) }))) : ''}`);
   return { total: msgs.length, rebonds: bounces.length };
 }
+
+/** ADMIN_DISPLAY_NAME : nom affiché de l'administrateur ADMIN_LOGIN (affichage seulement ; identifiants inchangés). */
+export function setAdminDisplayName(db, env = process.env, log = console.log) {
+  const name = String(env.ADMIN_DISPLAY_NAME || '').trim().slice(0, 80); const login = String(env.ADMIN_LOGIN || '').trim().toLowerCase();
+  if (!name || !login) return null;
+  const n = Number(db.run("UPDATE users SET name=? WHERE email=? AND role='superadmin' AND name!=?", name, login, name).changes);
+  if (n) log(`Nom affiché de l’administrateur : ${name}`);
+  return n;
+}

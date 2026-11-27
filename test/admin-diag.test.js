@@ -103,3 +103,11 @@ test('renommage de campagne et copie de contrôle (administrateur seul, liens pe
   assert.equal(sent.length, 1, 'une seule copie'); assert.equal(sent[0].to, 'boss@cdp.fr', 'uniquement à l’administrateur');
   const m = JSON.parse(sent[0].data); assert.match(m.subject, /^\[Copie de contrôle\] Objet/); assert.doesNotMatch(m.text, /abc123|zz9/, 'liens personnels neutralisés');
 });
+
+test('ADMIN_DISPLAY_NAME : seul le nom affiché change', async () => {
+  const B = await import('../src/bootops.js'); const { db } = app;
+  db.run("INSERT INTO users(email,pass_hash,name,role,email_verified,totp_secret,created_at) VALUES('nom@cdp.fr','h','Administrateur','superadmin',1,'S',?)", Date.now());
+  assert.equal(B.setAdminDisplayName(db, { ADMIN_LOGIN: 'nom@cdp.fr', ADMIN_DISPLAY_NAME: 'Walner Amantie' }, () => {}), 1);
+  const u = db.one("SELECT * FROM users WHERE email='nom@cdp.fr'"); assert.equal(u.name, 'Walner Amantie'); assert.equal(u.pass_hash, 'h'); assert.equal(u.totp_secret, 'S');
+  assert.equal(B.setAdminDisplayName(db, { ADMIN_LOGIN: 'nom@cdp.fr', ADMIN_DISPLAY_NAME: 'Walner Amantie' }, () => {}), 0);
+});
