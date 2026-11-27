@@ -143,6 +143,8 @@ function mailOwner(db, t, template, payload, key) {
   const owner = db.one('SELECT email FROM users WHERE id=?', t.owner_user_id); if (!owner) return;
   enqueue(db, { tenantId: t.id, channel: 'email', to: owner.email, template, key, payload: { lang: t.lang, tenant: t.name, billingUrl: `${config.baseUrl}/pro/abonnement`, ...payload } });
 }
+const cdpPrice = (x) => /^cdp_/.test(x?.price?.lookup_key || x?.pricing?.price_details?.price_lookup_key || '');
+export const isOurs = (o) => !!(o?.metadata?.tenant_id || o?.metadata?.cdp_plan || o?.client_reference_id || o?.subscription_details?.metadata?.tenant_id || o?.parent?.subscription_details?.metadata?.tenant_id || o?.lines?.data?.some(cdpPrice) || o?.items?.data?.some(cdpPrice));
 /** Traite un événement Stripe vérifié. Idempotent : un même événement n'est appliqué qu'une fois. */
 export function handleStripeEvent(db, ev) {
   if (!ev?.id || !ev?.type) return { ok: false };
@@ -150,7 +152,9 @@ export function handleStripeEvent(db, ev) {
   const o = ev.data?.object || {}; const t = tenantFrom(db, o, ev.type); const now = Date.now();
   db.tx(() => {
     db.run('INSERT INTO webhook_events(id,type,received_at) VALUES(?,?,?)', ev.id, ev.type, now);
-    if (!t) { if (/^(checkout|invoice|customer\.subscription)/.test(ev.type)) recordIncident(db, { kind: 'billing', severity: 'warning', message: `Événement ${ev.type} sans entreprise associée` }); return; }
+    // Compte Stripe partagé avec d'autres activités : un événement sans aucune marque ClientDirect Pro (entreprise, tarif cdp_)
+    // ne nous concerne pas et n'est pas un incident ; un événement marqué mais sans entreprise connue en est un.
+    if (!t) { if (/^(checkout|invoice|customer\.subscription)/.test(ev.type) && isOurs(o)) recordIncident(db, { kind: 'billing', severity: 'warning', message: `Événement ${ev.type} sans entreprise associée` }); return; }
     switch (ev.type) {
       case 'checkout.session.completed': {
         const plan = PLANS[o.metadata?.plan] ? o.metadata.plan : t.plan;

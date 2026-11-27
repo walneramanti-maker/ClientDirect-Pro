@@ -450,7 +450,11 @@ test('paiements : changement de statut d’abonnement (impayé, réactivation) s
   row = db.one('SELECT status FROM tenants WHERE id=?', t.id); assert.equal(row.status, 'active');
 });
 test('paiements : événement pour une entreprise inconnue signalé, sans plantage', async () => {
-  assert.equal(await hook({ id: 'evt_unk', type: 'invoice.paid', data: { object: { id: 'in_unk', customer: 'cus_inconnu', amount_paid: 100 } } }), 200);
+  // Paiement d'une autre activité du même compte Stripe (aucune marque ClientDirect Pro) : ignoré, pas d'incident
+  assert.equal(await hook({ id: 'evt_autre', type: 'invoice.paid', data: { object: { id: 'in_autre', customer: 'cus_autre', amount_paid: 1900, lines: { data: [{ price: { lookup_key: null } }] } } } }), 200);
+  assert.equal(db.one("SELECT COUNT(*) n FROM incidents WHERE kind='billing' AND message LIKE '%sans entreprise%'").n, 0);
+  // Paiement marqué ClientDirect Pro mais entreprise introuvable : signalé
+  assert.equal(await hook({ id: 'evt_unk', type: 'invoice.paid', data: { object: { id: 'in_unk', customer: 'cus_inconnu', amount_paid: 100, subscription_details: { metadata: { tenant_id: '999999' } } } } }), 200);
   assert.ok(db.one("SELECT 1 FROM incidents WHERE kind='billing' AND message LIKE '%sans entreprise%'"));
 });
 
