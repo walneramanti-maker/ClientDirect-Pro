@@ -5,7 +5,7 @@ import { isDial } from './phone.js';
 import { COUNTRIES, country as countryOf, validTz, PRICES } from './markets.js';
 import { LANGS, t as tr } from './i18n.js';
 import { templateFor } from './templates.js';
-import { config, PLANS } from './config.js';
+import { config, PLANS, planHas } from './config.js';
 
 const RESERVED = new Set(['www', 'app', 'admin', 'api', 'pro', 'static', 'mail', 'support', 'aide', 'demo', 's', 'login', 'inscription']);
 
@@ -23,8 +23,10 @@ export function createTenant(db, { name, tpl, activity = null, activityOther = '
   // Indicatif par défaut des clients : celui du pays (pour « Autre pays », celui choisi par le professionnel)
   cc = cc || C.dial || (isDial(phoneCc) ? phoneCc : ''); tz = tz && validTz(tz) ? tz : C.tz;
   // Activité du catalogue ou saisie libre : textes, prestations, horaires adaptés ; sinon modèle historique
-  const T = activity ? activityTemplate(activity, activityOther, lang, Object.fromEntries(Object.keys(TEMPLATES).map((k) => [k, templateFor(k, lang)]))) : templateFor(tpl, lang); const now = Date.now();
+  const T = { ...(activity ? activityTemplate(activity, activityOther, lang, Object.fromEntries(Object.keys(TEMPLATES).map((k) => [k, templateFor(k, lang)]))) : templateFor(tpl, lang)) }; const now = Date.now();
   if (activity) tpl = ACTIVITIES[T.activity]?.base || (TEMPLATES[tpl] ? tpl : 'artisan');
+  // Formule sans prise de rendez-vous en ligne : la phrase d'accueil ne promet pas de réservation
+  if (!planHas(PLANS[plan] ? plan : 'pro', 'rdv')) T.lead = lang === 'en' ? `${T.metier}. Request a quote or message us on WhatsApp for a quick reply.` : `${T.metier}. Demandez un devis ou contactez-nous directement sur WhatsApp : réponse rapide.`;
   const slug = forcedSlug || uniqueSlug(db, name);
   let demoToken = null;
   return db.tx(() => {
@@ -57,7 +59,7 @@ export function loadTenant(db, where, value) {
 export function siteState(t, now = Date.now()) {
   if (t.status === 'active') return 'live';
   if (t.status === 'trial') return t.trial_ends_at > now ? 'live' : 'expired';
-  if (t.status === 'past_due') return (t.current_period_end || 0) + config.graceDays * 864e5 > now ? 'live' : 'expired';
+  if (t.status === 'past_due') return (t.past_due_since || t.current_period_end || 0) + config.graceDays * 864e5 > now ? 'live' : 'expired';
   if (t.status === 'demo') return 'demo';
   return 'paused';
 }

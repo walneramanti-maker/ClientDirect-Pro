@@ -11,7 +11,8 @@ export const DAYS_SHORT = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.
 export const dowOf = (d) => new Date(d + 'T12:00:00Z').getUTCDay();
 export const addDays = (d, k) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + k); return x.toISOString().slice(0, 10); };
 export const dlabel = (d) => { const x = new Date(d + 'T12:00:00Z'); return `${DAYS_SHORT[x.getUTCDay()]} ${x.getUTCDate()}/${x.getUTCMonth() + 1}`; };
-export const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s)) && !Number.isNaN(Date.parse(s + 'T00:00:00Z'));
+/** Date AAAA-MM-JJ réellement existante (refuse 2027-02-30, 2026-13-01…). */
+export const isDate = (s) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(String(s))) return false; const d = new Date(s + 'T00:00:00Z'); return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s; };
 export const isTime = (s) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s));
 
 export const TIMEZONES = {

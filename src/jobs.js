@@ -37,9 +37,15 @@ export async function runJobs(db, now = Date.now()) {
     enqueue(db, { tenantId: t.id, channel: 'email', to: t.owner_email, template: 'trial_ending', payload: { lang: t.lang, tenant: t.name, trialEnd: new Date(t.trial_ends_at).toLocaleDateString(t.lang === 'fr' ? 'fr-FR' : 'en-US'), billingUrl: `${config.baseUrl}/pro/abonnement` } });
     r.trialNotices++;
   }
+  // 2 bis. Essai terminé : prévenir une fois que le site est hors ligne, avec le lien pour le remettre en ligne (30 derniers jours seulement)
+  for (const t of db.all("SELECT t.*, u.email owner_email FROM tenants t JOIN users u ON u.id=t.owner_user_id WHERE t.status='trial' AND t.example=0 AND COALESCE(t.internal,0)=0 AND COALESCE(t.source,'') NOT LIKE 'utm:controle%' AND t.trial_ends_at BETWEEN ? AND ?", now - 30 * 864e5, now)) {
+    if (db.one("SELECT 1 FROM outbox WHERE tenant_id=? AND template='trial_ended'", t.id)) continue;
+    enqueue(db, { tenantId: t.id, channel: 'email', to: t.owner_email, template: 'trial_ended', key: `fin-essai:${t.id}`, payload: { lang: t.lang, tenant: t.name, billingUrl: `${config.baseUrl}/pro/abonnement`, supportEmail: config.supportEmail || '' } });
+    r.trialNotices++;
+  }
   // 3. Impayés au-delà du délai de grâce : site en pause
-  { const toPause = db.all("SELECT t.id, t.name, t.lang, t.current_period_end, u.email FROM tenants t LEFT JOIN users u ON u.id=t.owner_user_id WHERE t.status='past_due' AND COALESCE(t.current_period_end,0) + ? < ?", config.graceDays * 864e5, now);
-    r.paused = Number(db.run("UPDATE tenants SET status='paused' WHERE status='past_due' AND COALESCE(current_period_end,0) + ? < ?", config.graceDays * 864e5, now).changes);
+  { const toPause = db.all("SELECT t.id, t.name, t.lang, t.current_period_end, u.email FROM tenants t LEFT JOIN users u ON u.id=t.owner_user_id WHERE t.status='past_due' AND COALESCE(t.past_due_since, t.current_period_end, 0) + ? < ?", config.graceDays * 864e5, now);
+    r.paused = Number(db.run("UPDATE tenants SET status='paused' WHERE status='past_due' AND COALESCE(past_due_since, current_period_end, 0) + ? < ?", config.graceDays * 864e5, now).changes);
     for (const t of toPause) if (t.email) enqueue(db, { tenantId: t.id, channel: 'email', to: t.email, template: 'site_paused', key: `pause:${t.id}:${t.current_period_end || 0}`, payload: { lang: t.lang, tenant: t.name, billingUrl: `${config.baseUrl}/pro/abonnement` } }); }
   // 3 bis. Fin de l'engagement de 12 mois (date anniversaire du premier paiement) : prévenir 30 jours avant, une fois par année
   for (const t of db.all("SELECT t.id, t.name, t.lang, u.email, MIN(i.paid_at) first FROM tenants t JOIN invoices i ON i.tenant_id=t.id AND i.status='paid' JOIN users u ON u.id=t.owner_user_id WHERE t.status IN ('active','past_due') GROUP BY t.id")) {

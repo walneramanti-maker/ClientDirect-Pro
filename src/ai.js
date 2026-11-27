@@ -1,6 +1,6 @@
 import { config, planHas } from './config.js';
 import { net } from './net.js';
-import { nowIn, fromMin, phoneFmt, clampStr } from './util.js';
+import { nowIn, fromMin, phoneFmt, clampStr, pricesShown, addDays, dowOf } from './util.js';
 import { t as tr, currentLang, fmtTime, fmtDay, dayName, locale } from './i18n.js';
 import { money } from './markets.js';
 import { freeSlots, openDays, book } from './booking.js';
@@ -15,7 +15,7 @@ function brief(t) {
   return `Business: ${t.name} (${t.metier}), ${t.address || t.city}. Phone/WhatsApp: ${phoneFmt(t.phone)}.
 Opening hours (local time, 24h): ${[1, 2, 3, 4, 5, 6, 0].map((d) => `${dayName(d, 'en')} ${t.hours[d] ? t.hours[d].join('-') : 'closed'}`).join(', ')}.
 Services (id | name | starting price in ${t.currency || 'EUR'} | duration in minutes):
-${t.services.map((s) => `${s.id} | ${s.name} | ${s.price} | ${s.dur}`).join('\n')}
+${t.services.map((s) => `${s.id} | ${s.name} | ${pricesShown(t) && s.price > 0 ? s.price : 'on request (never quote a price)'} | ${s.dur}`).join('\n')}
 Other information: ${t.faq}
 Appointment confirmation: ${t.auto_confirm ? 'automatic' : 'by the business owner'}.
 Now: ${dayName(n.dow, 'en')} ${n.date} ${fromMin(n.min)} (local time, ${t.tz}).`;
@@ -27,18 +27,43 @@ ${brief(t)}`;
 
 /** Réponses simples sans IA (formules sans assistant, clé absente ou quota atteint), dans la langue du site. */
 export function ruleAnswer(db, t, q) {
-  const l = String(q).toLowerCase();
+  const l = String(q).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const m = (v) => money(v, t.currency || 'EUR', locale(currentLang(), t.country));
+  const canBook = planHas(t.plan, 'rdv') && t.services.length; const shown = pricesShown(t);
+  const contact = tr('Écrivez-nous sur WhatsApp au {p} ou demandez un devis sur cette page.', { p: phoneFmt(t.phone) });
+  if (/^\s*(bonjour|bonsoir|salut|coucou|hello|hi|hey|good (morning|evening|afternoon))\b[\s!.,]*$/.test(l)) return tr('Bonjour ! Je peux vous renseigner sur nos prestations, nos horaires, notre adresse ou {x}. Que souhaitez-vous savoir ?', { x: canBook ? tr('les créneaux disponibles') : tr('une demande de devis') });
+  if (/^\s*(merci|thanks|thank you)\b/.test(l)) return tr('Avec plaisir ! N’hésitez pas si vous avez une autre question.');
   if (/horaire|ouvert|ouvre|ferm|hour|open|close/.test(l)) return tr('Nos horaires : {h}.', { h: [1, 2, 3, 4, 5, 6, 0].map((d) => `${dayName(d).toLowerCase()} ${t.hours[d] ? fmtTime(t.hours[d][0]) + '–' + fmtTime(t.hours[d][1]) : tr('fermé')}`).join(', ') });
-  if (/où|adresse|situ|trouver|venir|where|address|located|find you/.test(l)) return tr('Nous sommes {a}. WhatsApp : {p}.', { a: t.address || t.city, p: phoneFmt(t.phone) });
-  const s = t.services.find((x) => x.name.toLowerCase().split(/\s+/).some((w) => w.length > 4 && l.includes(w)));
-  if (s) return tr('{s} : {p}, environ {d} minutes. Vous pouvez réserver en ligne sur cette page.', { s: s.name, p: s.price > 0 ? tr('à partir de {p}', { p: m(s.price) }) : tr('sans frais'), d: s.dur });
-  if (/rendez|rdv|réserv|reserv|dispo|créneau|demain|book|appointment|available|tomorrow|slot/.test(l)) {
-    const sv = t.services[0]; const d = sv && openDays(db, t, 3, sv.id)[0]; const f = d ? freeSlots(db, t, d, sv.id).slice(0, 3) : [];
-    return f.length ? tr('Le {d}, il reste par exemple {h} pour « {s} ». Réservez dans la section rendez-vous.', { d: fmtDay(d), h: f.map((x) => fmtTime(x)).join(', '), s: sv.name }) : tr('Utilisez la réservation en ligne : elle affiche les créneaux libres.');
+  if (/\bou\b.*(etes|situe|trouve)|adresse|situe|trouver|venir|where|address|located|find you/.test(l)) return tr('Vous nous trouvez à {a}. Téléphone et WhatsApp : {p}.', { a: t.address || t.city, p: phoneFmt(t.phone) });
+  const wantsSlot = /rendez|rdv|reserv|dispo|creneau|demain|aujourd|ce soir|matin|apres-midi|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|book|appointment|available|tomorrow|today|slot|monday|tuesday|wednesday|thursday|friday|saturday|sunday/.test(l);
+  const s = t.services.find((x) => x.name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/\s+/).some((w) => w.length > 4 && l.includes(w)));
+  if (wantsSlot) {
+    if (!canBook) return tr('La réservation en ligne n’est pas proposée ici. {c}', { c: contact });
+    const sv = s || t.services[0]; const today = nowIn(t.tz).date;
+    // Jour demandé : aujourd'hui, demain, après-demain ou un jour de la semaine ; sinon le prochain jour avec des créneaux
+    const DAYS = [['dimanche', 'sunday'], ['lundi', 'monday'], ['mardi', 'tuesday'], ['mercredi', 'wednesday'], ['jeudi', 'thursday'], ['vendredi', 'friday'], ['samedi', 'saturday']];
+    let day = /apres-demain|day after tomorrow/.test(l) ? addDays(today, 2) : /demain|tomorrow/.test(l) ? addDays(today, 1) : /aujourd|today|ce soir|tonight/.test(l) ? today : null;
+    const wd = DAYS.findIndex((n) => n.some((x) => l.includes(x))); if (!day && wd >= 0) { day = today; while (dowOf(day) !== wd || day === today) day = addDays(day, 1); }
+    const part = /matin|morning/.test(l) ? 'am' : /apres-midi|afternoon|soir|evening/.test(l) ? 'pm' : null;
+    const pick = (d) => freeSlots(db, t, d, sv.id).filter((h) => !part || (part === 'am' ? h < '12:00' : h >= '12:00'));
+    if (day) {
+      const f = pick(day).slice(0, 3);
+      if (f.length) return tr('Le {d}, il reste par exemple {h} pour « {s} ». Réservez dans la section rendez-vous.', { d: fmtDay(day), h: f.map((x) => fmtTime(x)).join(', '), s: sv.name });
+      const next = openDays(db, t, 10, sv.id).filter((d) => d > day).find((d) => pick(d).length);
+      return next ? tr('Plus de créneau le {d}{p}. Prochaine disponibilité : le {n} à {h} pour « {s} ».', { d: fmtDay(day), p: part === 'am' ? tr(' le matin') : part === 'pm' ? tr(' l’après-midi') : '', n: fmtDay(next), h: fmtTime(pick(next)[0]), s: sv.name }) : tr('Utilisez la réservation en ligne : elle affiche les créneaux libres en temps réel.');
+    }
+    const d = openDays(db, t, 10, sv.id).find((x) => pick(x).length); const f = d ? pick(d).slice(0, 3) : [];
+    return f.length ? tr('Le {d}, il reste par exemple {h} pour « {s} ». Réservez dans la section rendez-vous.', { d: fmtDay(d), h: f.map((x) => fmtTime(x)).join(', '), s: sv.name }) : tr('Utilisez la réservation en ligne : elle affiche les créneaux libres en temps réel.');
   }
-  if (/prix|tarif|combien|coût|cout|price|cost|how much|rate/.test(l)) return tr('Tarifs de départ : {l}. Pour un prix exact, demandez un devis.', { l: t.services.slice(0, 4).map((x) => `${x.name} ${m(x.price)}`).join(', ') });
-  if (/paie|carte|espèce|cb|paiement|pay|card|cash/.test(l)) return t.faq;
+  if (s) {
+    const price = shown && s.price > 0 ? tr('à partir de {p}', { p: m(s.price) }) : tr('tarif sur demande');
+    return canBook ? tr('{s} : {p}, environ {d} minutes. Vous pouvez réserver en ligne sur cette page.', { s: s.name, p: price, d: s.dur }) : tr('{s} : {p}. {c}', { s: s.name, p: price, c: contact });
+  }
+  if (/prix|tarif|combien|cout|devis|price|cost|how much|rate|quote/.test(l)) {
+    const priced = shown ? t.services.filter((x) => x.price > 0).slice(0, 4) : [];
+    return priced.length ? tr('Tarifs de départ : {l}. Pour un prix exact, demandez un devis.', { l: priced.map((x) => `${x.name} ${m(x.price)}`).join(', ') }) : tr('Nos tarifs dépendent de votre demande : demandez un devis gratuit sur cette page, nous vous répondons rapidement.');
+  }
+  if (/paie|carte|espece|\bcb\b|paiement|pay|card|cash/.test(l)) return t.faq;
   return tr('Je réponds sur les prestations, les tarifs, les horaires et l’adresse. Pour le reste, écrivez sur WhatsApp au {p}.', { p: phoneFmt(t.phone) });
 }
 

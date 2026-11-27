@@ -11,7 +11,7 @@ import * as V from './views.js';
 import { TEMPLATES } from './templates.js';
 import { ACTIVITIES } from './activities.js';
 const BOOT_AT = Date.now();
-import { emailOk, randomId, safeEq, clampStr, nowIn, intlPhone, phoneOk } from './util.js';
+import { emailOk, randomId, safeEq, clampStr, nowIn, intlPhone, phoneOk, phoneFmt } from './util.js';
 import { isDial, toE164, domCountryOf, phoneValid } from './phone.js';
 import { hashPassword, passwordProblem, createSession, readSession, destroySession, destroyUserSessions, csrfOk, issueToken, useToken, totpOk, rateLimit, login, audit } from './security.js';
 import { createTenant, loadTenant, siteState, updateSettings, userTenants } from './tenants.js';
@@ -378,6 +378,8 @@ export function createApp(db) {
       if (!r.ok) return json(c.res, { ...r, msg: tr(r.msg) }, 400);
       notifyPro(t, 'demande de devis', `${clampStr(c.form.name, 80)} (+${intlPhone(c.form.phone, isDial(c.form.cc) ? c.form.cc : t.cc)}) · ${clampStr(c.form.service, 80)} · ${clampStr(c.form.message, 300)}`);
       emit(db, 'devis', { entreprise: t.name, client: clampStr(c.form.name, 80), telephone: '+' + intlPhone(c.form.phone, isDial(c.form.cc) ? c.form.cc : t.cc), prestation: clampStr(c.form.service, 80), message: clampStr(c.form.message, 500) }, t.id);
+      const qe = clampStr(c.form.email, 190);
+      if (qe && emailOk(qe)) enqueue(db, { tenantId: t.id, channel: 'email', to: qe, template: 'quote_ack', key: `devis:${r.id}`, payload: { lang: t.lang, tenant: t.name, replyTo: t.email || '', color: t.color || '', name: clampStr(c.form.name, 80), service: clampStr(c.form.service, 80), phone: t.phone ? phoneFmt(t.phone) : '' } });
       json(c.res, { ok: true, msg: tr('Demande envoyée à {n}. Vous serez recontacté rapidement.', { n: t.name }) });
     });
     on('POST', `${prefix}/chat`, async (c) => {
@@ -486,12 +488,17 @@ export function createApp(db) {
     if (!billingOpen(c.tenant.country)) throw HttpError(403, 'Les abonnements payants ne sont pas encore ouverts dans votre pays.');
     // Acceptation expresse des CGV (engagement de 12 mois) avant le paiement, gardée comme preuve
     if (c.form.cgv !== 'on') throw HttpError(400, 'Cochez l’acceptation des CGV (engagement de 12 mois) pour continuer.');
-    const url = await createCheckout(c.tenant, c.user.email, c.form.plan);
+    // Abonnement déjà en cours (y compris impayé) : on passe par l'espace client Stripe, jamais un second abonnement
+    if (c.tenant.stripe_sub && ['active', 'past_due'].includes(c.tenant.status)) { if (c.tenant.stripe_customer) return redirect(c.res, await createPortal(c.tenant)); throw HttpError(409, 'Un abonnement est déjà en cours. Contactez-nous pour le modifier.'); }
+    if (!PLANS[c.form.plan]) throw HttpError(400, 'Formule inconnue.');
+    const setupPaid = !!db.one("SELECT 1 FROM invoices WHERE tenant_id=? AND status='paid' AND amount_cents>0", c.tenant.id);
+    let url; try { url = await createCheckout(c.tenant, c.user.email, c.form.plan, { setupPaid }); }
+    catch (e) { if (e.unpriced) { recordIncident(db, { kind: 'billing', severity: 'warning', message: `Pas de tarif Stripe en ${c.tenant.currency} pour ${c.tenant.name}`, tenantId: c.tenant.id }); throw HttpError(503, 'Le paiement en ligne n’est pas encore disponible dans votre devise. Écrivez-nous : nous activons votre abonnement sous 24 h.'); } throw e; }
     audit(db, { userId: c.user.id, tenantId: c.tenant.id, action: 'cgv.acceptees', detail: `CGV du 25 novembre 2026, formule ${c.form.plan}, engagement 12 mois`, ip: c.ip });
     audit(db, { userId: c.user.id, tenantId: c.tenant.id, action: 'checkout', detail: c.form.plan, ip: c.ip });
     redirect(c.res, url);
   });
-  on('POST', '/pro/abonnement/portail', async (c) => { requirePro(c); checkCsrf(c); redirect(c.res, await createPortal(c.tenant)); });
+  on('POST', '/pro/abonnement/portail', async (c) => { requirePro(c); checkCsrf(c); if (!c.tenant.stripe_customer) return redirect(c.res, '/pro/abonnement'); redirect(c.res, await createPortal(c.tenant)); });
   const proTickets = (c) => db.all('SELECT * FROM tickets WHERE tenant_id=? ORDER BY id DESC LIMIT 20', c.tenant.id).map((tk) => ({ ...tk, messages: db.all('SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY id', tk.id) }));
   on('GET', '/pro/aide', (c) => { requirePro(c); html(c.res, V.proHelp(c.tenant, c.user, csrfToken(c), { tickets: proTickets(c), msg: c.url.searchParams.get('m') === 'ticket' ? 'Ticket envoyé. Nous vous répondons par e-mail.' : '' })); });
   on('POST', '/pro/aide/question', async (c) => {

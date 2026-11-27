@@ -5,6 +5,7 @@ import { net } from './net.js';
 import { dlabel, hfr, esc, phoneFmt } from './util.js';
 import { e164Ok } from './phone.js';
 import { recordIncident } from './incidents.js';
+import { apptCancelToken } from './booking.js';
 
 // ---------- contenu des messages ----------
 // Les textes sont traduits dans la langue enregistrée avec le message (p.lang), au moment de l'envoi.
@@ -13,12 +14,14 @@ const MAIL = {
     text: `${tr('Bonjour {n},', { n: p.name })}\n\n${p.status === 'confirmed' ? tr('Votre rendez-vous est confirmé : {s}, le {w}.', { s: p.service, w: p.when }) : tr('Votre demande de rendez-vous est bien reçue, le professionnel va la confirmer : {s}, le {w}.', { s: p.service, w: p.when })}\n\n${tr('Adresse : {a}', { a: p.address })}\n${tr('Pour annuler : {u}', { u: p.cancelUrl })}\n\n${p.tenant}` }),
   appt_confirmed: (p) => ({ subject: tr('Rendez-vous confirmé chez {t}', { t: p.tenant }), text: `${tr('Bonjour {n},', { n: p.name })}\n\n${tr('{t} confirme votre rendez-vous : {s}, le {w}.', { t: p.tenant, s: p.service, w: p.when })}\n${tr('Adresse : {a}', { a: p.address })}\n${tr('Pour annuler : {u}', { u: p.cancelUrl })}` }),
   appt_refused: (p) => ({ subject: tr('Rendez-vous non disponible chez {t}', { t: p.tenant }), text: `${tr('Bonjour {n},', { n: p.name })}\n\n${tr('{t} ne peut pas vous recevoir le {w}. Vous pouvez choisir un autre créneau : {u}', { t: p.tenant, w: p.when, u: p.siteUrl })}` }),
-  appt_reminder: (p) => ({ subject: tr('Rappel : rendez-vous demain chez {t}', { t: p.tenant }), text: `${tr('Bonjour {n},', { n: p.name })}\n\n${tr('Rappel de votre rendez-vous : {s}, le {w}.', { s: p.service, w: p.when })}\n${tr('Adresse : {a}', { a: p.address })}\n${tr('Pour annuler : {u}', { u: p.cancelUrl })}` }),
+  appt_reminder: (p) => ({ subject: tr('Rappel : votre rendez-vous du {w} chez {t}', { w: p.when, t: p.tenant }), text: `${tr('Bonjour {n},', { n: p.name })}\n\n${tr('Rappel de votre rendez-vous : {s}, le {w}.', { s: p.service, w: p.when })}\n${tr('Adresse : {a}', { a: p.address })}\n${tr('Pour annuler : {u}', { u: p.cancelUrl })}` }),
+  quote_ack: (p) => ({ subject: tr('Votre demande de devis à {t}', { t: p.tenant }), text: `${tr('Bonjour {n},', { n: p.name })}\n\n${tr('{t} a bien reçu votre demande de devis ({s}) et vous recontacte rapidement.', { t: p.tenant, s: p.service || tr('demande') })}\n${p.phone ? tr('Pour toute précision : {p}', { p: p.phone }) : ''}` }),
   pro_new_request: (p) => ({ subject: tr('Nouvelle demande : {k}', { k: tr(p.kind) }), text: `${tr('Nouvelle demande sur votre site {t} ({k}) :', { t: p.tenant, k: tr(p.kind) })}\n${p.summary}\n\n${tr('Gérez-la dans votre espace : {u}', { u: p.dashUrl })}` }),
   verify_email: (p) => ({ subject: tr('Confirmez votre adresse e-mail'), text: `${tr('Bonjour,')}\n\n${tr('Confirmez votre adresse pour activer votre espace ClientDirect Pro : {u}', { u: p.url })}\n\n${tr('Ce lien expire dans 48 heures.')}` }),
   reset_password: (p) => ({ subject: tr('Réinitialisation de votre mot de passe'), text: `${tr('Bonjour,')}\n\n${tr('Pour choisir un nouveau mot de passe : {u}', { u: p.url })}\n${tr('Ce lien expire dans 2 heures. Si vous n’avez rien demandé, ignorez ce message.')}` }),
   welcome: (p) => ({ subject: tr('Votre site est en ligne'), text: `${tr('Bonjour,')}\n\n${tr('Votre site {t} est en ligne : {u}', { t: p.tenant, u: p.siteUrl })}\n${tr('Votre espace pro : {u}', { u: p.dashUrl })}\n${tr('Essai gratuit jusqu’au {d}.', { d: p.trialEnd })}` }),
   trial_ending: (p) => ({ subject: tr('Votre essai se termine bientôt'), text: `${tr('Bonjour,')}\n\n${tr('L’essai de {t} se termine le {d}. Pour garder votre site en ligne, choisissez votre formule : {u}', { t: p.tenant, d: p.trialEnd, u: p.billingUrl })}` }),
+  trial_ended: (p) => ({ subject: tr('Votre essai est terminé : votre site est hors ligne'), text: `${tr('Bonjour,')}\n\n${tr('L’essai gratuit de {t} est terminé et le site n’est plus visible. Vos réglages, prestations et demandes sont conservés : choisissez votre formule pour le remettre en ligne immédiatement : {u}', { t: p.tenant, u: p.billingUrl })}\n${tr('Une question ? Répondez simplement à cet e-mail.')}` }),
   payment_failed: (p) => ({ subject: tr('Échec du paiement de votre abonnement'), text: `${tr('Bonjour,')}\n\n${tr('Le paiement de l’abonnement de {t} a échoué. Mettez à jour votre moyen de paiement : {u}', { t: p.tenant, u: p.billingUrl })}\n${tr('Sans régularisation, le site sera mis en pause après {g} jours.', { g: config.graceDays })}` }),
   ticket_reply: (p) => ({ subject: tr('Réponse à votre demande : {s}', { s: p.subject }), text: `${tr('Bonjour,')}\n\n${p.body}\n\n${tr('Suivi : {u}', { u: p.url })}` }),
   monthly_report: (p) => ({ subject: tr('{t} : votre site en {m}', { t: p.tenant, m: p.monthLabel }), text: `${tr('Bonjour,')}\n\n${tr('Voici ce que votre site vous a apporté en {m} :', { m: p.monthLabel })}\n- ${tr('{v} visites', { v: p.views })}\n- ${tr('{r} demandes reçues ({b} réservations, {q} devis, {w} contacts WhatsApp)', { r: p.requests, b: p.bookings, q: p.quotes, w: p.wa_clicks })}\n- ${tr('{c} rendez-vous confirmés, pour {v} de prestations', { c: p.confirmed, v: p.valueLabel || p.value + ' €' })}\n\n${tr('Détail dans votre espace : {u}', { u: p.dashUrl })}\n\nClientDirect Pro` }),
@@ -55,7 +58,7 @@ export function enqueue(db, { tenantId = null, channel, to, template, payload = 
 export function apptPayload(t, a, cancelToken) {
   const lang = t.lang || 'fr';
   return { lang, tenant: t.name, replyTo: t.email || '', color: t.color || '', name: a.customer_name, service: a.service_name, when: `${fmtDay(a.date, lang)} · ${fmtTime(a.time, lang)}`, address: t.address || t.city, status: a.status,
-    cancelUrl: cancelToken ? `${config.baseUrl}/annuler/${cancelToken}` : `${config.baseUrl}/s/${t.slug}`, siteUrl: `${config.baseUrl}/s/${t.slug}` };
+    cancelUrl: `${config.baseUrl}/annuler/${cancelToken || apptCancelToken(a.id)}`, siteUrl: `${config.baseUrl}/s/${t.slug}` };
 }
 /** Prévient le client (e-mail + WhatsApp) et le professionnel (e-mail) d'un nouvel événement. */
 export function notifyAppointment(db, t, a, template, cancelToken) {
@@ -124,10 +127,10 @@ export function sampleEmails() {
   const appt = { ...base, name: 'Marie', service: 'Vidange et filtres', when: 'ven. 27/11 · 9h', address: '12 rue des Palmistes, Kourou', status: 'confirmed', cancelUrl: `${u}/annuler/exemple`, siteUrl: `${u}/s/exemple`, replyTo: 'garage@exemple.fr', color: '#c81e1e' };
   return {
     verify_email: { ...base, url: `${u}/verifier/exemple` }, reset_password: { ...base, url: `${u}/mot-de-passe/exemple` },
-    welcome: { ...base, siteUrl: `${u}/s/exemple`, dashUrl: `${u}/pro`, trialEnd: '10/12/2026' }, trial_ending: { ...base, trialEnd: '10/12/2026' },
+    welcome: { ...base, siteUrl: `${u}/s/exemple`, dashUrl: `${u}/pro`, trialEnd: '10/12/2026' }, trial_ending: { ...base, trialEnd: '10/12/2026' }, trial_ended: { ...base },
     subscription_confirmed: { ...base, plan: 'Pro' }, payment_receipt: { ...base, amount: '548 €', invoiceUrl: '' }, payment_failed: base,
     site_paused: base, renewal_reminder: { ...base, renewal: '26/11/2027' }, subscription_canceled: base,
-    appt_customer: appt, appt_confirmed: appt, appt_refused: appt, appt_reminder: appt,
+    appt_customer: appt, appt_confirmed: appt, appt_refused: appt, appt_reminder: appt, quote_ack: { ...appt, service: 'Remplacement embrayage', phone: '+594 694 12 34 56' },
     pro_new_request: { ...base, kind: 'demande de devis', summary: 'Marie (+594 694 11 22 33) · Vidange · Clio 2019', dashUrl: `${u}/pro` },
     monthly_report: { ...base, monthLabel: 'novembre 2026', views: 312, requests: 14, bookings: 9, quotes: 4, wa_clicks: 11, dashUrl: `${u}/pro` },
     ticket_reply: { ...base, subject: 'Changer mes horaires', body: 'Bonjour, c’est fait : vos nouveaux horaires sont en ligne.', url: `${u}/pro/aide` },
@@ -138,7 +141,7 @@ export function sampleEmails() {
   };
 }
 /** E-mails envoyés au nom d'un professionnel à SES clients : son nom en expéditeur, réponses vers lui. */
-const CUSTOMER_FACING = new Set(['appt_customer', 'appt_confirmed', 'appt_refused', 'appt_reminder']);
+const CUSTOMER_FACING = new Set(['appt_customer', 'appt_confirmed', 'appt_refused', 'appt_reminder', 'quote_ack']);
 /** Construit le message final (texte + HTML, expéditeur affiché, adresse de réponse) dans la langue du destinataire. */
 export function renderEmail(template, p) {
   const f = MAIL[template]; if (!f) throw new Error('Modèle inconnu ' + template);

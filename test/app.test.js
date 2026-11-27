@@ -123,7 +123,7 @@ test('abonnement : page de paiement Stripe puis activation par notification sign
   await hook({ id: 'evt_3', type: 'invoice.payment_failed', data: { object: { customer: 'cus_1' } } });
   assert.equal(db.one('SELECT status FROM tenants WHERE id=?', t.id).status, 'past_due');
   assert.equal((await app.client().get(`/s/${t.slug}`)).status, 200, 'site maintenu pendant le délai de grâce');
-  db.run('UPDATE tenants SET current_period_end=? WHERE id=?', Date.now() - 8 * 864e5, t.id);
+  db.run('UPDATE tenants SET current_period_end=?, past_due_since=? WHERE id=?', Date.now() + 20 * 864e5, Date.now() - 8 * 864e5, t.id);
   app.net.resetFetch(); mock(() => jsonResponse({ messageId: 'm' }, 201));
   await runJobs(db);
   assert.equal(db.one('SELECT status FROM tenants WHERE id=?', t.id).status, 'paused', 'mis en pause après le délai de grâce');

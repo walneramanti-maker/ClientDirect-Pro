@@ -46,7 +46,7 @@ export function robots(sitemapUrl, { allow = true } = {}) {
 /** Sites publiés (essai en cours, actifs ou en délai de grâce) pour le sitemap et l'annuaire. */
 export function publicTenants(db, now = Date.now()) {
   return db.all(`SELECT id, slug, name, metier, city, custom_domain, domain_status, created_at, updated_at FROM tenants
-    WHERE (status='active' OR (status='trial' AND trial_ends_at > ?) OR (status='past_due' AND COALESCE(current_period_end,0) + ? > ?))
+    WHERE (status='active' OR (status='trial' AND trial_ends_at > ?) OR (status='past_due' AND COALESCE(past_due_since, current_period_end, 0) + ? > ?))
       AND COALESCE(source,'') NOT LIKE 'utm:controle%' AND COALESCE(source,'')!='autotest' ORDER BY city, name`, now, config.graceDays * 864e5, now)
     .filter((t) => !config.sitemapExclude.includes(String(t.slug).toLowerCase()));
 }

@@ -226,12 +226,12 @@ const LEAD = {
   rdv: (l, s) => `${l}. Prenez rendez-vous en ligne en quelques secondes : ${s}.`,
   devis: (l, s) => `${l}. Demandez un devis ou une intervention en ligne : ${s}.`,
   table: (l, s) => `${l}. Réservez en ligne : ${s}.`,
-  commande: (l, s) => `${l}. Commandez ou réservez en ligne, puis retirez sans attendre : ${s}.`,
+  commande: (l, s) => `${l}. Commandez en ligne ou demandez un devis : ${s}.`,
   sejour: (l, s) => `${l}. Envoyez votre demande de réservation en ligne : ${s}.`,
   cours: (l, s) => `${l}. Réservez votre séance en ligne : ${s}.`,
   conseil: (l, s) => `${l}. Prenez rendez-vous en ligne pour un premier échange : ${s}.`
 };
-const LEAD_EN = { rdv: 'Book your appointment online in seconds.', devis: 'Request a quote or a visit online.', table: 'Book online.', commande: 'Order or reserve online, then collect without waiting.', sejour: 'Send your booking request online.', cours: 'Book your session online.', conseil: 'Book a first meeting online.' };
+const LEAD_EN = { rdv: 'Book your appointment online in seconds.', devis: 'Request a quote or a visit online.', table: 'Book online.', commande: 'Order online or request a quote.', sejour: 'Send your booking request online.', cours: 'Book your session online.', conseil: 'Book a first meeting online.' };
 const GENERIC = [['Demande de rendez-vous', 30, 'Choisissez un créneau, je vous confirme rapidement.'], ['Demande de devis', 30, 'Décrivez votre besoin, devis gratuit.'], ['Renseignements', 15, 'Une question sur mes prestations ?']];
 const GENERIC_EN = { rdv: [['Appointment', 'Choose a time slot.'], ['First consultation', 'Tell us about your needs.'], ['Follow-up', 'Next appointment.']], devis: [['Quote request', 'Describe your needs, free quote.'], ['Site visit', 'We come to assess the work.'], ['Call-out', 'Repair or service.']], table: [['Table booking', 'Free booking.'], ['Group booking', 'From 8 people.'], ['Private event', 'On quotation.']], commande: [['Order to collect', 'Prepared in advance.'], ['Reservation', 'Item kept for you.'], ['Advice', 'Ask us anything.']], sejour: [['Booking request', 'Your dates and number of guests.'], ['Group booking', 'On quotation.'], ['Information', 'Ask us anything.']], cours: [['Session', 'Individual or group.'], ['Trial session', 'Discover our classes.'], ['Assessment', 'Level and goals.']], conseil: [['First meeting', 'Discuss your needs.'], ['Quote', 'On request.'], ['Follow-up', 'Ongoing support.']] };
 
