@@ -92,6 +92,7 @@ export function createApp(db) {
   function requireAdmin(c) {
     if (!c.session || c.session.role !== 'superadmin') throw Object.assign(new Error('auth'), { redirect: '/connexion' });
     if (!c.session.totp_ok) throw Object.assign(new Error('2fa'), { redirect: '/connexion/2fa' });
+    V.setAdminContext({ name: db.one('SELECT name FROM users WHERE id=?', c.session.user_id)?.name, alerts: db.one('SELECT COUNT(*) n FROM incidents WHERE resolved_at IS NULL').n + db.one("SELECT COUNT(*) n FROM tickets WHERE status='open'").n });
   }
   const proEmail = (t) => db.one('SELECT email FROM users WHERE id=?', t.owner_user_id)?.email || t.email;
   const notifyPro = (t, kind, summary) => enqueue(db, { tenantId: t.id, channel: 'email', to: proEmail(t), template: 'pro_new_request', payload: { lang: t.lang, kind, tenant: t.name, summary, dashUrl: `${config.baseUrl}/pro` } });
@@ -506,14 +507,18 @@ export function createApp(db) {
   function adminData(c, msg = '') {
     const m = month(); const start = Date.parse(m + '-01T00:00:00Z');
     const terr = territoryStats(db);
-    const recent = db.all(`SELECT t.* FROM tenants t WHERE (${KIND_SQL})='client' ORDER BY t.created_at DESC LIMIT 10`); const tenants = recent;
+    const tf = c.url.searchParams.get('terr'); const terrFilter = ['GF', 'FR', 'MQ', 'GP', 'RE', 'YT', 'XX'].includes(tf) ? tf : '';
+    const terrSql = terrFilter ? (terrFilter === 'XX' ? " AND t.country NOT IN ('GF','FR','MQ','GP','RE','YT')" : ' AND t.country=?') : '';
+    const recent = db.all(`SELECT t.* FROM tenants t WHERE (${KIND_SQL})='client'${terrSql} ORDER BY t.created_at DESC LIMIT 8`, ...(terrFilter && terrFilter !== 'XX' ? [terrFilter] : [])); const tenants = recent;
+    const clientCount = (where, ...a) => db.one(`SELECT COUNT(*) n FROM tenants t WHERE (${KIND_SQL})='client' AND ${where}`, ...a).n;
     const ai = db.one('SELECT COALESCE(SUM(calls),0) calls, COALESCE(SUM(in_tokens),0) i, COALESCE(SUM(out_tokens),0) o FROM ai_usage WHERE month=?', m);
     const expenses = db.all('SELECT * FROM expenses WHERE month=? OR (recurring=1 AND month<=?) ORDER BY id DESC', m, m);
     const aiCost = aiCostEur(ai.i, ai.o);
     const count = (s) => db.one(`SELECT COUNT(*) n FROM tenants t WHERE t.status=? AND (${KIND_SQL})='client'`, s).n;
     return { canPurge: !config.isProd && (!config.stripeKey || isTestKey()),
       msg, tenants, expenses, aiCost, aiCalls: ai.calls,
-      counts: { active: count('active'), trial: count('trial') },
+      counts: { active: count('active'), trial: count('trial'), pastDue: count('past_due') }, terrFilter,
+      trialsEnding: clientCount("t.status='trial' AND t.trial_ends_at BETWEEN ? AND ?", Date.now(), Date.now() + 3 * 864e5), openTickets: db.one("SELECT COUNT(*) n FROM tickets WHERE status='open'").n,
       mrr: terr.totals.mrr, terr, recent,
       revenueMonth: db.one("SELECT COALESCE(SUM(amount_cents),0) c FROM invoices WHERE status='paid' AND paid_at>=?", start).c / 100,
       expensesMonth: expenses.reduce((s, e) => s + e.amount_cents, 0) / 100 + aiCost + (() => { const p = db.one("SELECT COALESCE(SUM(amount_cents),0) c, COUNT(*) n FROM invoices WHERE status='paid' AND paid_at>=?", start); return p.n ? (p.c / 100) * config.costs.stripePct + p.n * config.costs.stripeFixed : 0; })(),
@@ -523,6 +528,19 @@ export function createApp(db) {
       tickets: db.all("SELECT * FROM tickets WHERE status!='closed' ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, updated_at DESC LIMIT 30")
     };
   }
+  on('GET', '/admin/paiements', (c) => {
+    requireAdmin(c); const page = Math.max(1, Math.floor(Number(c.url.searchParams.get('page')) || 1)); const st = ['paid', 'open', 'void', 'uncollectible', 'refunded'].includes(c.url.searchParams.get('statut')) ? c.url.searchParams.get('statut') : '';
+    const w = st ? 'WHERE i.status=?' : ''; const a = st ? [st] : []; const total = db.one(`SELECT COUNT(*) n FROM invoices i ${w}`, ...a).n;
+    const rows = db.all(`SELECT i.*, t.name, t.slug, t.country, t.plan, t.id tid FROM invoices i LEFT JOIN tenants t ON t.id=i.tenant_id ${w} ORDER BY COALESCE(i.paid_at, i.created_at) DESC LIMIT 50 OFFSET ?`, ...a, (page - 1) * 50);
+    const m = month(); const start = Date.parse(m + '-01T00:00:00Z');
+    const sums = db.one("SELECT COALESCE(SUM(CASE WHEN status='paid' AND paid_at>=? THEN amount_cents END),0) mois, COALESCE(SUM(CASE WHEN status='paid' THEN amount_cents END),0) total, COALESCE(SUM(CASE WHEN status='open' THEN amount_cents END),0) attente FROM invoices", start);
+    html(c.res, V.adminPayments(csrfToken(c), { rows, total, page, pages: Math.max(1, Math.ceil(total / 50)), st, sums, pastDue: db.all(`SELECT t.id, t.name, t.current_period_end FROM tenants t WHERE t.status='past_due' AND (${KIND_SQL})='client' ORDER BY t.current_period_end`) }));
+  });
+  on('GET', '/admin/tickets', (c) => {
+    requireAdmin(c); const st = ['open', 'answered', 'closed'].includes(c.url.searchParams.get('statut')) ? c.url.searchParams.get('statut') : '';
+    html(c.res, V.adminTickets(csrfToken(c), { st, rows: db.all(`SELECT k.*, t.name tenant_name, t.id tid FROM tickets k LEFT JOIN tenants t ON t.id=k.tenant_id ${st ? 'WHERE k.status=?' : ''} ORDER BY CASE k.status WHEN 'open' THEN 0 WHEN 'answered' THEN 1 ELSE 2 END, k.updated_at DESC LIMIT 200`, ...(st ? [st] : [])) }));
+  });
+  on('GET', '/admin/parametres', (c) => { requireAdmin(c); html(c.res, V.adminSettings(csrfToken(c), { r: readiness(db), env: config.appEnv, sending: config.campaignSending, lastBackup: db.one("SELECT * FROM backups WHERE status='ok' ORDER BY id DESC LIMIT 1") })); });
   on('GET', '/admin/clients', (c) => { requireAdmin(c); const f = clientFilters(c.url.searchParams); html(c.res, V.adminClients(csrfToken(c), f, listClients(db, f))); });
   on('GET', '/admin/clients.csv', (c) => { requireAdmin(c); audit(db, { userId: c.session.user_id, action: 'admin.export.clients', ip: c.ip }); send(c.res, 200, clientsCsv(db, clientFilters(c.url.searchParams)), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="clients-clientdirectpro.csv"', 'Cache-Control': 'no-store' }); });
   on('GET', '/admin/clients/:id', (c) => { requireAdmin(c); const d = clientDetail(db, Number(c.params.id)); if (!d) throw HttpError(404, 'Entreprise introuvable'); const m = c.url.searchParams.get('m'); html(c.res, V.adminClient(csrfToken(c), d, m ? decodeURIComponent(m).slice(0, 200) : '')); });

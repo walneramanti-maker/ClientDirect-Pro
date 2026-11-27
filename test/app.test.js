@@ -241,7 +241,7 @@ async function makeAdmin() {
 test('administration : chiffres, dépenses, incidents, suspension', async () => {
   const admin = await makeAdmin();
   let p = await admin.get('/admin'); assert.equal(p.status, 200);
-  assert.match(p.text, /revenu mensuel récurrent/);
+  assert.match(p.text, /Revenu mensuel récurrent/); assert.match(p.text, /Résultat du mois/); assert.match(p.text, /Filtres rapides/);
   await admin.post('/admin/depenses', { csrf: admin.csrf(p.text), label: 'Serveur', amount: '7,50', category: 'technique', recurring: 'on' });
   p = await admin.get('/admin'); assert.match(p.text, /Serveur \(mensuelle\)/); assert.match(p.text, /7,50\s€/);
   const { t } = await signup(app, { business: 'Garage Suspendu', email: 'susp@test.fr' });

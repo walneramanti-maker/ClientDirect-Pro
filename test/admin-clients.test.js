@@ -96,9 +96,20 @@ test('tableau de bord : par territoire, prospects / démonstrations / clients s�
   assert.equal(by.GF.essais, 1); assert.equal(by.FR.payants, 1); assert.equal(by.FR.mrr, 149); assert.equal(by.FR.encaisse, 548); assert.equal(by.MQ.impayes, 1); assert.equal(by.MQ.mrr, 149);
   assert.equal(T.totals.payants, 1); assert.equal(T.kinds.controle, 1); assert.equal(T.kinds.demo, 1);
   const d = await admin.get('/admin'); assert.equal(d.status, 200);
-  assert.match(d.text, /Par territoire/); assert.match(d.text, /Guyane/); assert.match(d.text, /Martinique/); assert.match(d.text, /démonstrations préparées/); assert.match(d.text, /prospects repérés/); assert.match(d.text, /Dernières inscriptions/);
+  assert.match(d.text, /Par territoire/); assert.match(d.text, /Guyane/); assert.match(d.text, /Martinique/); assert.match(d.text, /démonstrations préparées/); assert.match(d.text, /prospects repérés/); assert.match(d.text, /Entreprises récentes/); assert.match(d.text, /Actions rapides/); assert.match(d.text, /Incidents \/ alertes/);
   assert.doesNotMatch(d.text, /Controle pro/);
   await admin.submit(`/admin/clients/${ids.gf}`, `/admin/clients/${ids.gf}/interne`, { value: '1', confirm: '1' });
   const T2 = A.territoryStats(db, now); assert.equal(T2.list.find((b) => b.code === 'GF').essais, 0, 'compte interne exclu des statistiques'); assert.equal(T2.kinds.interne, 1);
   const list = await admin.get('/admin/clients?kind=interne'); assert.match(list.text, /Garage Kourou/);
+});
+
+test('nouvelle interface : menu latéral, recherche globale, filtres rapides, paiements, tickets, paramètres', async () => {
+  const d = await admin.get('/admin'); assert.match(d.text, /class="side"/); assert.match(d.text, /Rechercher une entreprise/); assert.match(d.text, /aria-current="page"[^>]*>.*Tableau de bord/s);
+  assert.match(d.text, /c-neg|c-pos/, 'résultat coloré selon le signe');
+  const mq = await admin.get('/admin?terr=MQ'); assert.match(mq.text, /Resto Fort/); assert.doesNotMatch(mq.text.split('id="recentes"')[1].split('</section>')[0], /Salon Lyon/, 'filtre rapide par territoire');
+  const p = await admin.get('/admin/paiements'); assert.equal(p.status, 200); assert.match(p.text, /in_1/); assert.match(p.text, /548\s€/); assert.match(p.text, /Resto Fort/, 'impayé signalé');
+  const t = await admin.get('/admin/tickets'); assert.equal(t.status, 200); assert.match(t.text, /Question facture/); assert.match((await admin.get('/admin/tickets?statut=closed')).text, /Aucun ticket/);
+  const s = await admin.get('/admin/parametres'); assert.equal(s.status, 200); assert.match(s.text, /Envoi des campagnes/); assert.match(s.text, /Lancement et réglages techniques/);
+  const g = await admin.get('/admin/clients?kind=tous&q=Bruxelles'); assert.match(g.text, /Garage Bruxelles/, 'la recherche globale couvre tous les comptes');
+  for (const u of ['/admin/paiements', '/admin/tickets', '/admin/parametres']) assert.notEqual((await app.client().get(u)).status, 200, `${u} réservé`);
 });
