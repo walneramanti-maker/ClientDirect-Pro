@@ -37,6 +37,10 @@ if (restoredFrom && process.env.MIGRATE_FROM_ENV && restoredFrom.startsWith(`${p
   try { const b = await createBackup(db); console.log(`Première sauvegarde « ${config.appEnv} » après migration : ${b?.name || 'ok'}`); }
   catch (e) { console.error(`Sauvegarde après migration impossible, démarrage refusé : ${e.message}`); db.close(); process.exit(1); }
 }
+// Opérations ponctuelles pilotées par variables (date de lancement, suppression vérifiée d'un compte de test)
+{ const { applyLaunchDate, closeTestAccount } = await import('./bootops.js');
+  try { applyLaunchDate(db); } catch (e) { console.error('Date de lancement :', e.message); }
+  try { closeTestAccount(db); } catch (e) { console.error('Compte de test :', e.message); } }
 // Premier démarrage sans accès console (hébergement sans terminal) : création du compte administrateur depuis les variables
 // ADMIN_LOGIN, ADMIN_PASSWORD et ADMIN_TOTP_SECRET, uniquement s'il n'existe encore aucun administrateur.
 if (process.env.ADMIN_LOGIN && process.env.ADMIN_PASSWORD && process.env.ADMIN_TOTP_SECRET && !db.one("SELECT 1 FROM users WHERE role='superadmin'")) {

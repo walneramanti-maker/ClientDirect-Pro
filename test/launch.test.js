@@ -128,3 +128,20 @@ test('lancement : espace disque surveillé, sites exclus du sitemap, comptes de 
   const g = config.googleVerification; config.googleVerification = 'abc123';
   try { assert.match((await app.client().get('/')).text, /<meta name="google-site-verification" content="abc123">/); } finally { config.googleVerification = g; }
 });
+
+test('opérations de démarrage : date de lancement officielle ; suppression vérifiée d’un compte de test, jamais d’un vrai client', async () => {
+  const B = await import('../src/bootops.js'); const logs = []; const log = (m) => logs.push(m);
+  assert.deepEqual(B.applyLaunchDate(app.db, { LAUNCH_DATE: '2026-11-27', LAUNCH_AT: '2026-11-27T09:07:00-03:00' }, log), { date: '2026-11-27', at: '2026-11-27T12:07:00.000Z' });
+  assert.equal(app.db.one("SELECT v FROM meta WHERE k='launch_date'").v, '2026-11-27');
+  assert.deepEqual(B.applyLaunchDate(app.db, { LAUNCH_DATE: '2026-11-27', LAUNCH_AT: '2026-11-27T09:07:00-03:00' }, log), { inchange: '2026-11-27' });
+  const test1 = (await signup(app, { business: 'CONTROLE lancement', email: 'controle-boot@test.fr' })).t;
+  const vrai = (await signup(app, { business: 'Garage Vrai Client', email: 'vrai-client@test.fr' })).t;
+  const paye = (await signup(app, { business: 'Test paye', email: 'test-paye@test.fr' })).t; app.db.run("UPDATE tenants SET stripe_customer='cus_x' WHERE id=?", paye.id);
+  assert.ok(B.closeTestAccount(app.db, { CLOSE_TEST_ACCOUNT: vrai.slug }, log).refus.some((r) => /nom/.test(r)), 'un vrai client n’est jamais supprimé');
+  assert.ok(B.closeTestAccount(app.db, { CLOSE_TEST_ACCOUNT: paye.slug }, log).refus.some((r) => /paiement/.test(r)), 'compte lié à un paiement refusé');
+  const r = B.closeTestAccount(app.db, { CLOSE_TEST_ACCOUNT: test1.slug }, log);
+  assert.equal(r.supprime.nom, 'CONTROLE lancement'); assert.match(r.supprime.email, /^c\*\*\*@test\.fr$/, 'adresse masquée dans les journaux');
+  assert.equal(app.db.one('SELECT status FROM tenants WHERE id=?', test1.id).status, 'canceled');
+  assert.equal(app.db.one('SELECT status FROM tenants WHERE id=?', vrai.id).status, 'trial'); assert.equal(app.db.one('SELECT status FROM tenants WHERE id=?', paye.id).status, 'trial');
+  assert.deepEqual(B.closeTestAccount(app.db, { CLOSE_TEST_ACCOUNT: test1.slug }, log), { absent: test1.slug }, 'idempotent');
+});
