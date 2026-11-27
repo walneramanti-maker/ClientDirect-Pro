@@ -48,6 +48,7 @@ if (process.env.ADMIN_LOGIN && process.env.ADMIN_PASSWORD && process.env.ADMIN_T
   db.run("INSERT INTO users(email,pass_hash,name,role,email_verified,totp_secret,created_at) VALUES(?,?,'Administrateur','superadmin',1,?,?)", process.env.ADMIN_LOGIN.trim().toLowerCase(), hashPassword(process.env.ADMIN_PASSWORD), process.env.ADMIN_TOTP_SECRET.trim().toUpperCase(), Date.now());
   console.log('Compte administrateur créé à partir des variables d’environnement.');
 }
+{ const { adminDiagnostic } = await import('./bootops.js'); const S = await import('./security.js'); try { adminDiagnostic(db, process.env, S); } catch (e) { console.error('Diagnostic administrateur :', e.message); } }
 const server = http.createServer(createApp(db));
 server.headersTimeout = 20_000; server.requestTimeout = 30_000;
 const stopJobs = config.disableJobs ? () => {} : startScheduler(db);
@@ -57,6 +58,10 @@ if (process.env.PROSPECT_SEED) import('./prospect.js').then(({ seedProspects }) 
 // Stripe (mode test) : produits, prix et webhook créés automatiquement à partir de la seule clé secrète
 import('./potential.js').then(({ refreshPotentials }) => refreshPotentials(db)).then(() => import('./readiness.js')).then(({ readiness }) => { const r = readiness(db); console.log(`Préparation du lancement : ${r.done}/${r.total} — restant : ${r.items.filter((i) => !i.ok).map((i) => `${i.key} (${i.detail})`).join(' ; ')}`); }).catch((e) => console.error('Préparation :', e.message));
 import('./suppression.js').then(({ cleanContacts }) => console.log('Qualité des coordonnées :', JSON.stringify(cleanContacts(db)))).catch((e) => console.error('Qualité :', e.message));
+// Messagerie contact@ : test réel d'authentification SMTP et IMAP (aucun e-mail envoyé, boîte en lecture seule)
+if (config.smtp.host && config.smtp.pass) import('./smtp.js').then(({ verifySmtp }) => verifySmtp(config.smtp)).then((r) => console.log(`SMTP ${config.smtp.host}:${config.smtp.port} : ${r}`)).catch((e) => console.error(`SMTP ${config.smtp.host}:${config.smtp.port} : ÉCHEC ${e.message}`));
+else console.log(`SMTP : ${config.smtp.host ? 'mot de passe SMTP_PASS absent' : 'non configuré'}`);
+import('./imap.js').then(async ({ fetchSince, imapReady }) => { if (!imapReady()) return console.log('IMAP : non configuré (IMAP_HOST, SMTP_USER/SMTP_PASS)'); const m = await fetchSince({ ...config.imap, max: 0 }); console.log(`IMAP ${config.imap.host}:${config.imap.port} : connexion réussie (lecture seule), ${m.length} message(s) lu(s)`); }).catch((e) => console.error(`IMAP ${config.imap.host}:${config.imap.port} : ÉCHEC ${e.message}`));
 import('./netprobe.js').then(({ probeNetwork }) => probeNetwork()).then((r) => { console.log('Réseau :', JSON.stringify(r)); db.run("INSERT INTO meta(k,v) VALUES('netprobe',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", JSON.stringify({ ...r, at: new Date().toISOString() })); }).catch((e) => console.error('Réseau :', e.message));
 // Comptes de test à supprimer entièrement (PURGE_TEST_ACCOUNTS : adresses e-mail ou noms de site, séparés par des virgules)
 setTimeout(() => import('./privacy.js').then(async ({ purgeTestTenant }) => {

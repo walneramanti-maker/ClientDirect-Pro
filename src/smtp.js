@@ -22,7 +22,7 @@ export function buildMessage({ from, fromName, to, subject, text, unsubscribeUrl
 }
 
 /** Dialogue SMTP minimal : TLS direct (465) ou STARTTLS (587), authentification LOGIN. */
-export function sendMail({ host, port = 465, secure = true, user, pass, from, to, data, timeoutMs = 20000 }) {
+export function sendMail({ host, port = 465, secure = true, user, pass, from, to, data, timeoutMs = 20000, verifyOnly = false }) {
   return new Promise((resolve, reject) => {
     let sock = secure ? tls.connect({ host, port, servername: host }) : net.connect({ host, port });
     let buf = ''; let waiter = null; let done = false;
@@ -42,6 +42,7 @@ export function sendMail({ host, port = 465, secure = true, user, pass, from, to
         ehlo = await cmd('EHLO clientdirect.pro', [250]);
       }
       if (user) { await cmd('AUTH LOGIN', [334]); await cmd(b64(user), [334]); await cmd(b64(pass), [235]); }
+      if (verifyOnly) { try { sock.write('QUIT\r\n'); } catch { /* sans importance */ } clearTimeout(timer); done = true; sock.end(); return resolve('authentification réussie'); }
       await cmd(`MAIL FROM:<${from}>`, [250]); await cmd(`RCPT TO:<${to}>`, [250, 251]); await cmd('DATA', [354]);
       const r = await cmd(data.replace(/\r\n\./g, '\r\n..') + '\r\n.', [250]);
       try { sock.write('QUIT\r\n'); } catch { /* sans importance */ }
@@ -49,3 +50,6 @@ export function sendMail({ host, port = 465, secure = true, user, pass, from, to
     })().catch((e) => { clearTimeout(timer); fail(e); });
   });
 }
+
+/** Vérifie la connexion et l'authentification SMTP sans envoyer aucun message. */
+export const verifySmtp = (cfg) => sendMail({ ...cfg, verifyOnly: true });

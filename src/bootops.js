@@ -43,3 +43,24 @@ export function closeTestAccount(db, env = process.env, log = console.log) {
   log(`Compte de test supprimé (anonymisé) : ${t.name} (${t.slug})`);
   return { supprime: identite };
 }
+
+/**
+ * Diagnostic du compte administrateur (lecture seule, aucun secret journalisé) : compare la base aux variables
+ * ADMIN_LOGIN / ADMIN_PASSWORD / ADMIN_TOTP_SECRET. Ne modifie rien.
+ */
+export function adminDiagnostic(db, env = process.env, { verifyPassword, totpCode } = {}, log = console.log) {
+  const login = String(env.ADMIN_LOGIN || '').trim().toLowerCase();
+  const admins = db.all("SELECT id, email, created_at, failed_logins, locked_until, deleted_at, totp_secret IS NOT NULL AND totp_secret!='' has_totp FROM users WHERE role='superadmin'");
+  const same = login ? db.one('SELECT id, role, deleted_at, pass_hash, totp_secret, failed_logins, locked_until FROM users WHERE email=?', login) : null;
+  const norm = (s) => String(s || '').toUpperCase().replace(/[^A-Z2-7]/g, '');
+  const d = {
+    variables: { ADMIN_LOGIN: !!login, ADMIN_PASSWORD: !!env.ADMIN_PASSWORD, ADMIN_TOTP_SECRET: !!env.ADMIN_TOTP_SECRET, ADMIN_LOGIN_espaces: login !== String(env.ADMIN_LOGIN || '').toLowerCase(), ADMIN_PASSWORD_espaces_debut_fin: !!env.ADMIN_PASSWORD && env.ADMIN_PASSWORD !== env.ADMIN_PASSWORD.trim() },
+    administrateurs: admins.map((a) => ({ id: a.id, email: mask(a.email), cree: new Date(a.created_at).toISOString(), echecs: a.failed_logins, verrouille: a.locked_until > Date.now(), supprime: !!a.deleted_at, doubleAuth: !!a.has_totp, correspondAdminLogin: a.email === login })),
+    compteAdminLogin: !same ? 'absent' : { id: same.id, role: same.role, supprime: !!same.deleted_at, echecs: same.failed_logins, verrouille: same.locked_until > Date.now(),
+      motDePasseRenderCorrespond: !!(env.ADMIN_PASSWORD && verifyPassword?.(env.ADMIN_PASSWORD, same.pass_hash)),
+      motDePasseRenderSansEspacesCorrespond: !!(env.ADMIN_PASSWORD && verifyPassword?.(env.ADMIN_PASSWORD.trim(), same.pass_hash)),
+      cleDoubleAuthCorrespond: !!(env.ADMIN_TOTP_SECRET && same.totp_secret && totpCode?.(same.totp_secret) === totpCode?.(norm(env.ADMIN_TOTP_SECRET))) }
+  };
+  log(`Diagnostic administrateur : ${JSON.stringify(d)}`);
+  return d;
+}
