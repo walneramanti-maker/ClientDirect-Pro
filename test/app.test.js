@@ -243,7 +243,7 @@ test('administration : chiffres, dépenses, incidents, suspension', async () => 
   let p = await admin.get('/admin'); assert.equal(p.status, 200);
   assert.match(p.text, /revenu mensuel récurrent/);
   await admin.post('/admin/depenses', { csrf: admin.csrf(p.text), label: 'Serveur', amount: '7,50', category: 'technique', recurring: 'on' });
-  p = await admin.get('/admin'); assert.match(p.text, /Serveur \(mensuelle\)/); assert.match(p.text, /7,5 €/);
+  p = await admin.get('/admin'); assert.match(p.text, /Serveur \(mensuelle\)/); assert.match(p.text, /7,50\s€/);
   const { t } = await signup(app, { business: 'Garage Suspendu', email: 'susp@test.fr' });
   await admin.post(`/admin/entreprises/${t.id}/statut`, { csrf: admin.csrf(p.text), status: 'paused' });
   assert.equal((await app.client().get(`/s/${t.slug}`)).status, 503);

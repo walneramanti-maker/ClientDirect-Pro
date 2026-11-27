@@ -106,7 +106,13 @@ const MIGRATIONS = [
   `ALTER TABLE prospects ADD COLUMN bounced_at INTEGER`,
   `CREATE TABLE IF NOT EXISTS campaign_sends(id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, step INTEGER NOT NULL, sent_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS campaign_sends_at ON campaign_sends(sent_at)`,
-  `CREATE INDEX IF NOT EXISTS campaign_items_due ON campaign_items(status, next_at)`
+  `CREATE INDEX IF NOT EXISTS campaign_items_due ON campaign_items(status, next_at)`,
+  // Administration : compte interne (exclu des statistiques clients), note interne, index pour plusieurs milliers d'entreprises
+  `ALTER TABLE tenants ADD COLUMN internal INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE tenants ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''`,
+  `CREATE INDEX IF NOT EXISTS tenants_admin ON tenants(status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS invoices_tenant ON invoices(tenant_id, status, paid_at)`,
+  `CREATE INDEX IF NOT EXISTS audit_tenant ON audit(tenant_id, id)`
 ];
 
 export function openDb(file, { appEnv = null } = {}) {

@@ -77,5 +77,5 @@ test('tableau de bord quotidien : inscriptions, nouveaux abonnés, revenus, dép
   assert.ok(today.fraisFixes > 0 && today.fraisFixes < 1, 'frais fixes répartis par jour');
   assert.equal(today.benefice, Math.round((548 - today.fraisStripe - today.fraisFixes) * 100) / 100);
   const a = await admin(); const page = await a.get('/admin/journal');
-  assert.equal(page.status, 200); assert.match(page.text, /Tableau de bord quotidien/); assert.match(page.text, /548 €/);
+  assert.equal(page.status, 200); assert.match(page.text, /Tableau de bord quotidien/); assert.match(page.text, /548\s€/);
 });

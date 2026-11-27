@@ -32,6 +32,7 @@ import { siteHead, siteUrl, sitemap, robots, publicTenants } from './seo.js';
 import { setDomain, tenantByDomain } from './domains.js';
 import { track, isBot, last30, daily } from './stats.js';
 import { tenantCosts } from './costs.js';
+import { KIND_SQL, territoryStats, clientFilters, listClients, clientsCsv, clientDetail, clientAction } from './adminClients.js';
 import { optoutLink, optout, exportTenant, deleteTenant, purgeTestTenant } from './privacy.js';
 import { maintenanceOn, setMaintenance, MAINTENANCE_ALLOWED } from './maintenance.js';
 import { diskUsage } from './disk.js';
@@ -504,15 +505,16 @@ export function createApp(db) {
   // ---------- administration générale ----------
   function adminData(c, msg = '') {
     const m = month(); const start = Date.parse(m + '-01T00:00:00Z');
-    const tenants = db.all("SELECT t.*, (SELECT COUNT(*) FROM appointments a WHERE a.tenant_id=t.id) appts FROM tenants t WHERE t.status!='demo' ORDER BY t.id DESC LIMIT 500");
+    const terr = territoryStats(db);
+    const recent = db.all(`SELECT t.* FROM tenants t WHERE (${KIND_SQL})='client' ORDER BY t.created_at DESC LIMIT 10`); const tenants = recent;
     const ai = db.one('SELECT COALESCE(SUM(calls),0) calls, COALESCE(SUM(in_tokens),0) i, COALESCE(SUM(out_tokens),0) o FROM ai_usage WHERE month=?', m);
     const expenses = db.all('SELECT * FROM expenses WHERE month=? OR (recurring=1 AND month<=?) ORDER BY id DESC', m, m);
     const aiCost = aiCostEur(ai.i, ai.o);
-    const count = (s) => db.one('SELECT COUNT(*) n FROM tenants WHERE status=?', s).n;
+    const count = (s) => db.one(`SELECT COUNT(*) n FROM tenants t WHERE t.status=? AND (${KIND_SQL})='client'`, s).n;
     return { canPurge: !config.isProd && (!config.stripeKey || isTestKey()),
       msg, tenants, expenses, aiCost, aiCalls: ai.calls,
       counts: { active: count('active'), trial: count('trial') },
-      mrr: db.all("SELECT plan FROM tenants WHERE status IN ('active','past_due')").reduce((s, r) => s + PLANS[r.plan].monthly, 0),
+      mrr: terr.totals.mrr, terr, recent,
       revenueMonth: db.one("SELECT COALESCE(SUM(amount_cents),0) c FROM invoices WHERE status='paid' AND paid_at>=?", start).c / 100,
       expensesMonth: expenses.reduce((s, e) => s + e.amount_cents, 0) / 100 + aiCost + (() => { const p = db.one("SELECT COALESCE(SUM(amount_cents),0) c, COUNT(*) n FROM invoices WHERE status='paid' AND paid_at>=?", start); return p.n ? (p.c / 100) * config.costs.stripePct + p.n * config.costs.stripeFixed : 0; })(),
       incidents: openIncidents(db),
@@ -521,6 +523,16 @@ export function createApp(db) {
       tickets: db.all("SELECT * FROM tickets WHERE status!='closed' ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, updated_at DESC LIMIT 30")
     };
   }
+  on('GET', '/admin/clients', (c) => { requireAdmin(c); const f = clientFilters(c.url.searchParams); html(c.res, V.adminClients(csrfToken(c), f, listClients(db, f))); });
+  on('GET', '/admin/clients.csv', (c) => { requireAdmin(c); audit(db, { userId: c.session.user_id, action: 'admin.export.clients', ip: c.ip }); send(c.res, 200, clientsCsv(db, clientFilters(c.url.searchParams)), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="clients-clientdirectpro.csv"', 'Cache-Control': 'no-store' }); });
+  on('GET', '/admin/clients/:id', (c) => { requireAdmin(c); const d = clientDetail(db, Number(c.params.id)); if (!d) throw HttpError(404, 'Entreprise introuvable'); const m = c.url.searchParams.get('m'); html(c.res, V.adminClient(csrfToken(c), d, m ? decodeURIComponent(m).slice(0, 200) : '')); });
+  on('POST', '/admin/clients/:id/:action', (c) => {
+    requireAdmin(c); checkCsrf(c); limit(c, 'admin-action', 60, 15 * 60e3);
+    const id = Number(c.params.id);
+    if (c.form.confirm !== '1') { const d = clientDetail(db, id); if (!d) throw HttpError(404, 'Entreprise introuvable'); return html(c.res, V.adminClient(csrfToken(c), d, '', 'Cochez « Je confirme » pour valider l’action.'), 400); }
+    try { const msg = clientAction(db, id, c.params.action, c.form, { adminId: c.session.user_id, issueToken, enqueue }); redirect(c.res, `/admin/clients/${id}?m=${encodeURIComponent(msg)}`); }
+    catch (e) { const d = clientDetail(db, id); if (!d) throw HttpError(404, 'Entreprise introuvable'); html(c.res, V.adminClient(csrfToken(c), d, '', e.message), 400); }
+  });
   on('GET', '/admin', (c) => { requireAdmin(c); html(c.res, V.adminDashboard(csrfToken(c), adminData(c, c.url.searchParams.get('m') === 'ok' ? 'Enregistré.' : ''))); });
   // Bilan d'une période : inscriptions, abonnements, revenus, dépenses, canaux, territoires, avis
   function reviewData(fromIso, toIso) {
@@ -656,6 +668,8 @@ export function createApp(db) {
   on('POST', '/admin/entreprises/:id/statut', (c) => {
     requireAdmin(c); checkCsrf(c);
     if (!['paused', 'active'].includes(c.form.status)) throw HttpError(400, 'Statut inconnu');
+    // Remettre « actif » un compte sans abonnement Stripe le rendrait gratuit sans fin : seulement s'il a un abonnement
+    if (c.form.status === 'active' && !db.one('SELECT 1 FROM tenants WHERE id=? AND stripe_sub IS NOT NULL', Number(c.params.id))) throw HttpError(400, 'Compte sans abonnement : utilisez « Réactiver » ou « Prolonger l’essai » depuis la fiche de l’entreprise.');
     db.run("UPDATE tenants SET status=? WHERE id=? AND status!='demo'", c.form.status, Number(c.params.id));
     audit(db, { userId: c.session.user_id, tenantId: Number(c.params.id), action: `admin.statut.${c.form.status}`, ip: c.ip });
     redirect(c.res, '/admin?m=ok');
