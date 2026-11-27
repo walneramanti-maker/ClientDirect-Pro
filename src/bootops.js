@@ -61,6 +61,18 @@ export function adminDiagnostic(db, env = process.env, { verifyPassword, totpCod
       motDePasseRenderSansEspacesCorrespond: !!(env.ADMIN_PASSWORD && verifyPassword?.(env.ADMIN_PASSWORD.trim(), same.pass_hash)),
       cleDoubleAuthCorrespond: !!(env.ADMIN_TOTP_SECRET && same.totp_secret && totpCode?.(same.totp_secret) === totpCode?.(norm(env.ADMIN_TOTP_SECRET))) }
   };
+  if (same) {
+    // Historique des tentatives (7 jours) : où la connexion échoue-t-elle ? (adresses IP non journalisées)
+    const since = Date.now() - 7 * 864e5; const iso = (t) => new Date(t).toISOString().slice(0, 16);
+    d.tentatives = {
+      echecsMotDePasse: db.all("SELECT created_at FROM audit WHERE action='connexion.echec' AND detail=? AND created_at>? ORDER BY created_at DESC LIMIT 15", login, since).map((r) => iso(r.created_at)),
+      motDePasseAccepte: db.all("SELECT created_at FROM audit WHERE action='connexion' AND user_id=? AND created_at>? ORDER BY created_at DESC LIMIT 10", same.id, since).map((r) => iso(r.created_at)),
+      echecsCode2fa: db.all("SELECT created_at FROM audit WHERE action='2fa.echec' AND user_id=? AND created_at>? ORDER BY created_at DESC LIMIT 15", same.id, since).map((r) => iso(r.created_at)),
+      code2faAccepte: db.all("SELECT created_at FROM audit WHERE action='2fa.ok' AND user_id=? AND created_at>? ORDER BY created_at DESC LIMIT 5", same.id, since).map((r) => iso(r.created_at)),
+      // Autres adresses refusées (masquées) : révèle une faute de frappe dans l'adresse saisie
+      autresAdressesEssayees: db.all("SELECT detail, COUNT(*) n, MAX(created_at) t FROM audit WHERE action='connexion.echec' AND detail!=? AND created_at>? GROUP BY detail ORDER BY t DESC LIMIT 10", login, since).map((r) => `${mask(r.detail)} ×${r.n} (dernier ${iso(r.t)}, ${r.detail.length} car., ${r.detail.length === login.length ? 'même longueur' : 'longueur différente'})`)
+    };
+  }
   log(`Diagnostic administrateur : ${JSON.stringify(d)}`);
   return d;
 }
