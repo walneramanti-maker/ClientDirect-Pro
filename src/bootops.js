@@ -116,3 +116,17 @@ export function syncAdminTotp(db, env = process.env, log = console.log) {
   log('Clé 2FA : base de production alignée sur ADMIN_TOTP_SECRET (identifiant et mot de passe inchangés)');
   return { aligne: true };
 }
+
+/** Relevé d'audit (lecture seule) : facturation, incidents ouverts, dépenses, prospection. Adresses masquées. */
+export function auditReport(db, log = console.log) {
+  const iso = (t) => (t ? new Date(t).toISOString().slice(0, 16) : null);
+  const facturation = db.all("SELECT t.id, t.slug, t.name, t.status, t.plan, t.source, t.example, t.created_at, t.stripe_customer, t.stripe_sub, t.current_period_end, u.email FROM tenants t LEFT JOIN users u ON u.id=t.owner_user_id WHERE t.status IN ('active','past_due','canceled','paused') OR t.stripe_customer IS NOT NULL OR t.stripe_sub IS NOT NULL OR EXISTS (SELECT 1 FROM invoices i WHERE i.tenant_id=t.id)")
+    .map((t) => ({ id: t.id, site: t.slug, nom: t.name, statut: t.status, formule: t.plan, origine: t.source, exemple: t.example, cree: iso(t.created_at), email: mask(t.email), client: t.stripe_customer, abonnement: t.stripe_sub, finPeriode: iso(t.current_period_end),
+      factures: db.all('SELECT stripe_invoice, amount_cents, status, paid_at FROM invoices WHERE tenant_id=?', t.id).map((i) => `${i.stripe_invoice} ${i.amount_cents / 100}€ ${i.status} ${iso(i.paid_at)}`) }));
+  log(`Audit facturation : ${JSON.stringify(facturation)}`);
+  const inc = db.all('SELECT id, kind, severity, count, message, first_at, last_at, tenant_id FROM incidents WHERE resolved_at IS NULL ORDER BY id');
+  for (let i = 0; i < inc.length; i += 8) log(`Audit incidents ${i + 1}-${Math.min(i + 8, inc.length)}/${inc.length} : ${JSON.stringify(inc.slice(i, i + 8).map((x) => ({ id: x.id, type: x.kind, gravite: x.severity, nb: x.count, premier: iso(x.first_at), dernier: iso(x.last_at), client: x.tenant_id, message: x.message.slice(0, 170) })))}`);
+  log(`Audit dépenses : ${JSON.stringify(db.all('SELECT label, amount_cents, month, category, recurring FROM expenses'))}`);
+  const meta = Object.fromEntries(db.all("SELECT k, v FROM meta WHERE k LIKE 'prospect%' OR k LIKE 'job.%' OR k LIKE 'national%' OR k LIKE 'enrich%'").map((r) => [r.k, /^\d{12,}$/.test(r.v) ? iso(Number(r.v)) : String(r.v).slice(0, 120)]));
+  log(`Audit prospection : ${JSON.stringify({ meta, prospects: db.one('SELECT COUNT(*) n, MAX(created_at) dernier FROM prospects').n, dernierAjout: iso(db.one('SELECT MAX(created_at) t FROM prospects').t), parJour: db.all("SELECT date(created_at/1000,'unixepoch') j, COUNT(*) n FROM prospects GROUP BY j ORDER BY j DESC LIMIT 5"), audits: db.all("SELECT action, detail, created_at FROM audit WHERE action LIKE 'prospection%' ORDER BY id DESC LIMIT 5").map((a) => `${iso(a.created_at)} ${a.action} ${a.detail.slice(0, 140)}`) })}`);
+}
