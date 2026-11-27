@@ -513,7 +513,7 @@ export function createApp(db) {
       counts: { active: count('active'), trial: count('trial') },
       mrr: db.all("SELECT plan FROM tenants WHERE status IN ('active','past_due')").reduce((s, r) => s + PLANS[r.plan].monthly, 0),
       revenueMonth: db.one("SELECT COALESCE(SUM(amount_cents),0) c FROM invoices WHERE status='paid' AND paid_at>=?", start).c / 100,
-      expensesMonth: expenses.reduce((s, e) => s + e.amount_cents, 0) / 100 + aiCost,
+      expensesMonth: expenses.reduce((s, e) => s + e.amount_cents, 0) / 100 + aiCost + (() => { const p = db.one("SELECT COALESCE(SUM(amount_cents),0) c, COUNT(*) n FROM invoices WHERE status='paid' AND paid_at>=?", start); return p.n ? (p.c / 100) * config.costs.stripePct + p.n * config.costs.stripeFixed : 0; })(),
       incidents: openIncidents(db),
       lastBackup: db.one("SELECT * FROM backups WHERE status='ok' ORDER BY id DESC LIMIT 1"),
       pendingOutbox: db.one("SELECT COUNT(*) n FROM outbox WHERE status='pending'").n,

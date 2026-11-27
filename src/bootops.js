@@ -130,3 +130,56 @@ export function auditReport(db, log = console.log) {
   const meta = Object.fromEntries(db.all("SELECT k, v FROM meta WHERE k LIKE 'prospect%' OR k LIKE 'job.%' OR k LIKE 'national%' OR k LIKE 'enrich%'").map((r) => [r.k, /^\d{12,}$/.test(r.v) ? iso(Number(r.v)) : String(r.v).slice(0, 120)]));
   log(`Audit prospection : ${JSON.stringify({ meta, prospects: db.one('SELECT COUNT(*) n, MAX(created_at) dernier FROM prospects').n, dernierAjout: iso(db.one('SELECT MAX(created_at) t FROM prospects').t), parJour: db.all("SELECT date(created_at/1000,'unixepoch') j, COUNT(*) n FROM prospects GROUP BY j ORDER BY j DESC LIMIT 5"), audits: db.all("SELECT action, detail, created_at FROM audit WHERE action LIKE 'prospection%' ORDER BY id DESC LIMIT 5").map((a) => `${iso(a.created_at)} ${a.action} ${a.detail.slice(0, 140)}`) })}`);
 }
+
+/**
+ * CLEAN_STRIPE_TEST_DATA=1 : retire les données de facturation issues du MODE TEST de Stripe, après vérification une par
+ * une auprès du compte Stripe RÉEL (clé live) : seules les factures et abonnements que Stripe déclare inexistants
+ * (« No such … ») sont retirés. Un vrai paiement n'est jamais touché. Le compte du client repasse en essai gratuit.
+ */
+export async function cleanStripeTestData(db, env = process.env, { stripeGet, liveKey, now = Date.now() } = {}, log = console.log) {
+  if (env.CLEAN_STRIPE_TEST_DATA !== '1') return null;
+  if (!liveKey || !stripeGet) { log('Nettoyage Stripe REFUSÉ : clé Stripe réelle (live) requise pour vérifier chaque élément'); return { refus: 'clé live absente' }; }
+  const missing = async (path) => { try { await stripeGet(path); return false; } catch (e) { if (/No such|resource_missing|404/.test(e.message)) return true; throw e; } };
+  const out = { facturesRetirees: [], comptesRepasseEnEssai: [], incidentsClos: 0, conserves: [] };
+  for (const inv of db.all('SELECT id, tenant_id, stripe_invoice, amount_cents FROM invoices WHERE stripe_invoice IS NOT NULL')) {
+    if (await missing(`invoices/${inv.stripe_invoice}`)) { db.run('DELETE FROM invoices WHERE id=?', inv.id); out.facturesRetirees.push(`${inv.stripe_invoice} (${inv.amount_cents / 100} €, compte ${inv.tenant_id})`); }
+    else out.conserves.push(inv.stripe_invoice);
+  }
+  for (const t of db.all("SELECT id, slug, status, stripe_customer, stripe_sub FROM tenants WHERE stripe_sub IS NOT NULL OR stripe_customer IS NOT NULL")) {
+    const subGone = t.stripe_sub ? await missing(`subscriptions/${t.stripe_sub}`) : true;
+    const cusGone = t.stripe_customer ? await missing(`customers/${t.stripe_customer}`) : true;
+    if (!subGone || !cusGone) { out.conserves.push(t.slug); continue; }
+    const toTrial = ['active', 'past_due'].includes(t.status);
+    db.run(`UPDATE tenants SET stripe_customer=NULL, stripe_sub=NULL, current_period_end=NULL${toTrial ? ", status='trial', trial_ends_at=?" : ''} WHERE id=?`, ...(toTrial ? [now + 14 * 864e5, t.id] : [t.id]));
+    out.comptesRepasseEnEssai.push(`${t.slug} (${t.status} → ${toTrial ? 'essai gratuit 14 jours' : t.status})`);
+  }
+  // Notifications Stripe reçues pendant les essais en mode test (aucune entreprise associée) : sans objet en production
+  out.incidentsClos = Number(db.run("UPDATE incidents SET resolved_at=? WHERE resolved_at IS NULL AND kind='billing' AND message LIKE 'Événement % sans entreprise associée' AND first_at<?", now, Date.parse('2026-11-27T00:00:00Z')).changes);
+  db.run("INSERT INTO audit(action,detail,created_at) VALUES('stripe.test.nettoye',?,?)", JSON.stringify(out), now);
+  log(`Nettoyage des données de test Stripe (vérifiées auprès du compte réel) : ${JSON.stringify(out)}`);
+  return out;
+}
+
+/**
+ * FIXED_COSTS : dépenses fixes réelles, enregistrées comme dépenses récurrentes (idempotent, par libellé).
+ * Format JSON : [{"label":"Hébergement Render","eur":6.70,"category":"technique"}]. Un montant modifié est mis à jour.
+ */
+export function syncFixedCosts(db, env = process.env, log = console.log, now = Date.now()) {
+  if (!env.FIXED_COSTS) return null;
+  let list; try { list = JSON.parse(env.FIXED_COSTS); } catch { log('FIXED_COSTS ignoré : JSON invalide'); return null; }
+  const month = new Date(now).toISOString().slice(0, 7); const out = [];
+  for (const c of Array.isArray(list) ? list : []) {
+    const label = String(c.label || '').slice(0, 80); const cents = Math.round(Number(c.eur) * 100);
+    if (!label || !(cents >= 0)) continue;
+    const ex = db.one('SELECT id, amount_cents FROM expenses WHERE label=? AND recurring=1', label);
+    if (!ex) { db.run('INSERT INTO expenses(label,amount_cents,month,category,recurring,created_at) VALUES(?,?,?,?,1,?)', label, cents, c.since || month, ['technique', 'commercial', 'administratif'].includes(c.category) ? c.category : 'technique', now); out.push(`${label} ajoutée`); }
+    else if (ex.amount_cents !== cents) { db.run('UPDATE expenses SET amount_cents=? WHERE id=?', cents, ex.id); out.push(`${label} mise à jour`); }
+  }
+  if (out.length) log(`Dépenses fixes : ${out.join(' ; ')}`);
+  return out;
+}
+
+/** Clôture des incidents passagers qui ne se reproduisent plus (réseau, enrichissement, prospection) depuis 24 h. */
+export function autoResolveIncidents(db, now = Date.now()) {
+  return Number(db.run("UPDATE incidents SET resolved_at=? WHERE resolved_at IS NULL AND kind IN ('enrichissement','prospection','prospection_reseau','netprobe') AND severity!='critical' AND last_at<?", now, now - 864e5).changes);
+}

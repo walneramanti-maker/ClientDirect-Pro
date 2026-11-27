@@ -93,7 +93,14 @@ export async function runJobs(db, now = Date.now()) {
     const addedToday = db.one("SELECT COUNT(*) n FROM prospects WHERE created_at > ?", now - 20 * 36e5).n;
     // Dernier passage entièrement en échec (API injoignable) : on attend 6 h au lieu de réessayer toutes les heures
     let lastAllFailed = false; try { const d = JSON.parse(lastP?.detail || '{}'); lastAllFailed = d.calls > 0 && !d.ok && d.failed >= d.calls; } catch { lastAllFailed = false; }
-    const cooling = lastAllFailed && now - lastP.created_at < 6 * 36e5;
+    // Après une panne de l'API : petite sonde toutes les 30 min (au lieu d'attendre 6 h) ; reprise dès qu'elle répond
+    let cooling = lastAllFailed && now - lastP.created_at < 6 * 36e5;
+    if (cooling && now - Math.max(lastP.created_at, Number(db.one("SELECT v FROM meta WHERE k='prospect_probe_at'")?.v || 0)) > 30 * 60e3) {
+      db.run("INSERT INTO meta(k,v) VALUES('prospect_probe_at',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(now));
+      const { searchSirene } = await import('./prospect.js');
+      cooling = !(await searchSirene({ tpl: 'garage', departement: '973', page: 1 }).then(() => true).catch(() => false));
+      if (!cooling) console.log('Prospection : API Recherche d’entreprises de nouveau joignable, reprise immédiate');
+    }
     const resume = !cooling && lastP && now - lastP.created_at > 60 * 60e3 && lastAdded < prospectDaily(db) && addedToday < prospectDaily(db);
     if (prospectDaily(db) > 0 && !cooling && (!v2 || resume || now - lastRun(db, 'job.prospect') > 20 * 36e5)) r.prospect = background('prospect', () => runNationalCampaign(db, { now }), 'Prospection nationale');
     const { enrichEnabled, enrichBatch } = await import('./enrich.js');
@@ -121,6 +128,8 @@ export async function runJobs(db, now = Date.now()) {
   // 14 ter. Disque presque plein : incident (alerte e-mail à l'administrateur quand les e-mails sont configurés)
   { const { diskUsage } = await import('./disk.js'); const d = diskUsage(); r.disque = d && d.utilisePct;
     if (d?.alerte) recordIncident(db, { kind: 'disk', severity: d.utilisePct >= 95 ? 'critical' : 'warning', message: `Disque de la base rempli à ${d.utilisePct} % (${d.libreMo} Mo libres) : augmenter la taille du disque dans Render` }); }
+  // 14 quater. Incidents passagers résolus d'eux-mêmes (plus aucune répétition depuis 24 h) : clôturés automatiquement
+  { const { autoResolveIncidents } = await import('./bootops.js'); r.incidentsClos = autoResolveIncidents(db, now); }
   // 15. Battement de cœur : prouve que les tâches automatiques tournent
   heartbeat.at = now;
   return r;

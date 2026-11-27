@@ -38,3 +38,35 @@ test('clé 2FA : contrôle du format Base32 pour Google Authenticator, alignemen
   assert.deepEqual(syncAdminTotp(db, { ADMIN_TOTP_SYNC: '1', ADMIN_LOGIN: 'sync@cdp.fr', ADMIN_TOTP_SECRET: good }, () => {}), { inchange: true });
   assert.ok(S.totpOk(u.totp_secret, S.totpCode(good)), 'le code généré par l’application avec la clé de Render est accepté');
 });
+
+test('nettoyage Stripe : seules les données inexistantes sur le compte réel sont retirées ; dépenses fixes ; incidents passagers clos', async () => {
+  const B = await import('../src/bootops.js'); const { db } = app; const now = Date.now();
+  db.run("INSERT INTO tenants(slug,name,tpl,metier,status,plan,stripe_customer,stripe_sub,created_at) VALUES('faux','Faux','garage','G','active','pro','cus_TEST','sub_TEST',?)", now);
+  db.run("INSERT INTO tenants(slug,name,tpl,metier,status,plan,stripe_customer,stripe_sub,created_at) VALUES('vrai','Vrai','garage','G','active','pro','cus_LIVE','sub_LIVE',?)", now);
+  const faux = db.one("SELECT id FROM tenants WHERE slug='faux'").id; const vrai = db.one("SELECT id FROM tenants WHERE slug='vrai'").id;
+  db.run("INSERT INTO invoices(tenant_id,stripe_invoice,amount_cents,status,paid_at,created_at) VALUES(?,'in_TEST',54800,'paid',?,?)", faux, now, now);
+  db.run("INSERT INTO invoices(tenant_id,stripe_invoice,amount_cents,status,paid_at,created_at) VALUES(?,'in_LIVE',14900,'paid',?,?)", vrai, now, now);
+  db.run("INSERT INTO incidents(fingerprint,kind,severity,message,first_at,last_at) VALUES('f1','billing','warning','Événement invoice.paid sans entreprise associée',?,?)", Date.parse('2026-11-25T23:41:00Z'), Date.parse('2026-11-25T23:41:00Z'));
+  const stripeGet = async (p) => { if (/TEST/.test(p)) throw new Error('Stripe 404: No such object'); return {}; };
+  assert.equal(await B.cleanStripeTestData(db, {}, { stripeGet, liveKey: true }, () => {}), null, 'inactif sans CLEAN_STRIPE_TEST_DATA=1');
+  assert.equal((await B.cleanStripeTestData(db, { CLEAN_STRIPE_TEST_DATA: '1' }, { stripeGet, liveKey: false }, () => {})).refus, 'clé live absente');
+  const r = await B.cleanStripeTestData(db, { CLEAN_STRIPE_TEST_DATA: '1' }, { stripeGet, liveKey: true, now }, () => {});
+  assert.equal(r.facturesRetirees.length, 1); assert.equal(r.comptesRepasseEnEssai.length, 1); assert.equal(r.incidentsClos, 1);
+  assert.equal(db.one("SELECT COUNT(*) n FROM invoices WHERE stripe_invoice='in_LIVE'").n, 1, 'vraie facture conservée');
+  assert.equal(db.one("SELECT status, stripe_sub FROM tenants WHERE slug='vrai'").status, 'active', 'vrai client intact');
+  const f = db.one("SELECT * FROM tenants WHERE slug='faux'"); assert.equal(f.status, 'trial'); assert.equal(f.stripe_sub, null); assert.ok(f.trial_ends_at > now + 13 * 864e5);
+  await assert.rejects(B.cleanStripeTestData(db, { CLEAN_STRIPE_TEST_DATA: '1' }, { stripeGet: async () => { throw new Error('Stripe 500: panne'); }, liveKey: true }, () => {}), /panne/, 'en cas de doute (erreur Stripe), rien n’est retiré');
+  assert.equal(db.one("SELECT COUNT(*) n FROM invoices WHERE stripe_invoice='in_LIVE'").n, 1);
+  // Dépenses fixes réelles, idempotentes
+  const env = { FIXED_COSTS: JSON.stringify([{ label: 'Hébergement Render', eur: 6.7 }]) };
+  B.syncFixedCosts(db, env, () => {}); B.syncFixedCosts(db, env, () => {});
+  assert.equal(db.one("SELECT COUNT(*) n, SUM(amount_cents) c FROM expenses WHERE label='Hébergement Render' AND recurring=1").c, 670);
+  B.syncFixedCosts(db, { FIXED_COSTS: JSON.stringify([{ label: 'Hébergement Render', eur: 7 }]) }, () => {});
+  assert.equal(db.one("SELECT amount_cents c FROM expenses WHERE label='Hébergement Render'").c, 700);
+  // Incidents passagers : clos après 24 h sans répétition ; les critiques restent ouverts
+  db.run("INSERT INTO incidents(fingerprint,kind,severity,message,first_at,last_at) VALUES('f2','enrichissement','info','fetch failed',?,?)", now - 3 * 864e5, now - 2 * 864e5);
+  db.run("INSERT INTO incidents(fingerprint,kind,severity,message,first_at,last_at) VALUES('f3','prospection','info','fetch failed',?,?)", now - 3600e3, now - 3600e3);
+  db.run("INSERT INTO incidents(fingerprint,kind,severity,message,first_at,last_at) VALUES('f4','backup','critical','sauvegarde',?,?)", now - 3 * 864e5, now - 2 * 864e5);
+  assert.equal(B.autoResolveIncidents(db, now), 1);
+  assert.equal(db.one("SELECT resolved_at FROM incidents WHERE fingerprint='f4'").resolved_at, null);
+});

@@ -204,6 +204,8 @@ export async function runNationalCampaign(db, { quota = prospectDaily(db), pause
     if (pause) await new Promise((ok) => setTimeout(ok, pause));
   }
   db.run("INSERT INTO meta(k,v) VALUES('prospect_cursor',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(cursor));
+  // Recherche rétablie : les incidents de panne réseau de la prospection sont clôturés
+  if ((r.ok || 0) > 0 && !r.failed) db.run("UPDATE incidents SET resolved_at=? WHERE resolved_at IS NULL AND kind IN ('prospection','prospection_reseau') AND (message LIKE '%fetch failed%' OR message LIKE '%injoignable%')", now);
   db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.prospect',?,?)", JSON.stringify({ added: r.added, calls: r.calls, ok: r.ok || 0, failed: r.failed || 0 }), now);
   refreshPotentials(db);
   return { ...r, cursor, coverage: Math.min(1, cursor / U) };

@@ -131,7 +131,7 @@ test('avis des professionnels et page Bilan', async () => {
   const b2 = await admin.get('/admin/bilan'); assert.match(b2.text, /Bilan du 01\/12\/2026 au 30\/12\/2026/); assert.match(b2.text, /se lit le <b>31\/12\/2026/);
 });
 
-test('prospection : panne réseau = pages non perdues (curseur immobile), arrêt après 3 échecs, pause de 6 h, remise à zéro ponctuelle', async () => {
+test('prospection : panne réseau = pages non perdues (curseur immobile), arrêt après 3 échecs, sonde toutes les 30 min, reprise au retour de l’API, remise à zéro ponctuelle', async () => {
   const { runJobs } = await import('../src/jobs.js');
   const cur = () => Number(db.one("SELECT v FROM meta WHERE k='prospect_cursor'")?.v || 0);
   const before = cur();
@@ -145,8 +145,15 @@ test('prospection : panne réseau = pages non perdues (curseur immobile), arrêt
   app.net.setFetch(async (url) => { if (String(url).includes('/search')) calls++; return jsonResponse({ results: [] }); });
   db.run("INSERT INTO meta(k,v) VALUES('prospect_order','v2') ON CONFLICT(k) DO UPDATE SET v='v2'");
   db.run("INSERT INTO meta(k,v) VALUES('prospect_daily','50') ON CONFLICT(k) DO UPDATE SET v='50'");
-  await runJobs(db, now + 2 * 36e5); await new Promise((ok) => setTimeout(ok, 50)); assert.equal(calls, 0, 'en pause');
-  await runJobs(db, now + 7 * 36e5); await new Promise((ok) => setTimeout(ok, 200)); assert.ok(calls > 0, 'reprise après 6 h');
+  await runJobs(db, now + 10 * 60e3); await new Promise((ok) => setTimeout(ok, 50)); assert.equal(calls, 0, 'en pause : aucune requête avant 30 min');
+  // API toujours en panne : une seule petite sonde, pas de campagne
+  app.net.setFetch(async (url) => { if (String(url).includes('/search')) calls++; throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }); });
+  await runJobs(db, now + 40 * 60e3); await new Promise((ok) => setTimeout(ok, 50)); assert.equal(calls, 1, 'une sonde, pas de campagne');
+  await runJobs(db, now + 50 * 60e3); await new Promise((ok) => setTimeout(ok, 50)); assert.equal(calls, 1, 'sonde espacée de 30 min');
+  // API rétablie : reprise immédiate à la sonde suivante, sans attendre 6 h ; incidents réseau clôturés
+  calls = 0; app.net.setFetch(async (url) => { if (String(url).includes('/search')) calls++; return jsonResponse({ results: [] }); });
+  await runJobs(db, now + 75 * 60e3); await new Promise((ok) => setTimeout(ok, 200)); assert.ok(calls > 1, 'reprise dès le retour de l’API');
+  assert.equal(db.one("SELECT COUNT(*) n FROM incidents WHERE kind='prospection_reseau' AND resolved_at IS NULL").n, 0, 'incident réseau clôturé');
   // Remise à zéro du curseur, une seule fois par valeur
   process.env.PROSPECT_CURSOR_RESET = '2';
   try { await P.runNationalCampaign(db, { quota: 1, maxCalls: 1 }); assert.equal(cur(), 3); await P.runNationalCampaign(db, { quota: 1, maxCalls: 1 }); assert.equal(cur(), 4, 'pas réappliquée'); }
