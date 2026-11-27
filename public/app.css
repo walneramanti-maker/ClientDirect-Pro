@@ -507,3 +507,4 @@ body.typing .mbar{display:none}
   .admbody .plans{gap:8px}.admbody .pl{padding:10px}.admbody .pl b{font-size:.95rem}.admbody .pl span{font-size:.78rem}
 }
 @media (pointer:coarse) and (min-width:700px){.mk nav{align-items:center}.mk nav > a:not(.btn){display:inline-flex;align-items:center;min-height:44px}}
+em.soon{display:inline-block;font-style:normal;font-size:.72rem;font-weight:800;letter-spacing:.02em;text-transform:uppercase;color:#8a5a00;background:#fff4d6;border:1px solid #f3d58a;border-radius:999px;padding:1px 8px;margin-left:6px;vertical-align:middle;white-space:nowrap}

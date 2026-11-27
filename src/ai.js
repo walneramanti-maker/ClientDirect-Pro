@@ -92,6 +92,11 @@ export async function answer(db, t, convId, question) {
   if (!aiAvailable(t)) return done(ruleAnswer(db, t, question), 'simple');
   const m = month(); const u = db.one('SELECT calls FROM ai_usage WHERE tenant_id=? AND month=?', t.id, m);
   if (u && u.calls >= config.aiMonthlyMessagesPerTenant) return done(ruleAnswer(db, t, question), 'simple');
+  // Plafond de dépense mensuel, toutes entreprises confondues : au-delà, réponses simples et alerte (une fois par mois)
+  if (aiSpentEur(db, m) >= config.aiMonthlyBudgetEur) {
+    if (!db.one("SELECT 1 FROM meta WHERE k=?", `ai_budget_alert_${m}`)) { db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', `ai_budget_alert_${m}`, String(Date.now())); recordIncident(db, { kind: 'ai', severity: 'critical', message: `Plafond mensuel de l'assistant IA atteint (${config.aiMonthlyBudgetEur} €) : réponses simples jusqu'au mois prochain. Relevez AI_MONTHLY_BUDGET_EUR pour continuer.` }); }
+    return done(ruleAnswer(db, t, question), 'simple');
+  }
 
   const hist = db.all('SELECT role, body FROM chat_logs WHERE tenant_id=? AND conv=? ORDER BY id DESC LIMIT 12', t.id, convId).reverse();
   while (hist.length && hist[0].role !== 'user') hist.shift();
@@ -102,11 +107,14 @@ export async function answer(db, t, convId, question) {
       calls++;
       const res = await net.fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST', headers: { 'x-api-key': config.anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: config.aiModel, max_tokens: 400, system: SYSTEM(t), tools: tl.map((x) => x.def), messages })
+        // Claude Haiku 5.5 : réflexion adaptative toujours active ; effort « low » pour des réponses courtes et peu coûteuses.
+        // max_tokens couvre la réflexion et la réponse (1 024 jetons au plus = 0,0005 $ maximum en sortie par appel).
+        body: JSON.stringify({ model: config.aiModel, max_tokens: 1024, output_config: { effort: 'low' }, system: SYSTEM(t), tools: tl.map((x) => x.def), messages })
       });
       if (!res.ok) throw new Error(`API IA ${res.status}: ${(await res.text()).slice(0, 160)}`);
       const j = await res.json();
       inTok += j.usage?.input_tokens || 0; outTok += j.usage?.output_tokens || 0;
+      if (j.stop_reason === 'refusal') return done(ruleAnswer(db, t, question), 'simple');
       const uses = (j.content || []).filter((c) => c.type === 'tool_use');
       if (j.stop_reason !== 'tool_use' || !uses.length) {
         const text = (j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim() || ruleAnswer(db, t, question);
@@ -124,4 +132,6 @@ export async function answer(db, t, convId, question) {
       ON CONFLICT(tenant_id,month) DO UPDATE SET calls=calls+1, in_tokens=in_tokens+excluded.in_tokens, out_tokens=out_tokens+excluded.out_tokens`, t.id, m, inTok, outTok);
   }
 }
+/** Dépense IA du mois en euros, toutes entreprises confondues. */
+export const aiSpentEur = (db, m = month()) => { const r = db.one('SELECT COALESCE(SUM(in_tokens),0) i, COALESCE(SUM(out_tokens),0) o FROM ai_usage WHERE month=?', m); return aiCostEur(r.i, r.o); };
 export const aiCostEur = (inTok, outTok) => ((inTok / 1e6) * config.aiPriceInPerMTok + (outTok / 1e6) * config.aiPriceOutPerMTok) * config.usdToEur;

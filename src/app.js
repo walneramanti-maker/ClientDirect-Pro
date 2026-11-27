@@ -18,7 +18,7 @@ import { hashPassword, passwordProblem, createSession, readSession, destroySessi
 import { createTenant, loadTenant, siteState, updateSettings, userTenants } from './tenants.js';
 import { freeSlots, openDays, book, createQuote, setAppointmentStatus, cancelByCustomer } from './booking.js';
 import { notifyAppointment, enqueue, emit, sampleEmails, renderEmail, esc, emailsSentToday } from './notify.js';
-import { answer, aiAvailable, ruleAnswer, aiCostEur } from './ai.js';
+import { answer, aiAvailable, ruleAnswer, aiCostEur, aiSpentEur } from './ai.js';
 import { billingConfigured, createCheckout, createPortal, verifyStripeSignature, handleStripeEvent, useDb, isTestKey } from './billing.js';
 import { safeSearch, importProspects, prepareDemo, outreachMessage, demoTenantByToken, recordDemoView, prospectStats, PIPELINE, runNationalCampaign, campaignStatus, demoTokenFor, displayName } from './prospect.js';
 import { DEPARTEMENTS } from './france.js';
@@ -697,6 +697,35 @@ export function createApp(db) {
       } catch (e) { msg = `Maintenance activée, mais la sauvegarde a échoué : ${String(e.message).slice(0, 160)}. NE PAS migrer.`; }
     } else { setMaintenance(db, false); msg = 'Maintenance désactivée : les clients peuvent de nouveau écrire.'; }
     audit(db, { action: 'admin.maintenance', detail: msg.slice(0, 200), ip: c.ip });
+    redirect(c.res, '/admin/pret?msg=' + encodeURIComponent(msg));
+  });
+  // Tests réels déclenchés par l'administrateur : une question à l'assistant IA, un WhatsApp vers son propre numéro
+  on('POST', '/admin/test-ia', async (c) => {
+    requireAdmin(c); checkCsrf(c); limit(c, 'test-ia', 10, 3600e3);
+    let msg;
+    if (!config.anthropicKey) msg = 'Assistant IA non activé : ANTHROPIC_API_KEY absente dans Render.';
+    else {
+      const tn = exampleTenant(db, 'garage', 'fr'); const before = aiSpentEur(db);
+      const r = await answer(db, tn, `test-admin-${Date.now()}`, clampStr(c.form.q, 200) || 'Bonjour, vous ouvrez à quelle heure ?');
+      const cost = aiSpentEur(db) - before;
+      msg = r.mode === 'ia' ? `Assistant IA OK (${config.aiModel}, ${cost.toFixed(4)} €) : « ${r.text.slice(0, 300)} »` : `Échec : réponse en mode simple (voir les incidents) : « ${r.text.slice(0, 200)} »`;
+    }
+    audit(db, { action: 'admin.test_ia', detail: msg.slice(0, 300), ip: c.ip });
+    redirect(c.res, '/admin/pret?msg=' + encodeURIComponent(msg));
+  });
+  on('POST', '/admin/test-whatsapp', async (c) => {
+    requireAdmin(c); checkCsrf(c); limit(c, 'test-wa', 5, 3600e3);
+    const to = toE164(c.form.phone || '', '594');
+    let msg;
+    if (!config.waToken || !config.waPhoneId) msg = 'WhatsApp non activé : WHATSAPP_TOKEN et WHATSAPP_PHONE_ID absents dans Render.';
+    else if (!to) msg = 'Numéro invalide : indiquez-le au format international (+594…, +33…).';
+    else {
+      const { sendWhatsApp, WA } = await import('./notify.js');
+      const tpl = WA.appt_confirmed({ lang: 'fr', name: 'Test', tenant: 'ClientDirect Pro', service: 'Rendez-vous de test', when: 'aujourd’hui · test' });
+      try { const r = await sendWhatsApp(to, tpl); msg = r.ok ? `WhatsApp envoyé à +${to} (modèle ${tpl.name}). Vérifiez votre téléphone.` : `Non envoyé : ${r.skipped}`; }
+      catch (e) { msg = `Échec WhatsApp : ${String(e.message).slice(0, 220)}`; }
+    }
+    audit(db, { action: 'admin.test_whatsapp', detail: msg.slice(0, 300), ip: c.ip });
     redirect(c.res, '/admin/pret?msg=' + encodeURIComponent(msg));
   });
   on('POST', '/admin/test-email', async (c) => {

@@ -29,6 +29,9 @@ export const config = {
   aiPriceInPerMTok: num(env.AI_PRICE_IN, 0.10), // USD, prompts < 100k tokens
   aiPriceOutPerMTok: num(env.AI_PRICE_OUT, 0.50),
   aiMonthlyMessagesPerTenant: num(env.AI_MONTHLY_CAP, 1500),
+  // Plafonds de dépense mensuels, toutes entreprises confondues (en euros). Une fois atteints : réponses simples / e-mail seul, et alerte à l'administrateur.
+  aiMonthlyBudgetEur: num(env.AI_MONTHLY_BUDGET_EUR, 10),
+  waMonthlyBudgetEur: num(env.WA_MONTHLY_BUDGET_EUR, 15),
   usdToEur: num(env.USD_EUR, 0.92),
   // Paiement (Stripe)
   stripeKey: env.STRIPE_SECRET_KEY || '',
@@ -118,7 +121,7 @@ export const config = {
   // Coûts unitaires pour calculer la rentabilité réelle de chaque client (en euros)
   costs: {
     email: num(env.COST_EMAIL, 0.0015), // Brevo Starter ≈ 7 €/5 000 e-mails ; 0 sur l'offre gratuite
-    waByCc: { '594': num(env.COST_WA_594, 0.0104), '33': num(env.COST_WA_33, 0.0276), default: num(env.COST_WA_DEFAULT, 0.0276) },
+    waByCc: { '594': num(env.COST_WA_594, 0.0104), '33': num(env.COST_WA_33, 0.0248), default: num(env.COST_WA_DEFAULT, 0.0276) },
     stripePct: num(env.COST_STRIPE_PCT, 0.022), // 1,5 % carte + 0,7 % Billing
     stripeFixed: num(env.COST_STRIPE_FIXED, 0.25),
     domain: num(env.COST_DOMAIN, 0.23) // domaine personnalisé au-delà des 2 inclus sur Render (0,25 $)
