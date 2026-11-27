@@ -9,7 +9,8 @@ export const OUTCOMES = {
   rappeler: { label: 'À rappeler', status: 'contacted' },
   injoignable: { label: 'Injoignable / messagerie', status: 'contacted' },
   refus: { label: 'Pas intéressé', status: 'lost' },
-  opposition: { label: 'Ne veut plus être contacté', status: 'optout' }
+  opposition: { label: 'Ne veut plus être contacté', status: 'optout' },
+  reponse: { label: 'A répondu par e-mail (à traiter)', status: 'contacted' }
 };
 export const CHANNELS = { appel: 'Appel', sms: 'SMS', email: 'E-mail', visite: 'Visite', autre: 'Autre' };
 
@@ -22,6 +23,8 @@ export function logContact(db, prospectId, { outcome, channel = 'appel', note = 
   const status = p.status === 'converted' ? 'converted' : o.status;
   if (status === 'optout') applyOptout(db, p.id, 'opposition exprimée lors d’un contact');
   else db.run('UPDATE prospects SET status=?, last_contact_at=? WHERE id=?', status, now, p.id);
+  // Un échange avec la personne (hors « injoignable ») : la suite est humaine, les relances automatiques s'arrêtent
+  if (outcome !== 'injoignable') { db.run('UPDATE prospects SET replied_at=COALESCE(replied_at, ?) WHERE id=?', now, p.id); db.run("UPDATE campaign_items SET next_at=NULL WHERE prospect_id=? AND status='sent'", p.id); }
   return status;
 }
 

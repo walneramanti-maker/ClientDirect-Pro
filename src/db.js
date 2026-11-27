@@ -97,7 +97,16 @@ const MIGRATIONS = [
   `CREATE INDEX IF NOT EXISTS contacts_at ON contacts(created_at)`,
   `CREATE TABLE IF NOT EXISTS suppressions(kind TEXT NOT NULL, hash TEXT NOT NULL, source TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, PRIMARY KEY(kind, hash))`,
   `ALTER TABLE outbox ADD COLUMN dedup_key TEXT`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS outbox_dedup ON outbox(dedup_key) WHERE dedup_key IS NOT NULL`
+  `CREATE UNIQUE INDEX IF NOT EXISTS outbox_dedup ON outbox(dedup_key) WHERE dedup_key IS NOT NULL`,
+  // Séquence de prospection : étape envoyée, prochaine relance, objet ; journal de chaque envoi ; réponse reçue
+  `ALTER TABLE campaign_items ADD COLUMN step INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE campaign_items ADD COLUMN next_at INTEGER`,
+  `ALTER TABLE campaign_items ADD COLUMN subject TEXT`,
+  `ALTER TABLE prospects ADD COLUMN replied_at INTEGER`,
+  `ALTER TABLE prospects ADD COLUMN bounced_at INTEGER`,
+  `CREATE TABLE IF NOT EXISTS campaign_sends(id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, step INTEGER NOT NULL, sent_at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS campaign_sends_at ON campaign_sends(sent_at)`,
+  `CREATE INDEX IF NOT EXISTS campaign_items_due ON campaign_items(status, next_at)`
 ];
 
 export function openDb(file, { appEnv = null } = {}) {

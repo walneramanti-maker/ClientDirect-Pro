@@ -75,8 +75,11 @@ export function importProspects(db, list) {
 /** Prépare un site de démonstration au nom de l'entreprise prospectée (non publié). */
 /** Nom commercial lisible : l'enseigne entre parenthèses plutôt que le nom de la personne (entreprise individuelle). */
 export function displayName(raw) {
-  const m = /\(([^()]+)\)\s*$/.exec(raw || ''); let s = (m ? m[1] : raw || '').replace(/^(SAS|SARL|SASU|EURL)\s+/i, '').trim();
-  if (s === s.toUpperCase()) s = s.toLowerCase().replace(/(^|[\s'’\-&.(])([a-zà-ÿ])/g, (x, a, b) => a + b.toUpperCase()).replace(/\b(Slm|Sas|Sarl|Snc)\b/g, (x) => x.toUpperCase());
+  const m = /\(([^()]+)\)\s*$/.exec(raw || '');
+  // « NOM (ENSEIGNE) » : l'enseigne est le nom connu des clients ; mais « NOM (SIGLE) » garde le nom complet, plus parlant
+  const sigle = m && /^[A-Z0-9&.]{2,5}$/.test(m[1].trim());
+  let s = (m && !sigle ? m[1] : m ? raw.slice(0, m.index) : raw || '').replace(/^(SAS|SARL|SASU|EURL)\s+/i, '').trim();
+  if (s === s.toUpperCase()) s = s.toLowerCase().replace(/(^|[\s'’\-&.(])([a-zà-ÿ])/g, (x, a, b) => a + b.toUpperCase()).replace(/\b(Slm|Sas|Sarl|Snc)\b/g, (x) => x.toUpperCase()).replace(/(?<=\s)(De|Du|Des|La|Le|Les|Et|Aux?|En)(?=\s)/g, (x) => x.toLowerCase());
   return s;
 }
 /** Jeton de démonstration stable (le même lien survit à un redémarrage du serveur). */
@@ -93,11 +96,13 @@ export function prepareDemo(db, prospectId, { stable = false } = {}) {
 
 /** Message de prise de contact, prêt à copier (WhatsApp, e-mail, SMS). */
 /** Message de prise de contact B2B : identifie l'expéditeur, l'origine des données et donne un moyen simple de s'opposer. */
+import { sequenceEmail, sequenceSms } from './outreach.js';
 export const PLAN_LINE = 'Trois formules, prix hors taxes : Essentiel, 79 €/mois + 199 € de mise en service, pour votre site, vos demandes de devis et WhatsApp ; Pro, 149 €/mois + 399 € de mise en service, qui ajoute la prise de rendez-vous en ligne, les rappels automatiques et les statistiques ; Premium, 249 €/mois + 599 € de mise en service, qui ajoute un assistant qui répond à vos clients 24 h/24. Essai gratuit 14 jours sans carte bancaire, puis abonnement avec engagement de 12 mois ; la mise en service est payée une seule fois. L’exemple montre toutes les fonctions (Premium).';
-export function outreachMessage(p, demoUrl, stopUrl, { channel = 'email' } = {}) {
+export function outreachMessage(p, demoUrl, stopUrl, { channel = 'email', step = 0 } = {}) {
   const name = displayName(p.name);
-  if (channel === 'sms') return `Bonjour, Walner de ClientDirect Pro. Exemple de site gratuit préparé pour ${name} : ${demoUrl} – démo non officielle. Dès 79 € HT/mois + mise en service, essai 14 j sans carte. Plus de message : STOP ou ${stopUrl}`;
-  return `Bonjour,\n\nJe suis ${config.legal.owner}, fondateur de ClientDirect Pro. J'ai préparé gratuitement un exemple de site pour ${name} : vos clients y voient vos prestations, vous demandent un devis et vous écrivent sur WhatsApp, à toute heure.\n\nC'est une démonstration non officielle, accessible uniquement par ce lien personnel et non référencée sur les moteurs de recherche : ${demoUrl}\n\n${PLAN_LINE}\n\nSi l'exemple vous plaît, je vous le présente en 10 minutes, par téléphone ou en visio.\n\n${config.legal.owner} – ClientDirect Pro (${config.legal.name}, SIRET ${config.legal.siret})\n\nVos coordonnées professionnelles proviennent du registre public des entreprises (INSEE) et de votre fiche d'établissement publique. Elles servent uniquement à vous présenter ce service et sont conservées au plus 36 mois sans réponse. Vous pouvez y accéder, les faire corriger ou supprimer en répondant à ce message. Pour ne plus être contacté et supprimer la démo : ${stopUrl} (ou répondez STOP).`;
+  if (channel === 'sms') return sequenceSms(p, { name, demoUrl, stopUrl });
+  const token = String(demoUrl).split('/demo/')[1] || '';
+  return sequenceEmail(p, { name, demoUrl, token, stopUrl, step }).text;
 }
 
 export function demoTenantByToken(db, token) {

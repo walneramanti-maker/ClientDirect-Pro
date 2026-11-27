@@ -106,10 +106,18 @@ export async function runJobs(db, now = Date.now()) {
   }
   // 14 bis. Campagnes préparées en brouillon chaque jour (jamais validées ni envoyées automatiquement)
   // … et immédiatement si l'adresse du site a changé (liens de démonstration à jour, ex. passage au nom de domaine)
-  const staleDraft = db.one("SELECT 1 FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id WHERE c.status='draft' AND c.name LIKE 'Préparée automatiquement%' AND i.message LIKE '%/demo/%' AND i.message NOT LIKE ? LIMIT 1", `%${config.baseUrl}/demo/%`);
+  const staleDraft = db.one("SELECT 1 FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id WHERE c.status='draft' AND c.name LIKE 'Préparée automatiquement%' AND ((i.message LIKE '%/demo/%' AND i.message NOT LIKE ?) OR (c.channel='email' AND i.subject IS NULL)) LIMIT 1", `%${config.baseUrl}/demo/%`)
+    // … ou si aucun brouillon e-mail n'existe encore au format personnalisé (objet par métier)
+    || (!db.one("SELECT 1 FROM meta WHERE k='drafts_v2'") && (db.run("INSERT OR IGNORE INTO meta(k,v) VALUES('drafts_v2','1')"), true));
   if (staleDraft || now - lastRun(db, 'job.drafts') > 20 * 36e5) { const { prepareDrafts } = await import('./campaigns.js'); r.drafts = prepareDrafts(db, now); mark(db, 'job.drafts', now); console.log('Campagnes préparées (brouillons, rien n’est envoyé) :', JSON.stringify(r.drafts)); }
   // 14. Campagnes e-mail validées : un envoi espacé par passage, seulement si l'envoi a été autorisé (CAMPAIGN_SENDING=on)
-  { const { sendNext } = await import('./campaigns.js'); r.campaign = await sendNext(db, { now }).catch((e) => ({ error: e.message })); }
+  // 14 a. Réponses aux campagnes (boîte contact@, lecture seule), toutes les 10 minutes : STOP, refus, rebonds, relances arrêtées
+  if (now - lastRun(db, 'job.replies') > 10 * 60e3) {
+    const { checkReplies, imapReady } = await import('./imap.js');
+    if (imapReady()) { r.replies = await checkReplies(db, { now }).catch((e) => { recordIncident(db, { kind: 'campagne', severity: 'warning', message: `Lecture des réponses impossible : ${String(e.message).slice(0, 140)}` }); return { error: e.message }; }); mark(db, 'job.replies', now); }
+  }
+  // Les réponses sont lues AVANT tout envoi : un STOP reçu n'est jamais suivi d'une relance
+  { const { sendNext } = await import('./campaigns.js'); const { imapReady } = await import('./imap.js'); r.campaign = r.replies?.error || (config.campaignSending && !imapReady()) ? { skipped: r.replies?.error ? 'réponses illisibles : envoi suspendu' : 'boîte de réception non lue : envoi suspendu' } : await sendNext(db, { now }).catch((e) => ({ error: e.message })); }
   // 14 ter. Disque presque plein : incident (alerte e-mail à l'administrateur quand les e-mails sont configurés)
   { const { diskUsage } = await import('./disk.js'); const d = diskUsage(); r.disque = d && d.utilisePct;
     if (d?.alerte) recordIncident(db, { kind: 'disk', severity: d.utilisePct >= 95 ? 'critical' : 'warning', message: `Disque de la base rempli à ${d.utilisePct} % (${d.libreMo} Mo libres) : augmenter la taille du disque dans Render` }); }

@@ -28,6 +28,7 @@ const MAIL = {
   renewal_reminder: (p) => ({ subject: tr('Votre engagement se renouvelle le {d}', { d: p.renewal }), text: `${tr('Bonjour,')}\n\n${tr('La période d’engagement de 12 mois de {t} se termine le {d}. Sans action de votre part, l’abonnement se poursuit aux mêmes conditions.', { t: p.tenant, d: p.renewal })}\n${tr('Gérer votre abonnement : {u}', { u: p.billingUrl })}` }),
   site_paused: (p) => ({ subject: tr('Votre site est en pause'), text: `${tr('Bonjour,')}\n\n${tr('Le paiement de l’abonnement de {t} n’a pas été régularisé : le site est en pause. Il revient en ligne dès le paiement : {u}', { t: p.tenant, u: p.billingUrl })}` }),
   admin_new_signup: (p) => ({ subject: `[ClientDirect Pro] Nouvelle inscription : ${p.tenant}`, text: `Nouvelle inscription le ${p.at} :\n${p.tenant} (${p.metier}, ${p.city}), formule ${p.plan}, origine ${p.source || 'directe'}.\nSite : ${p.siteUrl}\nAdministration : ${p.adminUrl}` }),
+  admin_prospect_reply: (p) => ({ subject: `[ClientDirect Pro] Réponse de ${p.prospect}`, text: `${p.prospect} (${p.city}, ${p.email}) a répondu à la campagne.\n${p.issue}\n\nDébut de la réponse :\n${p.extract}\n\nLe message complet est dans la boîte contact@. Prospection : ${p.url}` }),
   admin_alert: (p) => ({ subject: `[ClientDirect Pro] ALERTE : ${p.message.slice(0, 80)}`, text: `Incident critique détecté le ${p.at} :\n${p.message}\n\nType : ${p.kind}\nTableau de bord : ${p.url}` }),
   admin_digest: (p) => ({ subject: `ClientDirect Pro : ${p.count} incident(s) à traiter`, text: p.lines.join('\n') })
 };
@@ -131,6 +132,7 @@ export function sampleEmails() {
     monthly_report: { ...base, monthLabel: 'novembre 2026', views: 312, requests: 14, bookings: 9, quotes: 4, wa_clicks: 11, dashUrl: `${u}/pro` },
     ticket_reply: { ...base, subject: 'Changer mes horaires', body: 'Bonjour, c’est fait : vos nouveaux horaires sont en ligne.', url: `${u}/pro/aide` },
     admin_new_signup: { tenant, metier: 'Garage', city: 'Kourou', plan: 'pro', source: 'direct', at: '26/11/2026 14:30 (Guyane)', siteUrl: `${u}/s/exemple`, adminUrl: `${u}/admin` },
+    admin_prospect_reply: { prospect: 'GARAGE EXEMPLE', city: 'Kourou', email: 'contact@garage-exemple.fr', issue: 'Relances arrêtées : répondez-lui personnellement depuis contact@.', extract: 'Bonjour, ça m’intéresse, pouvez-vous m’appeler ?', url: `${u}/admin/prospection` },
     admin_alert: { message: 'Sauvegarde impossible (exemple)', kind: 'backup', at: '26/11/2026 14:30', url: `${u}/admin` },
     admin_digest: { count: 2, lines: ['Exemple : sauvegarde en retard', 'Exemple : envoi WhatsApp refusé'] }
   };

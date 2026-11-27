@@ -203,7 +203,7 @@ test('prospection : registre Sirene, démo personnalisée, activation par le pro
   const pr = db.one("SELECT * FROM prospects WHERE siren='111222333'"); assert.equal(pr.score, 5, 'créée il y a moins de 5 ans + métier prioritaire');
   r = await admin.post(`/admin/prospection/${pr.id}/demo`, { csrf: admin.csrf(p.text) });
   const url = /Lien : <a href="([^"]+)"/.exec(r.text)[1]; const token = url.split('/demo/')[1];
-  assert.match(r.text, /Gdm|GDM/); assert.match(r.text, /Pour ne plus être contacté/); assert.match(r.text, /non officielle/); assert.equal(db.one("SELECT COUNT(*) n FROM prospects WHERE siren='999888777'").n, 0, 'opposition à la prospection respectée'); assert.match(r.text, /\/stop\//);
+  assert.match(r.text, /Garage du Maroni/); assert.match(r.text, /Pour ne plus recevoir aucun message/); assert.match(r.text, /Essai gratuit de 14 jours, sans carte bancaire/); assert.match(r.text, /non officielle/); assert.equal(db.one("SELECT COUNT(*) n FROM prospects WHERE siren='999888777'").n, 0, 'opposition à la prospection respectée'); assert.match(r.text, /\/stop\//);
   const v = app.client(); const demo = await v.get(`/demo/${token}`);
   assert.equal(demo.status, 200); assert.match(demo.text, /Démonstration non officielle/);
   const dt = db.one("SELECT * FROM tenants WHERE status='demo' AND prospect_id=?", pr.id);
@@ -221,7 +221,7 @@ test('prospection : registre Sirene, démo personnalisée, activation par le pro
   assert.equal(db.one('SELECT status FROM prospects WHERE id=?', pr.id).status, 'converted');
   assert.equal((await app.client().get(`/s/${t.slug}`)).status, 200, 'site publié après activation');
   assert.equal((await app.client().get(`/demo/${token}`)).status, 404, 'lien de démo désactivé');
-  assert.match((await v.get('/pro')).text, /Gdm|GDM/);
+  assert.match((await v.get("/pro")).text, /Garage du Maroni/);
 });
 
 async function makeAdmin() {

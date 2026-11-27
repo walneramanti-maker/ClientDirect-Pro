@@ -29,13 +29,13 @@ test('campagne : sélection par critères, message conforme, validation groupée
   seed(30, { dept: '59', tpl: 'garage' }); seed(10, { dept: '62', tpl: 'coiffeur' }); seed(5, { dept: '59', tpl: 'garage', email: false }); seed(4, { dept: '973', tpl: 'garage', score: 2 });
   assert.equal(C.countEligible(db, { channel: 'email', depts: ['59'], tpls: ['garage'], minScore: 3 }), 30);
   const admin = await makeAdmin();
-  const page = await admin.get('/admin/campagnes'); assert.match(page.text, /Aucun envoi automatique/);
+  const page = await admin.get('/admin/campagnes'); assert.match(page.text, /Rien ne part sans vous/); assert.match(page.text, /jamais par Brevo/);
   const r = await admin.post('/admin/campagnes', { csrf: admin.csrf(page.text), name: 'Garages Nord', channel: 'email', depts: '59', tpl_garage: 'on', minScore: '3', size: '1000' });
   assert.equal(r.status, 303); const id = Number(r.location.split('/').pop());
   const cmp = db.one('SELECT * FROM campaigns WHERE id=?', id); assert.equal(cmp.size, 30, 'seules les entreprises avec e-mail');
   const det = await admin.get(`/admin/campagnes/${id}`);
-  assert.match(det.text, /Valider les 30 messages/); assert.match(det.text, /Essentiel, 79 €\/mois \+ 199 € de mise en service/); assert.match(det.text, /Premium, 249 €\/mois \+ 599 € de mise en service/); assert.match(det.text, /engagement de 12 mois/);
-  assert.match(det.text, /accessible uniquement par ce lien personnel/); assert.doesNotMatch(det.text, /visible seulement par vous/);
+  assert.match(det.text, /Valider les 30 messages/); assert.match(det.text, /Formule conseillée pour vous : Pro, 149 € HT\/mois \+ 399 € HT de mise en service/); assert.match(det.text, /dès 79 € HT\/mois/); assert.match(det.text, /engagement de 12 mois/); assert.match(det.text, /Essai gratuit de 14 jours, sans carte bancaire/);
+  assert.match(det.text, /démonstration non officielle, lien personnel, non référencée sur Google/); assert.doesNotMatch(det.text, /visible seulement par vous/);
   assert.match(det.text, /SIRET/);
   // une opposition arrive entre la préparation et la validation
   const one = db.one('SELECT prospect_id FROM campaign_items WHERE campaign_id=? LIMIT 1', id).prospect_id;
@@ -57,7 +57,7 @@ test('campagne : sélection par critères, message conforme, validation groupée
 });
 
 test('campagnes préparées automatiquement : brouillons régénérés chaque jour, jamais validés ni envoyés, campagne validée intacte', async () => {
-  db.run("UPDATE prospects SET potential=80 WHERE dept='62'"); db.run("UPDATE prospects SET potential=55 WHERE dept='973'");
+  db.run("UPDATE prospects SET potential=80 WHERE dept='62'"); db.run("UPDATE prospects SET email=NULL WHERE dept='62' AND id IN (SELECT id FROM prospects WHERE dept='62' ORDER BY id LIMIT 5)"); db.run("UPDATE prospects SET potential=55 WHERE dept='973'");
   const before = db.one("SELECT COUNT(*) n FROM campaign_items WHERE sent_at IS NOT NULL").n;
   const r1 = C.prepareDrafts(db, Date.UTC(2026, 10, 26));
   assert.ok(r1.email.brouillon && r1.appel.brouillon, JSON.stringify(r1));

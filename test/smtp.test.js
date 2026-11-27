@@ -46,9 +46,9 @@ test('envoi des campagnes validées : un e-mail espacé, en heures ouvrées, pla
   const sun = Date.parse('2026-12-06T10:00:00Z');
   assert.equal((await C.sendNext(db, { now: sun })).skipped, 'rien à envoyer à cette heure', 'pas le dimanche');
   const r1 = await C.sendNext(db, { now: tue10 }); assert.ok(r1.sent, JSON.stringify(r1));
-  assert.match(smtp.got.data, /Subject: Un exemple de site pour Garage 0/); assert.match(smtp.got.data, /From: =\?UTF-8\?B\?/); assert.match(smtp.got.data, /List-Unsubscribe: <https?:\/\/[^>]+\/stop\//); assert.match(smtp.got.data, /List-Unsubscribe-Post: List-Unsubscribe=One-Click/);
+  assert.match(Buffer.from(/Subject: =\?UTF-8\?B\?([^?]+)\?=/.exec(smtp.got.data)[1], 'base64').toString(), /^Garage 0 : vos clients peuvent-ils réserver leur entretien en ligne \?$/); assert.match(smtp.got.data, /From: =\?UTF-8\?B\?/); assert.match(smtp.got.data, /List-Unsubscribe: <https?:\/\/[^>]+\/stop\//); assert.match(smtp.got.data, /List-Unsubscribe-Post: List-Unsubscribe=One-Click/);
   const body = Buffer.from(smtp.got.data.split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString();
-  assert.match(body, /199 € de mise en service/); assert.match(body, /engagement de 12 mois/); assert.match(body, /SIRET/); assert.match(body, /Pour ne plus être contacté/);
+  assert.match(body, /399 € HT de mise en service/); assert.match(body, /engagement de 12 mois/); assert.match(body, /SIRET/); assert.match(body, /Pour ne plus recevoir aucun message/); assert.match(body, /sans carte bancaire/);
   assert.equal((await C.sendNext(db, { now: tue10 + 60e3 })).skipped, 'espacement');
   db.run("UPDATE prospects SET status='optout' WHERE siren='700000002'");
   const r2 = await C.sendNext(db, { now: tue10 + 9 * 60e3 }); assert.ok(r2.sent);

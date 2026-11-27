@@ -2,13 +2,14 @@
 // Une campagne validée n'envoie RIEN : aucun canal d'envoi n'est branché tant que vous ne l'avez pas autorisé.
 import { isSuppressed } from './suppression.js';
 import { config } from './config.js';
-import { outreachMessage, demoTokenFor, displayName } from './prospect.js';
+import { demoTokenFor, displayName } from './prospect.js';
 import { optoutLink } from './privacy.js';
 import { TEMPLATES } from './templates.js';
 import { DEPARTEMENTS, territoryOf } from './france.js';
 import { country as countryOf } from './markets.js';
 import { sendMail, buildMessage } from './smtp.js';
 import { recordIncident } from './incidents.js';
+import { sequenceEmail, sequenceSms, callPitch, nextDelayMs, LAST_STEP, SEQUENCE } from './outreach.js';
 
 export const CHANNELS = { email: 'E-mail', sms: 'SMS', appel: 'Appel téléphonique' };
 export const MAX_CAMPAIGN = 5000;
@@ -30,9 +31,16 @@ export function callOpener(p) {
   return o;
 }
 export function callScript(p, demoUrl) {
-  const n = displayName(p.name); const m = (TEMPLATES[p.tpl]?.metier || 'votre activité').toLowerCase();
   const opener = callOpener(p);
-  return `${opener ? `[Accroche, après la présentation : ${opener}] ` : ''}« Bonjour, ${config.legal.owner}, de ClientDirect Pro. Je vous appelle au sujet de votre activité (${m}) ; vous avez deux minutes ? J'ai préparé gratuitement un exemple de site pour ${n} : vos clients y demandent un devis ou vous écrivent sur WhatsApp, à toute heure. Je peux vous l'envoyer par SMS ou par e-mail ? » — Si oui : envoyer le lien ${demoUrl}. — Si non : « Très bien, je ne vous rappellerai pas » et noter « Ne veut plus être contacté » (opposition enregistrée définitivement). — Si la personne demande d'où vient son numéro : « De sources publiques : le registre des entreprises et votre fiche d'établissement en ligne. Vous pouvez vous opposer à tout moment, je le note tout de suite. » — Ne jamais rappeler plus de 2 fois sans réponse ; appeler en semaine, de 9 h à 18 h (heure locale du prospect).`;
+  return `${opener ? `[Accroche, après la présentation : ${opener}] ` : ''}${callPitch(p, { name: displayName(p.name), demoUrl })}`;
+}
+
+/** Message personnalisé d'une étape (métier, besoin constaté, liens personnels de démonstration, d'essai et d'opposition). */
+export function itemMessage(db, p, channel, step = 0) {
+  const token = demoTokenFor(p.siren); const demoUrl = `${config.baseUrl}/demo/${token}`; const stopUrl = optoutLink(db, p.id); const name = displayName(p.name);
+  if (channel === 'appel') return { subject: null, text: callScript(p, demoUrl) };
+  if (channel === 'sms') return { subject: null, text: sequenceSms(p, { name, demoUrl, stopUrl }) };
+  return sequenceEmail(p, { name, demoUrl, token, stopUrl, step });
 }
 
 /** Entreprises éligibles : à contacter, coordonnée présente pour le canal, ouvertes, pas déjà dans une campagne. */
@@ -56,9 +64,8 @@ export function createCampaign(db, { name, channel, depts = [], tpls = [], minSc
   db.tx(() => {
     id = Number(db.run("INSERT INTO campaigns(name,channel,filters,size,status,created_at) VALUES(?,?,?,?,'draft',?)", String(name || '').slice(0, 80) || `Campagne ${new Date(now).toLocaleDateString('fr-FR')}`, channel, JSON.stringify({ depts, tpls, minScore }), rows.length, now).lastInsertRowid);
     for (const p of rows) {
-      const demo = `${config.baseUrl}/demo/${demoTokenFor(p.siren)}`; const stop = optoutLink(db, p.id);
-      const msg = channel === 'appel' ? callScript(p, demo) : outreachMessage(p, demo, stop, { channel });
-      db.run("INSERT INTO campaign_items(campaign_id,prospect_id,to_addr,message,status) VALUES(?,?,?,?,'ready')", id, p.id, channel === 'email' ? p.email : p.phone, msg);
+      const m = itemMessage(db, p, channel, 0);
+      db.run("INSERT INTO campaign_items(campaign_id,prospect_id,to_addr,message,subject,status) VALUES(?,?,?,?,?,'ready')", id, p.id, channel === 'email' ? p.email : p.phone, m.text, m.subject);
     }
   });
   return id;
@@ -71,6 +78,9 @@ export function campaignDetail(db, id) {
     byTpl: db.all('SELECT p.tpl, COUNT(*) n FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? GROUP BY p.tpl ORDER BY n DESC', id),
     // Échantillon réparti sur toute la campagne, pour relire avant de valider
     sample: db.all('SELECT i.*, p.name, p.city, p.dept FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY (i.id * 7919) % 1000 LIMIT 5', id),
+    funnel: campaignFunnel(db, id),
+    // Séquence complète (premier message et relances) pour une entreprise de l'échantillon
+    sequence: c.channel === 'email' ? (() => { const it = db.one('SELECT prospect_id FROM campaign_items WHERE campaign_id=? ORDER BY id LIMIT 1', id); const p = it && db.one('SELECT * FROM prospects WHERE id=?', it.prospect_id); return p ? SEQUENCE.map((s) => ({ ...s, ...itemMessage(db, p, 'email', s.step), name: p.name })) : []; })() : [],
     optedOut: db.one("SELECT COUNT(*) n FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? AND p.status='optout'", id).n
   };
 }
@@ -91,35 +101,68 @@ function businessHours(p, now) {
  * interdits ; un blocage du compte toucherait aussi les e-mails transactionnels et les autres projets du compte). */
 export const brevoRelay = (host) => /(^|\.)brevo\.com$|sendinblue/i.test(String(host || ''));
 export function sendingReady() { const s = config.smtp; return config.campaignSending && !!(s.host && s.user && s.pass && s.from) && !brevoRelay(s.host); }
-export function sentToday(db, now = Date.now()) { return db.one('SELECT COUNT(*) n FROM campaign_items WHERE sent_at>=?', now - (now % 864e5)).n; }
+export function sentToday(db, now = Date.now()) { return db.one('SELECT COUNT(*) n FROM campaign_sends WHERE sent_at>=?', now - (now % 864e5)).n; }
+/** Une relance s'arrête dès que l'entreprise a répondu, s'est opposée, s'est inscrite, a refusé ou si l'adresse est invalide. */
+const FOLLOWUP_OK = "p.status IN ('contacted','demo') AND p.replied_at IS NULL AND p.bounced_at IS NULL AND NOT EXISTS (SELECT 1 FROM tenants t WHERE t.prospect_id=p.id AND t.status!='demo')";
 /**
  * Envoie AU PLUS UN e-mail par passage, espacés d'au moins CAMPAIGN_GAP_MIN minutes, sous le plafond quotidien,
  * uniquement depuis des campagnes e-mail validées, jamais à une entreprise qui s'est opposée.
+ * Les relances dues (J+4 puis J+10) passent avant les premiers messages ; 3 messages au plus par entreprise.
  */
 export async function sendNext(db, { now = Date.now(), send = sendMail } = {}) {
   if (!sendingReady()) return { skipped: 'envoi désactivé' };
   if (sentToday(db, now) >= config.campaignDailyMax) return { skipped: 'plafond quotidien' };
   const last = Number(db.one("SELECT v FROM meta WHERE k='campaign_last_send'")?.v || 0);
   if (now - last < config.campaignGapMin * 60e3) return { skipped: 'espacement' };
-  const cands = db.all("SELECT i.*, p.name, p.postal, p.siren, p.status pstatus FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id JOIN prospects p ON p.id=i.prospect_id WHERE c.status='approved' AND c.channel='email' AND i.status='ready' ORDER BY c.approved_at, i.id LIMIT 50");
-  for (const it of cands) {
-    if (it.pstatus === 'optout' || isSuppressed(db, { siren: it.siren, email: it.to_addr })) { db.run("UPDATE campaign_items SET status='skipped', error='opposition' WHERE id=?", it.id); continue; }
+  const base = "SELECT i.*, p.name, p.postal, p.siren, p.status pstatus FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id JOIN prospects p ON p.id=i.prospect_id WHERE c.status='approved' AND c.channel='email'";
+  // Relances qui ne sont plus d'actualité : arrêtées définitivement
+  db.run(`UPDATE campaign_items SET next_at=NULL WHERE status='sent' AND next_at IS NOT NULL AND prospect_id IN (SELECT p.id FROM prospects p WHERE NOT (${FOLLOWUP_OK}))`);
+  const due = db.all(`${base} AND i.status='sent' AND i.next_at IS NOT NULL AND i.next_at<=? AND ${FOLLOWUP_OK} ORDER BY i.next_at LIMIT 50`, now).map((x) => ({ ...x, follow: true }));
+  const fresh = db.all(`${base} AND i.status='ready' ORDER BY c.approved_at, i.id LIMIT 50`);
+  for (const it of [...due, ...fresh]) {
+    if (it.pstatus === 'optout' || isSuppressed(db, { siren: it.siren, email: it.to_addr })) { db.run(`UPDATE campaign_items SET ${it.follow ? 'next_at=NULL' : "status='skipped'"}, error='opposition' WHERE id=?`, it.id); continue; }
     if (!businessHours(it, now)) continue;
+    const step = it.follow ? it.step + 1 : 0;
+    const p = db.one('SELECT * FROM prospects WHERE id=?', it.prospect_id);
+    const m = step === 0 && it.subject ? { subject: it.subject, text: it.message } : itemMessage(db, p, 'email', step);
     db.run("INSERT INTO meta(k,v) VALUES('campaign_last_send',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(now));
-    const stop = (/\/stop\/[A-Za-z0-9_-]+/.exec(it.message) || [''])[0];
-    const data = buildMessage({ from: config.smtp.from, fromName: config.smtp.fromName, to: it.to_addr, subject: `Un exemple de site pour ${displayName(it.name)}`, text: it.message, unsubscribeUrl: stop ? config.baseUrl + stop : null });
+    const stop = (/\/stop\/[A-Za-z0-9_-]+/.exec(m.text) || [''])[0];
+    const data = buildMessage({ from: config.smtp.from, fromName: config.smtp.fromName, to: it.to_addr, subject: m.subject || `Un exemple de site pour ${displayName(it.name)}`, text: m.text, unsubscribeUrl: stop ? config.baseUrl + stop : null });
     try {
       await send({ ...config.smtp, to: it.to_addr, data });
-      db.run("UPDATE campaign_items SET status='sent', sent_at=? WHERE id=?", now, it.id);
+      const next = step < LAST_STEP ? now + nextDelayMs(step) : null;
+      db.run(`UPDATE campaign_items SET status='sent', step=?, next_at=?${step === 0 ? ', sent_at=?' : ''} WHERE id=?`, ...(step === 0 ? [step, next, now, it.id] : [step, next, it.id]));
+      db.run('INSERT INTO campaign_sends(item_id,step,sent_at) VALUES(?,?,?)', it.id, step, now);
       db.run("UPDATE prospects SET status=CASE WHEN status='new' THEN 'contacted' ELSE status END, last_contact_at=? WHERE id=?", now, it.prospect_id);
-      return { sent: it.id };
+      return { sent: it.id, step };
     } catch (e) {
-      db.run("UPDATE campaign_items SET status='skipped', error=? WHERE id=?", String(e.message).slice(0, 200), it.id);
+      db.run(`UPDATE campaign_items SET ${it.follow ? 'next_at=NULL' : "status='skipped'"}, error=? WHERE id=?`, String(e.message).slice(0, 200), it.id);
+      if (/^SMTP 55[0-3]/.test(e.message)) db.run('UPDATE prospects SET bounced_at=? WHERE id=?', now, it.prospect_id);
       recordIncident(db, { kind: 'campagne', severity: /^SMTP 5|auth/i.test(e.message) ? 'warning' : 'info', message: `Envoi refusé : ${String(e.message).slice(0, 140)}` });
       return { error: e.message };
     }
   }
   return { skipped: 'rien à envoyer à cette heure' };
+}
+
+/** Suivi des conversions d'une campagne : envois par étape, démonstrations ouvertes, réponses, inscriptions, paiements, oppositions. */
+export function campaignFunnel(db, id) {
+  const steps = Object.fromEntries(SEQUENCE.map((s) => [s.step, db.one('SELECT COUNT(*) n FROM campaign_sends s JOIN campaign_items i ON i.id=s.item_id WHERE i.campaign_id=? AND s.step=?', id, s.step).n]));
+  const q = (w) => db.one(`SELECT COUNT(*) n FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? AND i.status='sent' AND ${w}`, id).n;
+  const contacted = q('1');
+  const r = {
+    contacted, steps,
+    demoOpened: q("(p.demo_views>0 OR p.status IN ('demo','converted') OR EXISTS (SELECT 1 FROM tenants t WHERE t.prospect_id=p.id))"),
+    replied: q('p.replied_at IS NOT NULL'),
+    signups: q("EXISTS (SELECT 1 FROM tenants t WHERE t.prospect_id=p.id AND t.status!='demo')"),
+    paying: q("EXISTS (SELECT 1 FROM tenants t WHERE t.prospect_id=p.id AND t.status IN ('active','past_due'))"),
+    optout: q("p.status='optout'"), bounced: q('p.bounced_at IS NOT NULL'), lost: q("p.status='lost'"),
+    pendingFollowups: db.one("SELECT COUNT(*) n FROM campaign_items WHERE campaign_id=? AND status='sent' AND next_at IS NOT NULL", id).n,
+    waiting: db.one("SELECT COUNT(*) n FROM campaign_items WHERE campaign_id=? AND status='ready'", id).n
+  };
+  const pct = (a) => (contacted ? Math.round((a / contacted) * 1000) / 10 : 0);
+  r.rates = { demo: pct(r.demoOpened), reply: pct(r.replied), signup: pct(r.signups), paying: pct(r.paying), optout: pct(r.optout) };
+  return r;
 }
 
 /** Préfixe des campagnes préparées automatiquement (régénérées chaque jour tant qu'elles ne sont pas validées). */
@@ -131,10 +174,11 @@ export const AUTO_PREFIX = 'Préparée automatiquement';
  * Une campagne validée par l'administrateur n'est jamais modifiée.
  */
 export function prepareDrafts(db, now = Date.now()) {
-  // Une entreprise n'est que dans une campagne à la fois : les appels (potentiel A) d'abord, les e-mails pour les autres
+  // Une entreprise n'est que dans une campagne à la fois : l'e-mail d'abord (envoi et relances automatiques),
+  // les appels pour les entreprises de potentiel A joignables seulement par téléphone
   const plans = [
-    { channel: 'appel', minPotential: 75, size: 300, label: 'appels, potentiel A' },
-    { channel: 'email', minPotential: 50, size: 500, label: 'e-mails, potentiel A et B' }
+    { channel: 'email', minPotential: 50, size: 500, label: 'e-mails, potentiel A et B' },
+    { channel: 'appel', minPotential: 75, size: 300, label: 'appels, potentiel A' }
   ];
   const out = {};
   db.run("UPDATE campaigns SET status='canceled' WHERE status='draft' AND name LIKE ?", `${AUTO_PREFIX}%`);

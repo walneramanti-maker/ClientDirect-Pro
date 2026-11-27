@@ -88,6 +88,8 @@ export const config = {
   campaignSending: env.CAMPAIGN_SENDING === 'on',
   campaignDailyMax: num(env.CAMPAIGN_DAILY_MAX, 40),
   campaignGapMin: num(env.CAMPAIGN_GAP_MIN, 8),
+  // Lecture des réponses (même boîte, lecture seule). Par défaut, mêmes identifiants que l'envoi SMTP.
+  imap: { host: env.IMAP_HOST || '', port: num(env.IMAP_PORT, 993), secure: env.IMAP_SECURE !== '0', user: env.IMAP_USER || env.SMTP_USER || '', pass: env.IMAP_PASS || env.SMTP_PASS || '' },
   smtp: { host: env.SMTP_HOST || '', port: num(env.SMTP_PORT, 465), secure: env.SMTP_SECURE !== '0', user: env.SMTP_USER || '', pass: env.SMTP_PASS || '', from: env.SMTP_FROM || env.SMTP_USER || '', fromName: env.SMTP_FROM_NAME || 'Walner Amantie – ClientDirect Pro' },
   // Recette : les e-mails/WhatsApp ne partent que vers ces adresses ou domaines (ex. "walner.amanti@gmail.com,@exemple.fr")
   testAllowlist: (env.TEST_ALLOWLIST || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),

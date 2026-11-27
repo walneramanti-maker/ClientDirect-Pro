@@ -1,0 +1,119 @@
+// Messages de prospection personnalisés : métier, besoin constaté (site absent, plateforme, site ancien), séquence de relances.
+// Prospection B2B par e-mail (CNIL) : message en rapport avec l'activité du destinataire, expéditeur identifié,
+// origine des données indiquée, opposition simple et gratuite (lien + réponse STOP) à chaque message.
+import { config, PLANS } from './config.js';
+
+/** Séquence : premier message, relance à J+4, dernière relance à J+10 ; jamais plus de 3 messages par entreprise. */
+export const SEQUENCE = [{ step: 0, label: 'Premier message', delayDays: 0 }, { step: 1, label: 'Relance 1 (J+4)', delayDays: 4 }, { step: 2, label: 'Dernière relance (J+10)', delayDays: 6 }];
+export const LAST_STEP = SEQUENCE.length - 1;
+export const nextDelayMs = (step) => (SEQUENCE[step + 1] ? SEQUENCE[step + 1].delayDays * 864e5 : null);
+
+// Par métier : le besoin du client final, ce que le site fait concrètement, la formule conseillée.
+export const TRADES = {
+  garage: {
+    metier: 'garage', clients: 'vos clients',
+    need: 'Un automobiliste qui cherche un garage le soir ou le week-end choisit celui où il peut réserver tout de suite.',
+    does: ['prendre rendez-vous en ligne pour une vidange, des freins ou la climatisation, à toute heure', 'vous indiquer la marque, le modèle et l’année du véhicule avant de venir', 'recevoir un rappel automatique la veille, pour moins de rendez-vous oubliés'],
+    plan: 'pro', subject: (n) => `${n} : vos clients peuvent-ils réserver leur entretien en ligne ?`
+  },
+  coiffeur: {
+    metier: 'salon de coiffure', clients: 'vos clientes et clients',
+    need: 'Pendant une coupe, vous ne pouvez pas répondre au téléphone : chaque appel manqué est un rendez-vous qui part ailleurs.',
+    does: ['réserver leur créneau en ligne, 24 h/24, sans vous appeler', 'choisir la prestation (coupe, tresses, couleur) et voir le prix de départ', 'recevoir un rappel automatique la veille, pour moins de rendez-vous oubliés'],
+    plan: 'pro', subject: (n) => `${n} : des réservations en ligne, même pendant vos coupes`
+  },
+  beaute: {
+    metier: 'institut de beauté', clients: 'vos clientes',
+    need: 'Pendant un soin, vous ne pouvez pas répondre au téléphone : chaque appel manqué est un rendez-vous qui part ailleurs.',
+    does: ['réserver leur soin en ligne, 24 h/24, sans vous appeler', 'préciser la zone ou une peau sensible avant de venir', 'recevoir un rappel automatique la veille, pour moins de rendez-vous oubliés'],
+    plan: 'pro', subject: (n) => `${n} : des réservations en ligne, même pendant vos soins`
+  },
+  restaurant: {
+    metier: 'restaurant', clients: 'vos clients',
+    need: 'Beaucoup de clients choisissent où manger sur leur téléphone, souvent au dernier moment.',
+    does: ['réserver une table en ligne en indiquant le nombre de personnes', 'vous demander un devis traiteur pour un événement', 'vous écrire directement sur WhatsApp'],
+    plan: 'pro', subject: (n) => `${n} : la réservation de table en ligne, sans commission`
+  },
+  securite: {
+    metier: 'entreprise de sécurité', clients: 'vos clients professionnels',
+    need: 'Une entreprise qui cherche un prestataire de gardiennage compare d’abord en ligne, puis demande des devis.',
+    does: ['vous demander un devis en précisant le type de site à protéger', 'prendre rendez-vous avec un responsable', 'vous écrire directement sur WhatsApp'],
+    plan: 'essentiel', subject: (n) => `${n} : recevoir des demandes de devis qualifiées`
+  },
+  location: {
+    metier: 'loueur de véhicules', clients: 'vos clients',
+    need: 'Un voyageur réserve souvent son véhicule avant d’arriver, depuis son téléphone.',
+    does: ['réserver un créneau de retrait en ligne, avec les dates souhaitées', 'voir vos véhicules et vos prix de départ', 'vous écrire directement sur WhatsApp'],
+    plan: 'pro', subject: (n) => `${n} : des réservations de véhicules en ligne`
+  },
+  artisan: {
+    metier: 'artisan', clients: 'vos clients',
+    need: 'Sur un chantier, vous ne pouvez pas toujours décrocher : un client qui ne vous joint pas appelle le suivant.',
+    does: ['vous envoyer une demande de devis avec l’adresse du chantier et une description', 'prendre rendez-vous pour une visite', 'vous écrire directement sur WhatsApp'],
+    plan: 'essentiel', subject: (n) => `${n} : recevoir vos demandes de devis même sur le chantier`
+  }
+};
+const tradeOf = (p) => TRADES[p.tpl] || TRADES.artisan;
+
+/** Constat sur la présence en ligne : formulé prudemment, jamais affirmé sans vérification. */
+export function needLine(p) {
+  let f = {}; try { f = JSON.parse(p.site_flags || '{}'); } catch { f = {}; }
+  const st = p.site_status || (p.website ? null : 'aucun_probable');
+  if (st === 'aucun') return 'Je n’ai pas trouvé de site Internet à votre nom.';
+  if (st === 'aucun_probable') return 'Je n’ai pas trouvé de site Internet à votre nom (si vous en avez un, dites-le-moi, je ne vous relancerai pas pour rien).';
+  if (st === 'plateforme') return 'Vous êtes présent sur une plateforme ou un réseau social, mais vous n’avez pas encore de site à votre nom.';
+  if (st === 'vieillissant' || st === 'récent') {
+    const miss = [!f.booking && 'la réservation en ligne', !f.quote && 'la demande de devis en ligne'].filter(Boolean);
+    return miss.length ? `Votre site actuel ne propose pas encore ${miss.join(' ni ')}.` : 'Votre site actuel a déjà l’essentiel ; l’assistant qui répond à vos clients 24 h/24 pourrait vous faire gagner du temps.';
+  }
+  return '';
+}
+const planOf = (p) => { const t = tradeOf(p); const st = p.site_status; return (st === 'vieillissant' || st === 'récent') && !needLine(p).includes('pas encore') ? 'premium' : t.plan; };
+const eur = (v) => `${v} €`;
+export function planLine(p) {
+  const k = planOf(p); const pl = PLANS[k];
+  return `Formule conseillée pour vous : ${pl.name}, ${eur(pl.monthly)} HT/mois + ${eur(pl.setup)} HT de mise en service (payée une seule fois), avec engagement de 12 mois seulement si vous continuez après l’essai. Les trois formules, dès ${eur(PLANS.essentiel.monthly)} HT/mois : ${config.baseUrl}/#formules`;
+}
+export const trialUrl = (p, token) => `${config.baseUrl}/inscription?claim=${token}&formule=${planOf(p)}`;
+
+function legalFooter(stopUrl) {
+  const L = config.legal;
+  return `${L.owner}, fondateur de ClientDirect Pro – ${L.name}, SIRET ${L.siret}${L.phone ? ` – ${L.phone}` : ''}\n\nVos coordonnées professionnelles proviennent du registre public des entreprises (INSEE) et de votre fiche d'établissement publique. Elles servent uniquement à vous présenter ce service et sont conservées au plus 36 mois sans réponse. Vous pouvez y accéder, les faire corriger ou supprimer en répondant à ce message. Pour ne plus recevoir aucun message et supprimer l'exemple : ${stopUrl} (ou répondez STOP).`;
+}
+
+/**
+ * Message e-mail d'une étape de la séquence. p : prospect ; name : nom affiché ; demoUrl, token, stopUrl : liens personnels.
+ * Retourne { subject, text }.
+ */
+export function sequenceEmail(p, { name, demoUrl, token, stopUrl, step = 0 }) {
+  const T = tradeOf(p); const trial = trialUrl(p, token); const days = config.trialDays;
+  const essai = `Essai gratuit de ${days} jours, sans carte bancaire : vous activez le site en 2 minutes, et s'il ne vous convient pas, vous n'avez rien à faire, rien ne vous sera facturé.`;
+  if (step === 0) {
+    const nl = needLine(p);
+    return {
+      subject: T.subject(name),
+      text: `Bonjour,\n\nJe m'appelle ${config.legal.owner}, je dirige ClientDirect Pro, une solution de sites professionnels pour les petites entreprises en France et en Outre-mer.\n\n${T.need}${nl ? ` ${nl}` : ''}\n\nJ'ai donc préparé gratuitement un exemple de site pour ${name}. ${T.clients[0].toUpperCase() + T.clients.slice(1)} peuvent y :\n- ${T.does.join('\n- ')}\n\nVoir l'exemple (démonstration non officielle, lien personnel, non référencée sur Google) :\n${demoUrl}\n\n${essai}\nActiver mon essai gratuit :\n${trial}\n\n${planLine(p)}\n\nSi vous préférez, je vous le présente en 10 minutes, par téléphone ou en visio : répondez simplement à ce message.\n\nBien cordialement,\n\n${legalFooter(stopUrl)}`
+    };
+  }
+  if (step === 1) {
+    return {
+      subject: `Re: ${T.subject(name)}`,
+      text: `Bonjour,\n\nJe me permets de revenir vers vous : l'exemple de site préparé pour ${name} est toujours disponible ici :\n${demoUrl}\n\nEn deux mots : ${T.clients} ${T.does[0]}, et vous recevez chaque demande par e-mail et sur WhatsApp.\n\n${essai}\n${trial}\n\nUne question ? Répondez à ce message, je vous réponds personnellement.\n\nBien cordialement,\n\n${legalFooter(stopUrl)}`
+    };
+  }
+  return {
+    subject: `Re: ${T.subject(name)}`,
+    text: `Bonjour,\n\nC'est mon dernier message : je ne vous relancerai plus.\n\nL'exemple de site pour ${name} reste en ligne encore quelques semaines : ${demoUrl}\nSi le moment est mal choisi, vous pourrez l'activer plus tard, avec le même essai gratuit de ${days} jours, sans carte bancaire :\n${trial}\n\nMerci pour votre temps et bonne continuation.\n\n${legalFooter(stopUrl)}`
+  };
+}
+
+/** SMS (si un jour autorisé) : court, identifié, avec STOP. */
+export function sequenceSms(p, { name, demoUrl, stopUrl }) {
+  return `Bonjour, ${config.legal.owner} de ClientDirect Pro. Exemple de site gratuit préparé pour ${name} : ${demoUrl} (démo non officielle). Essai ${config.trialDays} j gratuit, sans carte bancaire. Plus de message : STOP ou ${stopUrl}`;
+}
+
+/** Script d'appel personnalisé (jamais envoyé : aide pour la personne qui appelle). */
+export function callPitch(p, { name, demoUrl }) {
+  const T = tradeOf(p); const nl = needLine(p);
+  return `« Bonjour, ${config.legal.owner}, de ClientDirect Pro. Je vous appelle au sujet de votre ${T.metier} ; vous avez deux minutes ? ${T.need}${nl ? ` ${nl}` : ''} J'ai préparé gratuitement un exemple de site pour ${name} : ${T.clients} peuvent y ${T.does[0]}. Vous pouvez l'essayer ${config.trialDays} jours gratuitement, sans carte bancaire. Je vous envoie le lien par SMS ou par e-mail ? » — Si oui : envoyer ${demoUrl}. — Si non : « Très bien, je ne vous rappellerai pas » et noter « Ne veut plus être contacté » (opposition enregistrée définitivement). — Si la personne demande d'où vient son numéro : « De sources publiques : le registre des entreprises et votre fiche d'établissement en ligne. Vous pouvez vous opposer à tout moment, je le note tout de suite. » — Ne jamais rappeler plus de 2 fois sans réponse ; appeler en semaine, de 9 h à 18 h (heure locale du prospect).`;
+}

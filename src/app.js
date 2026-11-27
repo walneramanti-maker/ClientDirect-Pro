@@ -234,6 +234,8 @@ export function createApp(db) {
       const { country: ctry, phoneCc } = signupCountry(f, guessCountry(c));
       tenantId = createTenant(db, { name: f.business, tpl: f.tpl, city: f.city, phone: f.phone, phoneCc, email, country: ctry, tz: validTz(f.tz) ? f.tz : null, lang: ulang, plan: f.plan, status: 'trial', ownerId: userId }).id;
       db.run('UPDATE tenants SET source=? WHERE id=?', c.source || 'direct', tenantId);
+      // Inscription directe d'une entreprise prospectée (même adresse e-mail) : comptée comme conversion de la campagne
+      { const pr = db.one("SELECT id FROM prospects WHERE email=? AND status NOT IN ('optout','converted')", email); if (pr) { db.run("UPDATE tenants SET prospect_id=?, source=CASE WHEN source IN ('','direct') THEN 'prospection' ELSE source END WHERE id=?", pr.id, tenantId); db.run("UPDATE prospects SET status='converted' WHERE id=?", pr.id); } }
       // Parrainage et partenariat : rattachement à l'inscription, récompense seulement après paiement
       if (c.source.startsWith('site:')) { const r = db.one("SELECT t.id, u.email FROM tenants t JOIN users u ON u.id=t.owner_user_id WHERE t.slug=? AND t.status IN ('trial','active','past_due')", c.source.slice(5)); if (r && r.email !== email) db.run('UPDATE tenants SET referred_by_tenant_id=? WHERE id=?', r.id, tenantId); }
       if (c.source.startsWith('partner:')) { const pa = db.one("SELECT id, email FROM partners WHERE code=? AND status='active'", c.source.slice(8)); if (pa && pa.email !== email) db.run('UPDATE tenants SET partner_id=? WHERE id=?', pa.id, tenantId); }
