@@ -202,3 +202,54 @@ a.cnt{display:inline-block;min-width:1.6em;padding:1px 6px;border-radius:8px;tex
 @media (max-width:1180px){.mgrid{grid-template-columns:repeat(3,1fr)}}
 @media (max-width:900px){.mgrid{grid-template-columns:1fr 1fr}.go-arrow{top:10px;right:12px}}
 @media (prefers-reduced-motion:reduce){.kc,.pl,.mk,.k.glass,.chip,.tab,.qa a,.btn,.side nav a,.glass::after{transition:none!important}.glass:hover,.qa a:hover{transform:none}}
+/* ===== Administration premium : style unifié sur toutes les pages ===== */
+body.admin{font-variant-numeric:tabular-nums}
+body.admin .admmain{background:radial-gradient(1200px 600px at 85% -10%,rgba(99,140,255,.16),transparent 60%),radial-gradient(900px 500px at -10% 30%,rgba(168,120,255,.10),transparent 60%),radial-gradient(800px 500px at 60% 110%,rgba(56,189,248,.10),transparent 60%),#f4f6fb}
+.topbar{background:rgba(255,255,255,.72);-webkit-backdrop-filter:saturate(180%) blur(18px);backdrop-filter:saturate(180%) blur(18px);border-bottom:1px solid rgba(15,27,61,.06)}
+.topbar details{border:0;padding:0}.me summary{padding:4px 6px 4px 4px;border-radius:999px;transition:background .2s}.me summary:hover{background:rgba(31,94,255,.08)}
+.gsearch{background:rgba(255,255,255,.7);border-color:rgba(15,27,61,.08);transition:box-shadow .2s,border-color .2s}.gsearch:focus-within{border-color:#1f5eff;box-shadow:0 0 0 4px rgba(31,94,255,.15)}
+.admbody h1{letter-spacing:-.02em}
+.admbody .card,.admbody section.card{background:rgba(255,255,255,.74);-webkit-backdrop-filter:saturate(170%) blur(16px);backdrop-filter:saturate(170%) blur(16px);border:1px solid rgba(255,255,255,.8);box-shadow:0 1px 2px rgba(16,24,40,.04),0 10px 30px rgba(31,62,140,.06);border-radius:20px}
+.admbody details{border-top:1px solid rgba(15,27,61,.07)}.admbody .card>details:first-child,.admbody details.more{border-top:0}
+/* chiffres clés : grands, lisibles, en vedette */
+.admbody .kpis{gap:14px}
+.admbody .kpis .k{background:rgba(255,255,255,.78);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.85);border-radius:18px;padding:16px 18px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 8px 22px rgba(31,62,140,.07);position:relative;overflow:hidden}
+.admbody .kpis .k::before{content:"";position:absolute;left:0;top:0;right:0;height:3px;background:linear-gradient(90deg,#1f5eff,#7c3aed);opacity:.55}
+.admbody .kpis .k strong{font-size:2rem;font-weight:900;letter-spacing:-.02em;line-height:1.1;margin-bottom:4px}.admbody .kpis .k span{font-size:.9rem}
+.kgrid .kc strong{letter-spacing:-.02em}
+/* tableaux */
+.admbody table.list{border-collapse:separate;border-spacing:0}
+.admbody table.list th{font-size:.76rem;text-transform:uppercase;letter-spacing:.05em;color:#64748b;font-weight:800;background:transparent;border-bottom:1px solid rgba(15,27,61,.08);padding:10px}
+.admbody table.list td{padding:12px 10px;border-bottom:1px solid rgba(15,27,61,.06);vertical-align:middle}
+.admbody table.list tbody tr{transition:background-color .2s}.admbody table.list tbody tr:hover td{background:rgba(31,94,255,.045)}
+.admbody table.list td a{color:#0f1b3d;text-decoration:none;font-weight:700}.admbody table.list td a:hover{color:#1f5eff}
+.admbody table.list td a[target="_blank"]{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(31,94,255,.08);color:#1f5eff;font-size:.85rem;font-weight:700}
+.admbody .scroll:has(> table.list){background:rgba(255,255,255,.74);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.8);border-radius:20px;box-shadow:0 10px 30px rgba(31,62,140,.06);padding:6px 10px}
+.admbody .card .scroll:has(> table.list){background:transparent;border:0;box-shadow:none;padding:0;-webkit-backdrop-filter:none;backdrop-filter:none}
+/* boutons */
+.admbody .btn{min-height:42px;border-radius:12px;padding:9px 16px;border:1px solid transparent;font-weight:800;letter-spacing:.005em;background:linear-gradient(180deg,#263352,#0f1b3d);color:#fff;box-shadow:0 1px 0 rgba(255,255,255,.15) inset,0 6px 16px rgba(15,27,61,.18)}
+.admbody .btn.blue{background:linear-gradient(180deg,#3b7bff,#1f5eff);box-shadow:0 1px 0 rgba(255,255,255,.3) inset,0 8px 20px rgba(31,94,255,.3)}
+.admbody .btn.red{background:linear-gradient(180deg,#f05252,#d92d2d);box-shadow:0 8px 20px rgba(217,45,45,.25)}
+.admbody .btn.ghost{background:rgba(255,255,255,.75);color:#1f5eff;border-color:rgba(31,94,255,.22);box-shadow:0 4px 12px rgba(31,62,140,.06)}
+.admbody .btn:disabled,.admbody .btn[disabled]{background:#cbd2de;box-shadow:none;cursor:not-allowed;transform:none}
+.admbody .btn.sm{min-height:36px;padding:6px 12px}
+/* formulaires */
+.admbody input:not([type=checkbox]):not([type=radio]):not([type=hidden]),.admbody select,.admbody textarea{border:1px solid rgba(15,27,61,.12);border-radius:12px;background:rgba(255,255,255,.85);padding:10px 12px;font:inherit;min-height:42px;transition:border-color .2s,box-shadow .2s;box-sizing:border-box}
+.admbody input:focus,.admbody select:focus,.admbody textarea:focus{outline:none;border-color:#1f5eff;box-shadow:0 0 0 4px rgba(31,94,255,.15)}
+.admbody .gsearch input{border:0!important;box-shadow:none!important;background:transparent!important}
+.filters .search input{min-width:0}
+.admbody summary{font-weight:700;padding:8px 0;list-style:none}.admbody summary::-webkit-details-marker{display:none}.admbody summary::before{content:"▸";display:inline-block;margin-right:8px;color:#1f5eff;transition:transform .25s var(--glass-ease)}.admbody details[open]>summary::before{transform:rotate(90deg)}
+.topbar summary::before{content:none}
+/* onglets, pastilles de statut */
+.tab{background:rgba(255,255,255,.75);border-color:rgba(15,27,61,.1)}.tab.on{background:linear-gradient(180deg,#3b7bff,#1f5eff);border-color:#1f5eff;color:#fff}
+.admbody .pill{font-weight:700;padding:3px 10px}
+.admbody .pill.st-active{background:#dcfce7;color:#15803d}.admbody .pill.st-trial{background:#fff1db;color:#c2410c}.admbody .pill.st-past_due{background:#fee2e2;color:#b91c1c}.admbody .pill.st-paused,.admbody .pill.st-canceled{background:#eef0f4;color:#475569}
+.admbody .flash{border-radius:14px}
+@media (max-width:900px){.admbody .kpis .k strong{font-size:1.55rem}.admbody .scroll:has(> table.cards){background:transparent;border:0;box-shadow:none;padding:0;-webkit-backdrop-filter:none;backdrop-filter:none}.admbody table.cards tr{background:rgba(255,255,255,.8);border:1px solid rgba(255,255,255,.85);border-radius:16px;box-shadow:0 6px 16px rgba(31,62,140,.06)}.admbody table.cards td{border:0}}
+.admbody form.filters{display:block}.admbody .filters .search{display:flex;flex-wrap:nowrap;gap:10px;width:100%;margin:0}.admbody .filters .search input{flex:1 1 auto;width:auto}
+.admbody .filters details.more{border:0;padding:0;margin-top:12px;display:block;width:100%;background:none;box-shadow:none}
+.admbody .pill,.admbody .sd,.admbody .tb,.admbody table.list td a[target="_blank"]{white-space:nowrap}
+.admbody table.list td[data-l="Contact"],.admbody table.list td[data-l="Inscription"],.admbody table.list td[data-l="Échéance"]{white-space:nowrap}
+.admbody .btn:disabled,.admbody .btn[disabled]{background:#e8ebf2;color:#6b7280;border-color:#dde2ec}
+.admbody table.list td[data-l="Entreprise"]{min-width:150px}
+.admbody td.pos,.admbody strong.pos{color:#15803d}.admbody td.neg,.admbody strong.neg{color:#b91c1c}

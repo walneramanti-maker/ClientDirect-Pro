@@ -31,3 +31,21 @@
   ['pointerup', 'pointercancel', 'pointerleave', 'dragstart', 'scroll'].forEach(function (t) { document.addEventListener(t, up, { passive: true, capture: true }); });
   document.addEventListener('touchstart', function () {}, { passive: true }); // active :active sur Safari iOS
 })();
+// Tableaux sur téléphone : chaque ligne devient une carte lisible (libellé de colonne au-dessus de chaque valeur)
+(function () {
+  Array.prototype.forEach.call(document.querySelectorAll('.admbody table.list:not(.cards)'), function (t) {
+    var heads = Array.prototype.map.call(t.querySelectorAll('thead th'), function (th) { return th.textContent.trim(); });
+    if (!heads.length) return;
+    Array.prototype.forEach.call(t.querySelectorAll('tbody tr'), function (tr) {
+      Array.prototype.forEach.call(tr.children, function (td, i) { if (!td.hasAttribute('data-l') && heads[i]) td.setAttribute('data-l', heads[i]); });
+    });
+    t.classList.add('cards');
+  });
+})();
+// Bénéfices, marges et résultats : vert si positifs, rouge si négatifs (tableaux et chiffres clés de toutes les pages)
+(function () {
+  var RE = /b[ée]n[ée]fice|marge|r[ée]sultat/i;
+  var tone = function (el, txt) { var v = parseFloat(String(txt).replace(/\s| | |€/g, '').replace(',', '.')); if (isNaN(v) || v === 0) return; el.classList.add(v < 0 ? 'neg' : 'pos'); };
+  Array.prototype.forEach.call(document.querySelectorAll('.admbody td[data-l]'), function (td) { if (RE.test(td.getAttribute('data-l'))) tone(td, td.textContent); });
+  Array.prototype.forEach.call(document.querySelectorAll('.admbody .kpis .k'), function (k) { var s = k.querySelector('span'), n = k.querySelector('strong'); if (s && n && RE.test(s.textContent)) tone(n, n.textContent); });
+})();
