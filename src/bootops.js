@@ -73,6 +73,46 @@ export function adminDiagnostic(db, env = process.env, { verifyPassword, totpCod
       autresAdressesEssayees: db.all("SELECT detail, COUNT(*) n, MAX(created_at) t FROM audit WHERE action='connexion.echec' AND detail!=? AND created_at>? GROUP BY detail ORDER BY t DESC LIMIT 10", login, since).map((r) => `${mask(r.detail)} ×${r.n} (dernier ${iso(r.t)}, ${r.detail.length} car., ${r.detail.length === login.length ? 'même longueur' : 'longueur différente'})`)
     };
   }
+  d.formatCleRender = totpFormat(env.ADMIN_TOTP_SECRET); d.formatCleBase = same ? totpFormat(same.totp_secret) : null;
   log(`Diagnostic administrateur : ${JSON.stringify(d)}`);
   return d;
+}
+
+/**
+ * Format d'une clé TOTP pour Google Authenticator (saisie manuelle) : Base32 RFC 4648, alphabet A–Z et 2–7 uniquement,
+ * au moins 16 caractères (80 bits). Ne renvoie que des caractéristiques, jamais la clé.
+ */
+export function totpFormat(raw) {
+  const s = String(raw ?? '');
+  const compact = s.replace(/\s+/g, '').toUpperCase();
+  const bad = [...compact].filter((c) => !/[A-Z2-7]/.test(c));
+  const kinds = [...new Set(bad.map((c) => (/[0189]/.test(c) ? 'chiffres 0, 1, 8 ou 9' : c === '=' ? 'signe = (remplissage)' : /["'`]/.test(c) ? 'guillemets' : /[-_]/.test(c) ? 'tiret ou soulignement' : 'autre caractère')))];
+  const valid = compact.length > 0 && bad.length === 0;
+  return {
+    longueur: compact.length, espaces: /\s/.test(s), espacesDebutFin: s !== s.trim(), minuscules: /[a-z]/.test(s),
+    caracteresInvalides: bad.length, typesInvalides: kinds, bits: valid ? compact.length * 5 : null,
+    longueurMultipleDe8: compact.length % 8 === 0,
+    compatibleGoogleAuthenticator: valid && compact.length >= 16
+  };
+}
+/** Clé strictement conforme (celle qu'on accepte d'enregistrer) : Base32 majuscules, 32 caractères ou plus, multiple de 8. */
+export const strictTotp = (raw) => { const c = String(raw ?? '').replace(/\s+/g, ''); return /^[A-Z2-7]+$/.test(c) && c.length >= 32 && c.length % 8 === 0 ? c : null; };
+
+/**
+ * ADMIN_TOTP_SYNC=1 : aligne la clé de double authentification de l'administrateur ADMIN_LOGIN sur ADMIN_TOTP_SECRET,
+ * seulement si cette clé est strictement conforme. Ne touche ni à l'identifiant ni au mot de passe ; la double
+ * authentification reste obligatoire. Idempotent.
+ */
+export function syncAdminTotp(db, env = process.env, log = console.log) {
+  if (env.ADMIN_TOTP_SYNC !== '1') return null;
+  const login = String(env.ADMIN_LOGIN || '').trim().toLowerCase();
+  const key = strictTotp(env.ADMIN_TOTP_SECRET);
+  if (!key) { log('Clé 2FA : synchronisation REFUSÉE, ADMIN_TOTP_SECRET non conforme (Base32 A–Z/2–7, 32 caractères)'); return { refus: 'clé non conforme' }; }
+  const u = db.one("SELECT id, totp_secret FROM users WHERE email=? AND role='superadmin'", login);
+  if (!u) { log('Clé 2FA : synchronisation REFUSÉE, administrateur ADMIN_LOGIN introuvable'); return { refus: 'administrateur introuvable' }; }
+  if (u.totp_secret === key) { log('Clé 2FA : déjà alignée sur Render'); return { inchange: true }; }
+  db.run('UPDATE users SET totp_secret=? WHERE id=?', key, u.id);
+  db.run("INSERT INTO audit(user_id,action,detail,created_at) VALUES(?,'2fa.cle.alignee','clé alignée sur ADMIN_TOTP_SECRET',?)", u.id, Date.now());
+  log('Clé 2FA : base de production alignée sur ADMIN_TOTP_SECRET (identifiant et mot de passe inchangés)');
+  return { aligne: true };
 }

@@ -48,6 +48,7 @@ if (process.env.ADMIN_LOGIN && process.env.ADMIN_PASSWORD && process.env.ADMIN_T
   db.run("INSERT INTO users(email,pass_hash,name,role,email_verified,totp_secret,created_at) VALUES(?,?,'Administrateur','superadmin',1,?,?)", process.env.ADMIN_LOGIN.trim().toLowerCase(), hashPassword(process.env.ADMIN_PASSWORD), process.env.ADMIN_TOTP_SECRET.trim().toUpperCase(), Date.now());
   console.log('Compte administrateur créé à partir des variables d’environnement.');
 }
+{ const { syncAdminTotp } = await import('./bootops.js'); try { syncAdminTotp(db); } catch (e) { console.error('Clé 2FA :', e.message); } }
 { const { adminDiagnostic } = await import('./bootops.js'); const S = await import('./security.js'); try { adminDiagnostic(db, process.env, S); } catch (e) { console.error('Diagnostic administrateur :', e.message); } }
 const server = http.createServer(createApp(db));
 server.headersTimeout = 20_000; server.requestTimeout = 30_000;
