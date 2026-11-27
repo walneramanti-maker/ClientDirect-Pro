@@ -130,3 +130,25 @@ test('avis des professionnels et page Bilan', async () => {
   const r2 = await admin.post('/admin/lancement', { csrf: admin.csrf(b.text), date: '2026-12-01' }); assert.equal(r2.status, 303);
   const b2 = await admin.get('/admin/bilan'); assert.match(b2.text, /Bilan du 01\/12\/2026 au 30\/12\/2026/); assert.match(b2.text, /se lit le <b>31\/12\/2026/);
 });
+
+test('prospection : panne réseau = pages non perdues (curseur immobile), arrêt après 3 échecs, pause de 6 h, remise à zéro ponctuelle', async () => {
+  const { runJobs } = await import('../src/jobs.js');
+  const cur = () => Number(db.one("SELECT v FROM meta WHERE k='prospect_cursor'")?.v || 0);
+  const before = cur();
+  app.net.setFetch(async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }); });
+  const r = await P.runNationalCampaign(db, { quota: 50, maxCalls: 20 });
+  assert.equal(cur(), before, 'aucune page marquée comme parcourue'); assert.equal(r.added, 0); assert.equal(r.calls, 3, 'arrêt après 3 échecs de suite');
+  assert.match(r.stopped, /réseau : fetch failed \(ECONNRESET\)/, 'cause exacte');
+  assert.ok(db.one("SELECT 1 FROM incidents WHERE kind='prospection_reseau'"));
+  // Pause : pas de nouvelle tentative avant 6 h, puis reprise
+  const now = Date.now(); let calls = 0;
+  app.net.setFetch(async (url) => { if (String(url).includes('/search')) calls++; return jsonResponse({ results: [] }); });
+  db.run("INSERT INTO meta(k,v) VALUES('prospect_order','v2') ON CONFLICT(k) DO UPDATE SET v='v2'");
+  db.run("INSERT INTO meta(k,v) VALUES('prospect_daily','50') ON CONFLICT(k) DO UPDATE SET v='50'");
+  await runJobs(db, now + 2 * 36e5); await new Promise((ok) => setTimeout(ok, 50)); assert.equal(calls, 0, 'en pause');
+  await runJobs(db, now + 7 * 36e5); await new Promise((ok) => setTimeout(ok, 200)); assert.ok(calls > 0, 'reprise après 6 h');
+  // Remise à zéro du curseur, une seule fois par valeur
+  process.env.PROSPECT_CURSOR_RESET = '2';
+  try { await P.runNationalCampaign(db, { quota: 1, maxCalls: 1 }); assert.equal(cur(), 3); await P.runNationalCampaign(db, { quota: 1, maxCalls: 1 }); assert.equal(cur(), 4, 'pas réappliquée'); }
+  finally { delete process.env.PROSPECT_CURSOR_RESET; }
+});

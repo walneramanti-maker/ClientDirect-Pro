@@ -26,6 +26,10 @@ export async function probeNetwork() {
       r.overpass[new URL(api).host] = `HTTP ${res.status} en ${Date.now() - t0} ms`;
     } catch (e) { r.overpass[new URL(api).host] = `échec : ${e.cause?.code || e.cause?.message || e.name || e.message} en ${Date.now() - t0} ms`; }
   }
+  // API publique Recherche d'entreprises (prospection nationale)
+  { const t0 = Date.now();
+    try { const res = await http.fetch(`${config.sireneApi}/search?q=garage&per_page=1`, { headers: { accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B ; contact@clientdirectpro.fr)' }, signal: AbortSignal.timeout(15000) }); r.sirene = `HTTP ${res.status} en ${Date.now() - t0} ms`; }
+    catch (e) { r.sirene = `échec : ${e.cause?.code || e.cause?.message || e.name || e.message} en ${Date.now() - t0} ms`; } }
   r.smtp587 = await tcp('smtp-relay.brevo.com', 587);
   r.smtp465 = await tcp('smtp-relay.brevo.com', 465);
   return r;

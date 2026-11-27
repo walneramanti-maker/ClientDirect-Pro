@@ -91,8 +91,11 @@ export async function runJobs(db, now = Date.now()) {
     const lastP = db.one("SELECT detail, created_at FROM audit WHERE action='job.prospect' ORDER BY id DESC LIMIT 1");
     let lastAdded = Infinity; try { lastAdded = JSON.parse(lastP?.detail || '{}').added ?? Infinity; } catch { lastAdded = Infinity; }
     const addedToday = db.one("SELECT COUNT(*) n FROM prospects WHERE created_at > ?", now - 20 * 36e5).n;
-    const resume = lastP && now - lastP.created_at > 60 * 60e3 && lastAdded < prospectDaily(db) && addedToday < prospectDaily(db);
-    if (prospectDaily(db) > 0 && (!v2 || resume || now - lastRun(db, 'job.prospect') > 20 * 36e5)) r.prospect = background('prospect', () => runNationalCampaign(db, { now }), 'Prospection nationale');
+    // Dernier passage entièrement en échec (API injoignable) : on attend 6 h au lieu de réessayer toutes les heures
+    let lastAllFailed = false; try { const d = JSON.parse(lastP?.detail || '{}'); lastAllFailed = d.calls > 0 && !d.ok && d.failed >= d.calls; } catch { lastAllFailed = false; }
+    const cooling = lastAllFailed && now - lastP.created_at < 6 * 36e5;
+    const resume = !cooling && lastP && now - lastP.created_at > 60 * 60e3 && lastAdded < prospectDaily(db) && addedToday < prospectDaily(db);
+    if (prospectDaily(db) > 0 && !cooling && (!v2 || resume || now - lastRun(db, 'job.prospect') > 20 * 36e5)) r.prospect = background('prospect', () => runNationalCampaign(db, { now }), 'Prospection nationale');
     const { enrichEnabled, enrichBatch } = await import('./enrich.js');
     if ((enrichEnabled(db) || config.osmEnrich) && now - lastRun(db, 'job.enrich') > 55 * 60e3) r.enrich = background('enrich', () => enrichBatch(db, { now }), 'Coordonnées');
   }

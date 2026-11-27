@@ -32,7 +32,10 @@ export async function searchSirene({ tpl, commune = null, departement = null, pa
   if (departement) { if (!DEPARTEMENTS[departement]) throw new Error('Département inconnu'); where = `departement=${departement}`; }
   else { if (!COMMUNES[commune]) throw new Error('Commune inconnue'); where = `code_commune=${commune}`; }
   const url = `${config.sireneApi}/search?activite_principale=${encodeURIComponent(T.naf.join(','))}&${where}&etat_administratif=A&per_page=25&page=${page}`;
-  const res = await net.fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
+  let res;
+  // Échec réseau : cause exacte (DNS, connexion refusée, TLS, délai) au lieu du seul « fetch failed »
+  try { res = await net.fetch(url, { headers: { accept: 'application/json', 'user-agent': 'ClientDirectPro/1.0 (prospection B2B ; contact@clientdirectpro.fr)' }, signal: AbortSignal.timeout(20000) }); }
+  catch (e) { const c = e.cause?.code || e.cause?.message || e.name; throw Object.assign(new Error(`${e.message}${c && c !== e.message ? ` (${c})` : ''}`), { network: true }); }
   if (res.status === 429) throw Object.assign(new Error("L'API publique limite le nombre de requêtes, réessayez dans une minute."), { rateLimited: true });
   if (!res.ok) throw new Error(`API Recherche d'entreprises ${res.status}`);
   const j = await res.json();
@@ -163,7 +166,12 @@ export function prospectDaily(db) { const v = db.one("SELECT v FROM meta WHERE k
 export async function runNationalCampaign(db, { quota = prospectDaily(db), pause = config.prospectPauseMs, maxCalls = null, now = Date.now() } = {}) {
   const U = CAMPAIGN_UNITS.length;
   let cursor = Number(db.one("SELECT v FROM meta WHERE k='prospect_cursor'")?.v || 0);
-  const r = { added: 0, calls: 0, cursorStart: cursor, stopped: '' };
+  // Remise à zéro ponctuelle du curseur (PROSPECT_CURSOR_RESET), appliquée une seule fois par valeur
+  const reset = process.env.PROSPECT_CURSOR_RESET;
+  if (reset && /^\d+$/.test(reset) && db.one("SELECT v FROM meta WHERE k='prospect_cursor_reset'")?.v !== reset) {
+    cursor = Number(reset); db.run("INSERT INTO meta(k,v) VALUES('prospect_cursor_reset',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", reset);
+  }
+  const r = { added: 0, calls: 0, cursorStart: cursor, stopped: '' }; let failsInRow = 0;
   const limitCalls = maxCalls ?? Math.max(10, Math.ceil(quota / 3));
   while (r.added < quota && r.calls < limitCalls) {
     const pass = Math.floor(cursor / U); const u = CAMPAIGN_UNITS[cursor % U];
@@ -175,17 +183,23 @@ export async function runNationalCampaign(db, { quota = prospectDaily(db), pause
         try { ({ list } = await searchSirene({ tpl: u.tpl, departement: u.d, page: pass + 1, withMeta: true })); break; }
         catch (e) { if (!e.rateLimited || k >= 4 || !pause) throw e; r.waits = (r.waits || 0) + 1; await new Promise((ok) => setTimeout(ok, 2000 * 2 ** k)); }
       }
-      r.calls++; r.added += importProspects(db, list);
+      r.calls++; r.added += importProspects(db, list); r.ok = (r.ok || 0) + 1; failsInRow = 0;
     } catch (e) {
-      r.calls++;
+      r.calls++; r.failed = (r.failed || 0) + 1;
       if (e.rateLimited) { r.stopped = 'limite API'; break; }
+      // Panne réseau : la page n'est PAS considérée comme parcourue (le curseur n'avance pas) ; arrêt après 3 échecs de suite
+      if (e.network) {
+        failsInRow++;
+        if (failsInRow >= 3) { r.stopped = `réseau : ${String(e.message).slice(0, 100)}`; recordIncident(db, { kind: 'prospection_reseau', severity: 'warning', message: `Prospection suspendue : API Recherche d'entreprises injoignable (${String(e.message).slice(0, 100)})` }); break; }
+        if (pause) await new Promise((ok) => setTimeout(ok, pause)); continue;
+      }
       recordIncident(db, { kind: 'prospection', severity: 'info', message: `Campagne nationale (${u.tpl}, ${u.d}) : ${String(e.message).slice(0, 120)}` });
     }
     cursor++;
     if (pause) await new Promise((ok) => setTimeout(ok, pause));
   }
   db.run("INSERT INTO meta(k,v) VALUES('prospect_cursor',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(cursor));
-  db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.prospect',?,?)", JSON.stringify({ added: r.added, calls: r.calls }), now);
+  db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.prospect',?,?)", JSON.stringify({ added: r.added, calls: r.calls, ok: r.ok || 0, failed: r.failed || 0 }), now);
   refreshPotentials(db);
   return { ...r, cursor, coverage: Math.min(1, cursor / U) };
 }
