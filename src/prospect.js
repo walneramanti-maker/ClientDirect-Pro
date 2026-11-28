@@ -127,11 +127,19 @@ export function isPersonName(name) {
 }
 /** Jeton de démonstration stable (le même lien survit à un redémarrage du serveur). */
 export const demoTokenFor = (siren) => hmac(config.secret, 'demo:' + siren).slice(0, 32);
+export function demoNameFor(p) {
+  const name = displayName(p.name); if (!isPersonName(name)) return name;
+  const label = (p.activity && ACTIVITIES[p.activity]?.label) || TEMPLATES[p.tpl]?.metier || 'Votre entreprise';
+  const city = p.city ? displayName(p.city) : '';
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)}${city ? ` à ${city}` : ''}`;
+}
 export function prepareDemo(db, prospectId, { stable = false } = {}) {
   const p = db.one('SELECT * FROM prospects WHERE id=?', prospectId); if (!p) throw new Error('Prospect introuvable');
   if (p.status === 'optout') throw new Error("Cette entreprise a demandé à ne plus être contactée.");
+  // Entreprise en nom propre, sans enseigne : la démonstration porte « Métier à Ville », comme le message envoyé
+  const name = demoNameFor(p);
+  if (p.demo_tenant_id && stable) db.run("UPDATE tenants SET name=? WHERE id=? AND status='demo' AND name!=?", name, p.demo_tenant_id, name);
   if (p.demo_tenant_id && db.one("SELECT 1 FROM tenants WHERE id=? AND status='demo'", p.demo_tenant_id) && stable) return { tenantId: p.demo_tenant_id, demoUrl: `${config.baseUrl}/demo/${demoTokenFor(p.siren)}`, demoToken: demoTokenFor(p.siren) };
-  const name = displayName(p.name);
   const r = createTenant(db, { name, tpl: p.tpl, activity: p.activity || null, city: displayName(p.city), address: p.address, country: territoryOf(p.postal), lang: 'fr', status: 'demo', prospectId: p.id, demoToken: stable ? demoTokenFor(p.siren) : null });
   db.run("UPDATE prospects SET status=CASE WHEN status IN ('new','contacted') THEN 'demo' ELSE status END, demo_tenant_id=? WHERE id=?", r.id, p.id);
   return { tenantId: r.id, demoUrl: `${config.baseUrl}/demo/${r.demoToken}`, demoToken: r.demoToken };
@@ -252,6 +260,8 @@ export async function runNationalCampaign(db, { quota = prospectDaily(db), pause
   db.run("INSERT INTO audit(action,detail,created_at) VALUES('job.prospect',?,?)", JSON.stringify({ added: r.added, calls: r.calls, ok: r.ok || 0, failed: r.failed || 0 }), now);
   // Nouvelles activités : un tiers des recherches en plus, sans toucher à la progression de la campagne principale
   if (!r.stopped && config.prospectExtension && limitCalls >= 3) { try { r.extension = await runExtensionCampaign(db, { calls: Math.max(1, Math.floor(limitCalls / 3)), pause, now }); } catch (e) { r.extension = { error: e.message }; } }
+  // Outre-mer prioritaire (Guyane, Martinique, Guadeloupe, La Réunion) : un tiers des recherches en plus, file dédiée
+  if (!r.stopped && limitCalls >= 3) { try { r.outremer = await runDomCampaign(db, { calls: Math.max(1, Math.floor(limitCalls / 3)), pause, now }); } catch (e) { r.outremer = { error: e.message }; } }
   refreshPotentials(db);
   return { ...r, cursor, coverage: Math.min(1, cursor / U) };
 }
@@ -268,6 +278,24 @@ export async function runExtensionCampaign(db, { calls = 5, pause = config.prosp
     cursor++; if (pause) await new Promise((ok) => setTimeout(ok, pause));
   }
   db.run("INSERT INTO meta(k,v) VALUES('prospect_cursor_ext',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(cursor));
+  return { ...r, cursor, units: U };
+}
+/** Outre-mer : tous les métiers historiques et toutes les nouvelles activités, département par département, page après page. */
+export const DOM_DEPTS = ['973', '972', '971', '974'];
+export const DOM_UNITS = [...TPLS.map((tpl) => ({ tpl, naf: null, activity: null })), ...EXT_TARGETS.map((x) => ({ tpl: x.base, naf: x.naf, activity: x.activity }))]
+  .flatMap((u, k) => DOM_DEPTS.map((d, i) => ({ d, ...u, k: (k + i) })));
+export async function runDomCampaign(db, { calls = 5, pause = config.prospectPauseMs, now = Date.now() } = {}) {
+  const U = DOM_UNITS.length; let cursor = Number(db.one("SELECT v FROM meta WHERE k='prospect_cursor_dom'")?.v || 0);
+  const r = { added: 0, calls: 0, ok: 0, failed: 0 }; let fails = 0;
+  while (r.calls < calls) {
+    const pass = Math.floor(cursor / U); const u = DOM_UNITS[cursor % U]; if (pass >= 20) break;
+    try {
+      const { list } = await searchSirene({ tpl: u.tpl, naf: u.naf, departement: u.d, page: pass + 1, withMeta: true }); r.calls++; r.ok++; fails = 0;
+      r.added += importProspects(db, list.map((p) => ({ ...p, activity: u.activity && u.naf?.includes(p.naf) ? u.activity : (activityFromNaf(p.naf)?.key || u.activity || null) })));
+    } catch (e) { r.calls++; r.failed++; if (e.rateLimited) break; if (e.network && ++fails >= 3) break; if (e.network) continue; }
+    cursor++; if (pause) await new Promise((ok) => setTimeout(ok, pause));
+  }
+  db.run("INSERT INTO meta(k,v) VALUES('prospect_cursor_dom',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", String(cursor));
   return { ...r, cursor, units: U };
 }
 /** Avancement de la campagne pour l'administration. */

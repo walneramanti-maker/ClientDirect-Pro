@@ -62,3 +62,29 @@ test('fiabilité des e-mails : domaine sans messagerie, adresse automatique ou j
   const C = await import('../src/campaigns.js');
   assert.equal(C.countEligible(db, { channel: 'email', depts: ['973'] }), 1, 'seule l’adresse vérifiée est éligible');
 });
+
+test('démonstration d’une entreprise en nom propre : « Métier à Ville », comme dans le message', async () => {
+  const { demoNameFor } = await import('../src/prospect.js');
+  assert.equal(demoNameFor({ name: 'MICHEL PIETROTTI', tpl: 'restaurant', city: 'BASTIA' }), 'Restaurant à Bastia');
+  assert.equal(demoNameFor({ name: 'WILFRIED PIGNOLET (SNACK TIFRID)', tpl: 'restaurant', city: 'SAINT-DENIS' }), 'Snack Tifrid');
+});
+
+test('prospection Outre-mer prioritaire : Guyane, Martinique, Guadeloupe, La Réunion, file dédiée', async () => {
+  const P = await import('../src/prospect.js');
+  const seen = []; let n = 920000000;
+  app.net.setFetch(async (url) => { const u = String(url); seen.push(u); const d = /departement=(\d+)/.exec(u)?.[1] || '973'; return new Response(JSON.stringify({ total_pages: 1, results: [{ siren: String(n++), nom_complet: 'ENT DOM', activite_principale: '45.20A', date_creation: '2024-01-01', tranche_effectif_salarie: 'NN', siege: { siret: '1', libelle_commune: 'VILLE', code_postal: d + '00', adresse: '1 rue' } }] }), { status: 200, headers: { 'content-type': 'application/json' } }); });
+  const r = await P.runDomCampaign(db, { calls: 4, pause: 0 });
+  assert.equal(r.calls, 4); assert.ok(r.added >= 1);
+  const depts = seen.map((u) => /departement=(\d+)/.exec(u)?.[1]).filter(Boolean);
+  assert.deepEqual([...new Set(depts)].sort(), ['971', '972', '973', '974']);
+});
+
+test('e-mails publics : une page Facebook ne bloque pas la file (marquée vue, les sites suivants sont lus)', async () => {
+  const { freeEmailPass } = await import('../src/enrich.js');
+  db.run("INSERT INTO prospects(siren,name,naf,tpl,city,postal,created_at,website,potential) VALUES('930000001','Resto FB','56.10A','restaurant','Cayenne','97300',?,'https://www.facebook.com/restofb',99)", Date.now());
+  db.run("INSERT INTO prospects(siren,name,naf,tpl,city,postal,created_at,website,potential) VALUES('930000002','Coiffure Site','96.02A','coiffeur','Kourou','97310',?,'https://coiffure-site.fr',98)", Date.now());
+  app.net.setFetch(async () => new Response('<p>Écrivez-nous : salon@coiffure-site.fr</p>', { status: 200, headers: { 'content-type': 'text/html' } }));
+  const r1 = await freeEmailPass(db, { max: 1 }); assert.equal(r1.plateformes, 1);
+  const r2 = await freeEmailPass(db, { max: 1 }); assert.equal(r2.found, 1, 'le site suivant est bien lu au passage d’après');
+  assert.equal(db.one("SELECT email FROM prospects WHERE siren='930000002'").email, 'salon@coiffure-site.fr');
+});

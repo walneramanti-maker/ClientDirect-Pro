@@ -124,7 +124,7 @@ export async function runJobs(db, now = Date.now()) {
       return v;
     }, 'Vérification des e-mails (gratuit)'); }
     // E-mails publics lus directement sur le site des entreprises (gratuit), 30 sites par heure au plus
-    if (!config.disableJobs && now - lastRun(db, 'job.freeemail') > 55 * 60e3) { mark(db, 'job.freeemail', now); r.freeEmail = background('freeemail', () => freeEmailPass(db, { now }), 'E-mails publics (gratuit)'); }
+    if (!config.disableJobs && (now - lastRun(db, 'job.freeemail') > 55 * 60e3 || (!db.one("SELECT 1 FROM meta WHERE k='free_email_boot_v3'") && (db.run("INSERT OR IGNORE INTO meta(k,v) VALUES('free_email_boot_v3','1')"), true)))) { mark(db, 'job.freeemail', now); r.freeEmail = background('freeemail', () => freeEmailPass(db, { now }), 'E-mails publics (gratuit)'); }
   }
   // 13. Parrainage et partenariat : validation des récompenses après 30 jours (une fois par jour)
   if (now - lastRun(db, 'job.rewards') > 20 * 36e5) {

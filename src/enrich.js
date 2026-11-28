@@ -277,7 +277,8 @@ export async function freeEmailPass(db, { max = 30, now = Date.now() } = {}) {
   for (const p of rows) {
     r.checked++;
     let url; try { url = new URL(/^https?:\/\//i.test(p.website) ? p.website : `https://${p.website}`); } catch { db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', `free_email_${p.id}`, String(now)); continue; }
-    if (!/^https?:$/.test(url.protocol) || isPlatform(p.website)) continue;
+    // Page Facebook, Instagram ou plateforme de réservation : pas de site propre à lire ; marquée vue pour ne pas bloquer les suivantes
+    if (!/^https?:$/.test(url.protocol) || isPlatform(p.website)) { r.plateformes = (r.plateformes || 0) + 1; db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', `free_email_${p.id}`, String(now)); continue; }
     const host = url.hostname.replace(/^www\./, ''); let found = []; let answered = false;
     for (const page of [url.origin + '/', url.origin + '/contact']) {
       const html = await fetchPublic(page).then((h) => { answered = true; return h; }).catch((e) => { const k = String(e.cause?.code || e.name || 'erreur'); r.erreurs[k] = (r.erreurs[k] || 0) + 1; return ''; });
