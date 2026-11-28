@@ -99,3 +99,16 @@ test('campagne n° 2 : le brouillon présenté est figé et n’est plus remplac
   C.prepareDrafts(db); assert.equal(db.one('SELECT status FROM campaigns WHERE id=?', id).status, 'draft', 'non annulée');
   assert.equal(freezeCampaign2(db, () => {}), null, 'une seule fois');
 });
+
+test('campagne n° 2 : validée une seule fois, L’Antre Ducale écartée, textes prudents sur l’absence de site', async () => {
+  const { approveCampaign2 } = await import('../src/bootops.js');
+  seed(1, { dept: '80', tpl: 'restaurant' });
+  const x = db.one("SELECT id FROM prospects WHERE dept='80'"); db.run("UPDATE prospects SET name='RESTO LOTUS (L''ANTRE DUCALE)' WHERE id=?", x.id);
+  const c2 = db.one("SELECT id FROM campaigns WHERE name='Campagne n° 2'").id;
+  db.run("INSERT INTO campaign_items(campaign_id,prospect_id,to_addr,message,subject,status) VALUES(?,?,?,?,?,'ready')", c2, x.id, 'a@b.fr', 'm', 's');
+  const r = await approveCampaign2(db, () => {});
+  assert.equal(r.validee, c2); assert.equal(db.one('SELECT status FROM campaigns WHERE id=?', c2).status, 'approved');
+  assert.equal(db.one('SELECT status FROM campaign_items WHERE campaign_id=? AND prospect_id=?', c2, x.id).status, 'skipped');
+  assert.equal(await approveCampaign2(db, () => {}), null, 'une seule fois');
+  assert.match(db.one("SELECT message FROM campaign_items WHERE campaign_id=? AND status='ready' LIMIT 1", c2).message, /Mes recherches ne m’ont pas permis d’identifier un site Internet/);
+});

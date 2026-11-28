@@ -21,7 +21,7 @@ export const TRADES = {
   coiffeur: {
     metier: 'salon de coiffure', clients: 'vos clientes et clients',
     need: 'Pendant une coupe, vous ne pouvez pas répondre au téléphone : chaque appel manqué est un rendez-vous qui part ailleurs.',
-    does: ['réserver leur créneau en ligne, 24 h/24, sans vous appeler', 'choisir la prestation : coupe, tresses, couleur…', 'vous écrire sur WhatsApp, dès que vous ajoutez votre numéro'],
+    does: ['réserver leur créneau en ligne, 24 h/24, sans vous appeler', 'choisir la prestation : coupe, couleur, coiffage…', 'vous écrire sur WhatsApp, dès que vous ajoutez votre numéro'],
     plan: 'pro', subject: (n) => `${n} : des réservations en ligne, même pendant vos coupes`
   },
   beaute: {
@@ -75,9 +75,8 @@ const tradeOf = (p) => {
 export function needLine(p) {
   let f = {}; try { f = JSON.parse(p.site_flags || '{}'); } catch { f = {}; }
   const st = p.site_status || (p.website ? null : 'aucun_probable');
-  if (st === 'aucun') return 'Je n’ai pas trouvé de site Internet à votre nom.';
-  if (st === 'aucun_probable') return 'Je n’ai pas trouvé de site Internet à votre nom.';
-  if (st === 'plateforme') return 'Vous êtes visible sur une plateforme ou un réseau social, mais pas encore sur un site à votre nom.';
+  if (st === 'aucun' || st === 'aucun_probable') return 'Mes recherches ne m’ont pas permis d’identifier un site Internet à votre nom.';
+  if (st === 'plateforme') return 'Je vous ai trouvé sur une plateforme ou un réseau social, mais mes recherches ne m’ont pas permis d’identifier un site Internet à votre nom.';
   if (st === 'vieillissant' || st === 'récent') {
     const miss = [!f.booking && 'la réservation en ligne', !f.quote && 'la demande de devis en ligne'].filter(Boolean);
     return miss.length ? `Votre site actuel ne propose pas encore ${miss.join(' ni ')}.` : 'Votre site actuel a déjà l’essentiel ; l’assistant qui répond à vos clients 24 h/24 pourrait vous faire gagner du temps.';

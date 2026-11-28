@@ -294,3 +294,22 @@ export function freezeCampaign2(db, log = console.log) {
   if (!c) return null;
   db.run("UPDATE campaigns SET name='Campagne n° 2' WHERE id=?", c.id); log(`Campagne ${c.id} figée sous le nom « Campagne n° 2 »`); return c.id;
 }
+
+/**
+ * Validation de la campagne n° 2 donnée par l'utilisateur le 28/11/2026 : 9 entreprises, L'Antre Ducale écartée
+ * (adresse e-mail à vérifier). Une seule fois. Les envois ne partent qu'en semaine, de 9 h à 18 h à l'heure locale
+ * de chaque destinataire, donc au plus tôt le lundi 30 novembre 2026.
+ */
+export async function approveCampaign2(db, log = console.log, now = Date.now()) {
+  if (db.one("SELECT 1 FROM meta WHERE k='campagne2_validee'")) return null;
+  const c = db.one("SELECT id FROM campaigns WHERE name='Campagne n° 2' AND status='draft' AND channel='email'"); if (!c) return null;
+  const { approveCampaign } = await import('./campaigns.js');
+  db.run(`UPDATE campaign_items SET status='skipped', error='adresse e-mail à vérifier (écartée par l''administrateur)'
+    WHERE campaign_id=? AND status='ready' AND prospect_id IN (SELECT id FROM prospects WHERE name LIKE '%ANTRE DUCALE%')`, c.id);
+  approveCampaign(db, c.id, now);
+  db.run("INSERT INTO meta(k,v) VALUES('campagne2_validee',?)", String(now));
+  db.run("INSERT INTO audit(action,detail,created_at) VALUES('campagne.validee',?,?)", `campagne ${c.id} « Campagne n° 2 » validée par l’administrateur le 28/11/2026 : 9 entreprises, L’Antre Ducale écartée`, now);
+  const n = db.one("SELECT COUNT(*) n FROM campaign_items WHERE campaign_id=? AND status='ready'", c.id).n;
+  log(`Campagne ${c.id} « Campagne n° 2 » validée : ${n} e-mail(s) prêts, envoi en semaine de 9 h à 18 h (heure locale), au plus tôt le lundi 30 novembre 2026`);
+  return { validee: c.id, prets: n };
+}
