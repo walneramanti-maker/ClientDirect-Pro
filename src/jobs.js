@@ -117,7 +117,12 @@ export async function runJobs(db, now = Date.now()) {
     const { enrichEnabled, enrichBatch } = await import('./enrich.js');
     if ((enrichEnabled(db) || config.osmEnrich) && now - lastRun(db, 'job.enrich') > 55 * 60e3) r.enrich = background('enrich', () => enrichBatch(db, { now }), 'Coordonnées');
     // Fiabilité des adresses e-mail (DNS, gratuit), avant toute campagne
-    if (!config.disableJobs && now - lastRun(db, 'job.verifyemail') > 55 * 60e3) { mark(db, 'job.verifyemail', now); r.verifyEmail = background('verifyemail', async () => { const { verifyEmails } = await import('./suppression.js'); return verifyEmails(db, { now }); }, 'Vérification des e-mails (gratuit)'); }
+    if (!config.disableJobs && now - lastRun(db, 'job.verifyemail') > 55 * 60e3) { mark(db, 'job.verifyemail', now); r.verifyEmail = background('verifyemail', async () => {
+      const { verifyEmails } = await import('./suppression.js'); const v = await verifyEmails(db, { now });
+      // Nouvelles adresses fiables : les brouillons de campagne sont refaits (jamais validés ni envoyés) et leur aperçu est écrit au journal
+      if (v.fiables) { const { prepareDrafts } = await import('./campaigns.js'); const { campaignPreview } = await import('./bootops.js'); v.brouillons = prepareDrafts(db, now); campaignPreview(db); }
+      return v;
+    }, 'Vérification des e-mails (gratuit)'); }
     // E-mails publics lus directement sur le site des entreprises (gratuit), 30 sites par heure au plus
     if (!config.disableJobs && now - lastRun(db, 'job.freeemail') > 55 * 60e3) { mark(db, 'job.freeemail', now); r.freeEmail = background('freeemail', () => freeEmailPass(db, { now }), 'E-mails publics (gratuit)'); }
   }
@@ -130,8 +135,10 @@ export async function runJobs(db, now = Date.now()) {
   // … et immédiatement si l'adresse du site a changé (liens de démonstration à jour, ex. passage au nom de domaine)
   const staleDraft = db.one("SELECT 1 FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id WHERE c.status='draft' AND c.name LIKE 'Préparée automatiquement%' AND ((i.message LIKE '%/demo/%' AND i.message NOT LIKE ?) OR (c.channel='email' AND i.subject IS NULL)) LIMIT 1", `%${config.baseUrl}/demo/%`)
     // … ou si aucun brouillon e-mail n'existe encore au format personnalisé (objet par métier)
-    || (!db.one("SELECT 1 FROM meta WHERE k='drafts_v3'") && (db.run("INSERT OR IGNORE INTO meta(k,v) VALUES('drafts_v3','1')"), true));
-  if (staleDraft || now - lastRun(db, 'job.drafts') > 20 * 36e5) { const { prepareDrafts } = await import('./campaigns.js'); r.drafts = prepareDrafts(db, now); mark(db, 'job.drafts', now); console.log('Campagnes préparées (brouillons, rien n’est envoyé) :', JSON.stringify(r.drafts)); }
+    || (!db.one("SELECT 1 FROM meta WHERE k='drafts_v3'") && (db.run("INSERT OR IGNORE INTO meta(k,v) VALUES('drafts_v3','1')"), true))
+    // … ou une fois après l'arrivée de la vérification des adresses (brouillons refaits avec les adresses fiables seulement)
+    || (!db.one("SELECT 1 FROM meta WHERE k='drafts_v4'") && (db.run("INSERT OR IGNORE INTO meta(k,v) VALUES('drafts_v4','1')"), true));
+  if (staleDraft || now - lastRun(db, 'job.drafts') > 20 * 36e5) { const { prepareDrafts } = await import('./campaigns.js'); r.drafts = prepareDrafts(db, now); mark(db, 'job.drafts', now); console.log('Campagnes préparées (brouillons, rien n’est envoyé) :', JSON.stringify(r.drafts)); try { const { campaignPreview } = await import('./bootops.js'); campaignPreview(db); } catch { /* aperçu facultatif */ } }
   // 14. Campagnes e-mail validées : un envoi espacé par passage, seulement si l'envoi a été autorisé (CAMPAIGN_SENDING=on)
   // 14 a. Réponses aux campagnes (boîte contact@, lecture seule), toutes les 10 minutes : STOP, refus, rebonds, relances arrêtées
   if (now - lastRun(db, 'job.replies') > 10 * 60e3) {

@@ -192,14 +192,15 @@ export function autoResolveIncidents(db, now = Date.now()) {
 
 /** Aperçu de la campagne e-mail préparée (pour validation) : entreprises, besoin constaté, objet. Adresses masquées. */
 export function campaignPreview(db, log = console.log) {
-  const c = db.one("SELECT id, name, size, status FROM campaigns WHERE channel='email' AND status IN ('draft','approved') ORDER BY id DESC LIMIT 1");
+  // Le brouillon à valider d'abord ; sinon la dernière campagne validée
+  const c = db.one("SELECT id, name, size, status FROM campaigns WHERE channel='email' AND status IN ('draft','approved') ORDER BY (status='draft') DESC, id DESC LIMIT 1");
   if (!c) return log('Aperçu campagne : aucune campagne e-mail préparée');
   const rows = db.all('SELECT p.name, p.city, p.dept, p.postal, p.tpl, p.site_status, p.site_flags, p.potential, p.email, i.subject FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC, i.id', c.id);
   log(`Aperçu campagne ${c.id} (${c.status}, ${rows.length} entreprises) : ${JSON.stringify(rows.map((r) => ({ ...r, email: mask(r.email) })))}`);
   // Campagne complète à présenter avant validation : répartition, puis 3 messages intégraux (adresses masquées)
   const by = (col) => db.all(`SELECT p.${col} k, COUNT(*) n FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? GROUP BY p.${col} ORDER BY n DESC`, c.id).map((x) => `${x.k} : ${x.n}`).join(', ');
   log(`Campagne ${c.id} « ${c.name} » — répartition par département : ${by('dept')} ; par métier : ${by('tpl')} ; potentiel moyen : ${db.one('SELECT ROUND(AVG(p.potential)) a FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=?', c.id).a}`);
-  for (const m of db.all('SELECT p.name, p.city, i.subject, i.message FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC LIMIT 3', c.id)) log(`Message type (campagne ${c.id}, ${m.name}, ${m.city}) — Objet : ${m.subject}\n${String(m.message).replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, (e) => mask(e))}`);
+  for (const m of db.all('SELECT p.name, p.city, i.subject, i.message FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC LIMIT 3', c.id)) log(`Message type (campagne ${c.id}, ${m.name}, ${m.city}) — Objet : ${m.subject} ⏎ ${String(m.message).replace(/\r?\n/g, ' ⏎ ').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, (e) => mask(e))}`);
 }
 
 /** MARK_INTERNAL=<site>[,<site>] : classe en compte interne (exclu des statistiques clients). Réversible depuis la fiche. */
