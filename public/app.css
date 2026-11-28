@@ -513,3 +513,26 @@ em.soon{display:inline-block;font-style:normal;font-size:.72rem;font-weight:800;
 .offer{display:inline-flex;align-items:center;gap:8px;margin:0 0 14px;padding:8px 14px;border-radius:999px;background:#16a34a;color:#fff;font-weight:700;font-size:.98rem;line-height:1.25;box-shadow:0 4px 14px rgba(22,163,74,.35)}
 .offer svg{width:18px;height:18px;flex:none;color:#fff;stroke:#fff}
 @media (max-width:640px){.hero-mk h1{font-size:1.85rem;line-height:1.15}.hero-mk .lead{font-size:1.02rem}.hero-mk .lead-plans{display:none}.hero-mk .kicker{font-size:.72rem;margin-bottom:8px}.offer{font-size:.92rem}}
+
+/* Accueil sur téléphone : l'essentiel d'abord, le reste dépliable, inscription toujours accessible */
+.steps3{list-style:none;padding:0;margin:14px 0;display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.steps3 li{display:flex;align-items:center;gap:12px;background:var(--bg);border-radius:var(--r);padding:16px;font-weight:600}
+.steps3 b{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#2563eb;color:#fff}
+.m-only{display:none}.fold-sum{display:none}
+@media (max-width:640px){
+  .m-only{display:block}.d-only{display:none!important}
+  .home .hero-mk .kicker,.home .hero-mk .phone{display:none}
+  .home .hero-mk{padding:22px 0 26px}
+  .home .hero-mk .cta{display:grid;gap:10px}.home .hero-mk .cta .btn{width:100%;text-align:center}
+  .steps3{grid-template-columns:1fr;gap:8px}.steps3 li{padding:12px 14px}
+  .how3{padding:22px 0}
+  .m-fold{padding:0!important;background:none!important}
+  .m-fold>.fold-sum{display:flex;width:calc(100% - 32px);font-size:1rem;color:inherit;justify-content:space-between;align-items:center;margin:0 16px 10px;padding:16px;border:1px solid var(--line,#e5e7eb);border-radius:var(--r);font-weight:700;cursor:pointer;background:#fff}
+  .m-fold>.fold-sum::after{content:'+';font-size:1.3rem;line-height:1}
+  .m-fold.open>.fold-sum::after{content:'−'}
+  .m-fold:not(.open)>:not(.fold-sum){display:none}.wrap>.m-fold>.fold-sum{width:100%;margin:0 0 10px}.m-fold.open>.wrap{padding:6px 16px 22px}
+  .sticky-cta{position:fixed;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:50;display:flex;flex-direction:column;align-items:center;padding:12px;border-radius:14px;background:#2563eb;color:#fff!important;font-weight:700;text-decoration:none;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:transform .2s}
+  .sticky-cta small{font-weight:500;opacity:.9;font-size:.78rem}
+  .sticky-cta.hide{transform:translateY(160%)}
+  .home{padding-bottom:84px}
+}

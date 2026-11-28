@@ -15,3 +15,23 @@
   var row = document.querySelector('.plans'), best = row && row.querySelector('.plan.best'); if (!best) return;
   row.scrollLeft = best.offsetLeft - (row.clientWidth - best.clientWidth) / 2;
 })();
+// Accueil sur téléphone : sections secondaires repliées derrière un bouton, bouton d'inscription fixe
+(function () {
+  var mq = window.matchMedia && window.matchMedia('(max-width:640px)');
+  document.querySelectorAll('.m-fold[data-fold]').forEach(function (sec) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'fold-sum'; b.textContent = sec.getAttribute('data-fold');
+    b.setAttribute('aria-expanded', 'false');
+    b.addEventListener('click', function () { var o = sec.classList.toggle('open'); b.setAttribute('aria-expanded', o ? 'true' : 'false'); });
+    sec.insertBefore(b, sec.firstChild);
+    if (location.hash && sec.id && location.hash === '#' + sec.id) sec.classList.add('open');
+  });
+  document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+    a.addEventListener('click', function () { var t = document.querySelector(a.getAttribute('href')); if (t && t.classList.contains('m-fold')) { t.classList.add('open'); var b = t.querySelector('.fold-sum'); if (b) b.setAttribute('aria-expanded', 'true'); } });
+  });
+  // Le bouton fixe se cache quand un autre bouton d'inscription est déjà à l'écran (pas de doublon)
+  var sticky = document.querySelector('.sticky-cta'); if (!sticky || !('IntersectionObserver' in window) || !mq || !mq.matches) return;
+  var seen = new Set();
+  var io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) seen.add(e.target); else seen.delete(e.target); }); sticky.classList.toggle('hide', seen.size > 0); });
+  document.querySelectorAll('.hero-mk .cta .btn.blue, .cta-band .btn.blue').forEach(function (el) { io.observe(el); });
+})();
+

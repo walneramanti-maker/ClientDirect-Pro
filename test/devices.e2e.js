@@ -30,6 +30,9 @@ for (const dev of Object.keys(DEVICES)) {
     const ctx = await ctxFor(dev); const p = await ctx.newPage(); const errs = errorsOf(p);
     await p.goto(app.base + '/'); await check(p, `${dev}-accueil`);
     const lang = await p.getAttribute('html', 'lang'); assert.equal(lang, DEVICES[dev].locale.slice(0, 2));
+    // Sur téléphone, les formules sont repliées : le visiteur voit d'abord l'offre et le bouton d'inscription
+    const fold = p.locator('#formules > .fold-sum');
+    if (await fold.isVisible()) { assert.ok(await p.isVisible('.hero-mk .cta .btn.blue')); await fold.click(); }
     assert.ok(await p.isVisible('.plan.best')); assert.ok(await p.isVisible('table.compare'));
     await p.locator('#formules').scrollIntoViewIfNeeded(); await check(p, `${dev}-formules`);
     assert.deepEqual(errs, []); await ctx.close();
