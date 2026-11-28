@@ -27,13 +27,13 @@ export const TRADES = {
   beaute: {
     metier: 'institut de beauté', clients: 'vos clientes',
     need: 'Pendant un soin, vous ne pouvez pas répondre au téléphone : chaque appel manqué est un rendez-vous qui part ailleurs.',
-    does: ['réserver leur soin en ligne, 24 h/24, sans vous appeler', 'préciser la zone ou une peau sensible avant de venir', 'vous écrire directement sur WhatsApp'],
+    does: ['réserver leur soin en ligne, 24 h/24, sans vous appeler', 'préciser leurs besoins avant de venir', 'vous écrire directement sur WhatsApp'],
     plan: 'pro', subject: (n) => `${n} : des réservations en ligne, même pendant vos soins`
   },
   restaurant: {
     metier: 'restaurant', clients: 'vos clients',
     need: 'Beaucoup de clients choisissent où manger sur leur téléphone, souvent au dernier moment.',
-    does: ['réserver une table en ligne en indiquant le nombre de personnes', 'vous demander un devis traiteur pour un événement', 'vous écrire directement sur WhatsApp'],
+    does: ['réserver une table en ligne en indiquant le nombre de personnes', 'vous demander un devis pour un groupe ou un événement', 'vous écrire directement sur WhatsApp'],
     plan: 'pro', subject: (n) => `${n} : la réservation de table en ligne, sans commission`
   },
   securite: {

@@ -286,6 +286,11 @@ export function setAdminDisplayName(db, env = process.env, log = console.log) {
  * la préparation automatique ; ses textes suivent les modèles actuels. Rien n'est validé ni envoyé ici.
  */
 export function freezeCampaign2(db, log = console.log) {
-  const c = db.one("SELECT id, name, status FROM campaigns WHERE id=15");
-  if (c && c.status === 'draft' && c.name.startsWith('Préparée automatiquement')) { db.run("UPDATE campaigns SET name='Campagne n° 2' WHERE id=15"); log('Campagne 15 figée sous le nom « Campagne n° 2 »'); }
+  if (db.one("SELECT 1 FROM campaigns WHERE name='Campagne n° 2' AND status!='canceled'")) return null;
+  // Le brouillon automatique qui contient les entreprises présentées à l'utilisateur (Guo et Bologo)
+  const c = db.one(`SELECT c.id FROM campaigns c WHERE c.status='draft' AND c.channel='email' AND c.name LIKE 'Préparée automatiquement%'
+    AND EXISTS (SELECT 1 FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=c.id AND p.name='GUO')
+    AND EXISTS (SELECT 1 FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=c.id AND p.name='BOLOGO') ORDER BY c.id DESC LIMIT 1`);
+  if (!c) return null;
+  db.run("UPDATE campaigns SET name='Campagne n° 2' WHERE id=?", c.id); log(`Campagne ${c.id} figée sous le nom « Campagne n° 2 »`); return c.id;
 }

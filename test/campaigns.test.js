@@ -87,3 +87,15 @@ test('campagnes : jamais deux fois la même adresse e-mail, textes des brouillon
   db.run("UPDATE campaign_items SET message='ancien' WHERE campaign_id=?", id);
   assert.ok(C.refreshDraftTexts(db) >= 1); assert.notEqual(db.one('SELECT message FROM campaign_items WHERE campaign_id=?', id).message, 'ancien');
 });
+
+test('campagne n° 2 : le brouillon présenté est figé et n’est plus remplacé par la préparation automatique', async () => {
+  const { freezeCampaign2 } = await import('../src/bootops.js');
+  seed(2, { dept: '76', tpl: 'restaurant' });
+  const [a, b] = db.all("SELECT id FROM prospects WHERE dept='76'");
+  db.run("UPDATE prospects SET name='GUO' WHERE id=?", a.id); db.run("UPDATE prospects SET name='BOLOGO' WHERE id=?", b.id);
+  const id = C.createCampaign(db, { name: 'Préparée automatiquement : test', channel: 'email', depts: ['76'], size: 5 });
+  assert.equal(freezeCampaign2(db, () => {}), id);
+  assert.equal(db.one('SELECT name FROM campaigns WHERE id=?', id).name, 'Campagne n° 2');
+  C.prepareDrafts(db); assert.equal(db.one('SELECT status FROM campaigns WHERE id=?', id).status, 'draft', 'non annulée');
+  assert.equal(freezeCampaign2(db, () => {}), null, 'une seule fois');
+});
