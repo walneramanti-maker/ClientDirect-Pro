@@ -270,18 +270,28 @@ async function fetchPublic(url) {
  * et retient l'adresse e-mail professionnelle affichée. Ne touche qu'aux entreprises qui ont un site et pas encore d'e-mail.
  */
 export async function freeEmailPass(db, { max = 30, now = Date.now() } = {}) {
-  const r = { checked: 0, found: 0 };
+  const r = { checked: 0, found: 0, sansReponse: 0, erreurs: {} };
+  // Version 2 : les visites qui avaient échoué faute de réseau sont oubliées une fois, pour être refaites
+  if (!db.one("SELECT 1 FROM meta WHERE k='free_email_v2'")) { db.run("DELETE FROM meta WHERE k LIKE 'free_email_%'"); db.run("INSERT OR IGNORE INTO meta(k,v) VALUES('free_email_v2','1')"); }
   const rows = db.all("SELECT id, website FROM prospects WHERE website IS NOT NULL AND website!='' AND (email IS NULL OR email='') AND status NOT IN ('optout') AND id NOT IN (SELECT CAST(substr(k, 12) AS INTEGER) FROM meta WHERE k LIKE 'free_email_%') ORDER BY potential DESC LIMIT ?", max);
   for (const p of rows) {
-    r.checked++; db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', `free_email_${p.id}`, String(now));
-    let url; try { url = new URL(p.website); } catch { continue; }
+    r.checked++;
+    let url; try { url = new URL(/^https?:\/\//i.test(p.website) ? p.website : `https://${p.website}`); } catch { db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', `free_email_${p.id}`, String(now)); continue; }
     if (!/^https?:$/.test(url.protocol) || isPlatform(p.website)) continue;
-    const host = url.hostname.replace(/^www\./, ''); let found = [];
+    const host = url.hostname.replace(/^www\./, ''); let found = []; let answered = false;
     for (const page of [url.origin + '/', url.origin + '/contact']) {
-      const html = await fetchPublic(page).catch(() => '');
+      const html = await fetchPublic(page).then((h) => { answered = true; return h; }).catch((e) => { const k = String(e.cause?.code || e.name || 'erreur'); r.erreurs[k] = (r.erreurs[k] || 0) + 1; return ''; });
       found = [...new Set((html.replace(/&#64;|\[at\]|\(at\)/gi, '@').match(EMAIL_RE) || []).map((e) => e.toLowerCase()))].filter((e) => !BAD_EMAIL.test(e));
       if (found.length) break;
     }
+    // Le site n'a pas répondu (réseau) : nouvel essai plus tard ; sinon, visite enregistrée pour ne jamais revenir
+    if (!answered) {
+      r.sansReponse++; const k = `free_email_try_${p.id}`; const tries = Number(db.one('SELECT v FROM meta WHERE k=?', k)?.v || 0) + 1;
+      db.run('INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v', k, String(tries));
+      if (tries >= 3) db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', `free_email_${p.id}`, String(now)); // site injoignable : abandon après 3 essais
+      continue;
+    }
+    db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', `free_email_${p.id}`, String(now));
     const email = found.find((e) => e.endsWith('@' + host)) || found.find((e) => /^(contact|info|bonjour|hello|accueil|devis|rdv|reservation|commande|secretariat)@/.test(e)) || found[0];
     if (email && emailOk(email)) { db.run("UPDATE prospects SET email=?, contact_source=COALESCE(contact_source,'site_public'), enriched_at=? WHERE id=? AND (email IS NULL OR email='')", email, now, p.id); r.found++; }
   }
