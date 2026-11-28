@@ -15,43 +15,43 @@ export const TRADES = {
   garage: {
     metier: 'garage', clients: 'vos clients',
     need: 'Un automobiliste qui cherche un garage le soir ou le week-end choisit celui où il peut réserver tout de suite.',
-    does: ['prendre rendez-vous en ligne pour une vidange, des freins ou la climatisation, à toute heure', 'vous indiquer la marque, le modèle et l’année du véhicule avant de venir', 'vous écrire directement sur WhatsApp'],
+    does: ['prendre rendez-vous en ligne pour une vidange, des freins ou la climatisation, à toute heure', 'vous indiquer la marque, le modèle et l’année du véhicule avant de venir', 'vous écrire sur WhatsApp, dès que vous ajoutez votre numéro'],
     plan: 'pro', subject: (n) => `${n} : vos clients peuvent-ils réserver leur entretien en ligne ?`
   },
   coiffeur: {
     metier: 'salon de coiffure', clients: 'vos clientes et clients',
     need: 'Pendant une coupe, vous ne pouvez pas répondre au téléphone : chaque appel manqué est un rendez-vous qui part ailleurs.',
-    does: ['réserver leur créneau en ligne, 24 h/24, sans vous appeler', 'choisir la prestation : coupe, tresses, couleur…', 'vous écrire directement sur WhatsApp'],
+    does: ['réserver leur créneau en ligne, 24 h/24, sans vous appeler', 'choisir la prestation : coupe, tresses, couleur…', 'vous écrire sur WhatsApp, dès que vous ajoutez votre numéro'],
     plan: 'pro', subject: (n) => `${n} : des réservations en ligne, même pendant vos coupes`
   },
   beaute: {
     metier: 'institut de beauté', clients: 'vos clientes',
     need: 'Pendant un soin, vous ne pouvez pas répondre au téléphone : chaque appel manqué est un rendez-vous qui part ailleurs.',
-    does: ['réserver leur soin en ligne, 24 h/24, sans vous appeler', 'préciser leurs besoins avant de venir', 'vous écrire directement sur WhatsApp'],
+    does: ['réserver leur soin en ligne, 24 h/24, sans vous appeler', 'préciser leurs besoins avant de venir', 'vous écrire sur WhatsApp, dès que vous ajoutez votre numéro'],
     plan: 'pro', subject: (n) => `${n} : des réservations en ligne, même pendant vos soins`
   },
   restaurant: {
     metier: 'restaurant', clients: 'vos clients',
     need: 'Beaucoup de clients choisissent où manger sur leur téléphone, souvent au dernier moment.',
-    does: ['réserver une table en ligne en indiquant le nombre de personnes', 'vous demander un devis pour un groupe ou un événement', 'vous écrire directement sur WhatsApp'],
+    does: ['réserver une table en ligne en indiquant le nombre de personnes', 'vous demander un devis pour un groupe ou un événement', 'vous écrire sur WhatsApp, dès que vous ajoutez votre numéro'],
     plan: 'pro', subject: (n) => `${n} : la réservation de table en ligne, sans commission`
   },
   securite: {
     metier: 'entreprise de sécurité', clients: 'vos clients professionnels',
     need: 'Une entreprise qui cherche un prestataire de gardiennage compare d’abord en ligne, puis demande des devis.',
-    does: ['vous demander un devis en précisant le type de site à protéger', 'prendre rendez-vous avec un responsable', 'vous écrire directement sur WhatsApp'],
+    does: ['vous demander un devis en précisant le type de site à protéger', 'prendre rendez-vous avec un responsable', 'vous écrire sur WhatsApp, dès que vous ajoutez votre numéro'],
     plan: 'essentiel', subject: (n) => `${n} : recevoir des demandes de devis qualifiées`
   },
   location: {
     metier: 'loueur de véhicules', clients: 'vos clients',
     need: 'Un voyageur réserve souvent son véhicule avant d’arriver, depuis son téléphone.',
-    does: ['réserver un créneau de retrait en ligne, avec les dates souhaitées', 'découvrir vos véhicules disponibles', 'vous écrire directement sur WhatsApp'],
+    does: ['réserver un créneau de retrait en ligne, avec les dates souhaitées', 'découvrir vos véhicules disponibles', 'vous écrire sur WhatsApp, dès que vous ajoutez votre numéro'],
     plan: 'pro', subject: (n) => `${n} : des réservations de véhicules en ligne`
   },
   artisan: {
     metier: 'artisan', clients: 'vos clients',
     need: 'Sur un chantier, vous ne pouvez pas toujours décrocher : un client qui ne vous joint pas appelle le suivant.',
-    does: ['vous envoyer une demande de devis avec l’adresse du chantier et une description', 'prendre rendez-vous pour une visite', 'vous écrire directement sur WhatsApp'],
+    does: ['vous envoyer une demande de devis avec l’adresse du chantier et une description', 'prendre rendez-vous pour une visite', 'vous écrire sur WhatsApp, dès que vous ajoutez votre numéro'],
     plan: 'essentiel', subject: (n) => `${n} : recevoir vos demandes de devis même sur le chantier`
   }
 };
@@ -60,7 +60,7 @@ const SUBJECT = { rdv: 'vos clients peuvent-ils prendre rendez-vous en ligne ?',
 // Activités dont l'argument du profil générique ne correspond pas au métier réel
 const PITCH = {
   traiteur: { need: 'Pour un mariage, un anniversaire ou un repas d’entreprise, vos clients cherchent un traiteur en ligne et demandent plusieurs devis.',
-    does: ['vous demander un devis avec la date et le nombre d’invités', 'découvrir vos formules : buffet, cocktail, repas', 'vous écrire directement sur WhatsApp'],
+    does: ['vous demander un devis avec la date et le nombre d’invités', 'découvrir vos formules : buffet, cocktail, repas', 'vous écrire sur WhatsApp, dès que vous ajoutez votre numéro'],
     subject: 'recevoir vos demandes de devis pour vos événements' }
 };
 const tradeOf = (p) => {
