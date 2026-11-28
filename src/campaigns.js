@@ -47,7 +47,7 @@ export function itemMessage(db, p, channel, step = 0) {
 function eligibleSql({ channel, depts = [], tpls = [], minScore = 0, minPotential = 0 }) {
   const w = ["p.status='new'", 'p.maps_closed=0', 'p.score>=?', 'p.potential>=?', "NOT EXISTS (SELECT 1 FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id WHERE i.prospect_id=p.id AND c.status!='canceled')"];
   const a = [Number(minScore) || 0, Math.max(0, Math.min(100, Number(minPotential) || 0))];
-  w.push(channel === 'email' ? 'p.email IS NOT NULL' : 'p.phone IS NOT NULL');
+  w.push(channel === 'email' ? 'p.email IS NOT NULL AND p.email_ok=1 AND p.bounced_at IS NULL' : 'p.phone IS NOT NULL'); // e-mail : adresse vérifiée (domaine qui reçoit le courrier), jamais en rebond
   const d = depts.filter((x) => DEPARTEMENTS[x]); if (d.length) { w.push(`p.dept IN (${d.map(() => '?').join(',')})`); a.push(...d); }
   const t = tpls.filter((x) => TEMPLATES[x]); if (t.length) { w.push(`p.tpl IN (${t.map(() => '?').join(',')})`); a.push(...t); }
   return { where: w.join(' AND '), args: a };

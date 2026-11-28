@@ -75,3 +75,30 @@ export function cleanContacts(db) {
   }
   return r;
 }
+
+// ---------- Fiabilité des adresses e-mail (gratuit : simple interrogation DNS du domaine) ----------
+const NO_MAIL = /^(no-?reply|ne-?pas-?repondre|donotreply|mailer-daemon|postmaster|abuse|webmaster|test|example)@/i;
+const BAD_DOMAIN = /(^|\.)(example\.(com|fr|org)|test\.fr|domain\.(com|fr)|email\.com|wixpress\.com|sentry\.io|yopmail\.com|mailinator\.com|guerrillamail\.com|trashmail\.com)$/i;
+/**
+ * Vérifie que chaque adresse peut recevoir du courrier : format, adresse non automatique, domaine non jetable,
+ * et domaine doté d'un serveur de messagerie (enregistrement MX). Résultat gardé : email_ok = 1 (fiable) ou 0 (écartée).
+ * Seules les adresses fiables entrent dans une campagne. Un domaine n'est interrogé qu'une fois par passage.
+ */
+export async function verifyEmails(db, { max = 300, now = Date.now(), resolveMx = null } = {}) {
+  const dns = resolveMx ? null : new (await import('node:dns')).promises.Resolver({ timeout: 4000, tries: 2 });
+  const mx = resolveMx || ((d) => dns.resolveMx(d));
+  const r = { verifiees: 0, fiables: 0, ecartees: 0, raisons: {} }; const cache = new Map();
+  const bad = (p, why) => { db.run('UPDATE prospects SET email_ok=0, email_checked_at=? WHERE id=?', now, p.id); r.ecartees++; r.raisons[why] = (r.raisons[why] || 0) + 1; };
+  for (const p of db.all("SELECT id, email FROM prospects WHERE email IS NOT NULL AND email!='' AND email_ok IS NULL AND status!='optout' LIMIT ?", max)) {
+    r.verifiees++; const e = String(p.email).trim().toLowerCase();
+    if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e)) { bad(p, 'format'); continue; }
+    if (NO_MAIL.test(e)) { bad(p, 'adresse automatique'); continue; }
+    const domain = e.split('@')[1]; if (BAD_DOMAIN.test(domain)) { bad(p, 'domaine jetable ou fictif'); continue; }
+    if (!cache.has(domain)) cache.set(domain, await mx(domain).then((l) => (Array.isArray(l) && l.some((x) => x && x.exchange && x.exchange !== '.') ? 'ok' : 'aucun serveur'), (err) => (/ENOTFOUND|ENODATA|NXDOMAIN/.test(String(err.code)) ? 'domaine sans messagerie' : 'indéterminé')));
+    const v = cache.get(domain);
+    if (v === 'ok') { db.run('UPDATE prospects SET email=?, email_ok=1, email_checked_at=? WHERE id=?', e, now, p.id); r.fiables++; }
+    else if (v === 'indéterminé') { r.raisons['réessai plus tard'] = (r.raisons['réessai plus tard'] || 0) + 1; } // panne DNS : on réessaiera
+    else bad(p, v);
+  }
+  return r;
+}

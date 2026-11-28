@@ -49,3 +49,16 @@ test('e-mails publics : lus gratuitement sur le site de l’entreprise, une seul
   assert.ok(seen.every((u) => u.startsWith('https://garage-libre.fr')), 'seul le site de l’entreprise est lu (aucun service payant)');
   assert.equal((await freeEmailPass(db, { max: 5 })).checked, 0, 'pas de seconde visite');
 });
+
+test('fiabilité des e-mails : domaine sans messagerie, adresse automatique ou jetable écartés ; seules les adresses fiables vont en campagne', async () => {
+  const { verifyEmails } = await import('../src/suppression.js');
+  const add = (siren, email) => db.run("INSERT INTO prospects(siren,name,naf,tpl,city,postal,created_at,email,potential,dept) VALUES(?,?,?,?,?,?,?,?,80,'973')", siren, 'ENT ' + siren, '45.20A', 'garage', 'Cayenne', '97300', Date.now(), email);
+  add('910000001', 'Contact@Garage-Bon.fr'); add('910000002', 'contact@domaine-mort.fr'); add('910000003', 'noreply@garage-bon.fr'); add('910000004', 'x@yopmail.com');
+  const resolveMx = async (d) => { if (d === 'garage-bon.fr') return [{ exchange: 'mx.garage-bon.fr', priority: 10 }]; const e = new Error('nx'); e.code = 'ENOTFOUND'; throw e; };
+  const r = await verifyEmails(db, { resolveMx });
+  assert.equal(r.fiables, 1);
+  for (const x of ['910000002', '910000003', '910000004']) assert.equal(db.one('SELECT email_ok FROM prospects WHERE siren=?', x).email_ok, 0, x);
+  assert.equal(db.one("SELECT email, email_ok FROM prospects WHERE siren='910000001'").email, 'contact@garage-bon.fr');
+  const C = await import('../src/campaigns.js');
+  assert.equal(C.countEligible(db, { channel: 'email', depts: ['973'] }), 1, 'seule l’adresse vérifiée est éligible');
+});

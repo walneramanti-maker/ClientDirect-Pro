@@ -116,6 +116,8 @@ export async function runJobs(db, now = Date.now()) {
     if (prospectDaily(db) > 0 && !cooling && (!v2 || resume || now - lastRun(db, 'job.prospect') > 20 * 36e5)) r.prospect = background('prospect', () => runNationalCampaign(db, { now }), 'Prospection nationale');
     const { enrichEnabled, enrichBatch } = await import('./enrich.js');
     if ((enrichEnabled(db) || config.osmEnrich) && now - lastRun(db, 'job.enrich') > 55 * 60e3) r.enrich = background('enrich', () => enrichBatch(db, { now }), 'Coordonnées');
+    // Fiabilité des adresses e-mail (DNS, gratuit), avant toute campagne
+    if (!config.disableJobs && now - lastRun(db, 'job.verifyemail') > 55 * 60e3) { mark(db, 'job.verifyemail', now); r.verifyEmail = background('verifyemail', async () => { const { verifyEmails } = await import('./suppression.js'); return verifyEmails(db, { now }); }, 'Vérification des e-mails (gratuit)'); }
     // E-mails publics lus directement sur le site des entreprises (gratuit), 30 sites par heure au plus
     if (!config.disableJobs && now - lastRun(db, 'job.freeemail') > 55 * 60e3) { mark(db, 'job.freeemail', now); r.freeEmail = background('freeemail', () => freeEmailPass(db, { now }), 'E-mails publics (gratuit)'); }
   }

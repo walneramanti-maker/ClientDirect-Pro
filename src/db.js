@@ -118,7 +118,9 @@ const MIGRATIONS = [
   `ALTER TABLE tenants ADD COLUMN activity_other TEXT`,
   `ALTER TABLE tenants ADD COLUMN prices_confirmed INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE prospects ADD COLUMN activity TEXT`,
-  `ALTER TABLE tenants ADD COLUMN past_due_since INTEGER`
+  `ALTER TABLE tenants ADD COLUMN past_due_since INTEGER`,
+  `ALTER TABLE prospects ADD COLUMN email_ok INTEGER`,
+  `ALTER TABLE prospects ADD COLUMN email_checked_at INTEGER`
 ];
 
 export function openDb(file, { appEnv = null } = {}) {

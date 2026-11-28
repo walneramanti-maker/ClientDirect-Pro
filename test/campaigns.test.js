@@ -4,6 +4,8 @@ import { setup } from './helpers.js';
 
 const app = await setup({ ADMIN_EMAIL: 'admin@cdp.fr' });
 const { db } = app;
+// Dans ces tests, les adresses sont considérées comme déjà vérifiées (le contrôle DNS est testé à part)
+db.raw.exec("CREATE TRIGGER IF NOT EXISTS t_email_ok_i AFTER INSERT ON prospects WHEN NEW.email IS NOT NULL AND NEW.email_ok IS NULL BEGIN UPDATE prospects SET email_ok=1 WHERE id=NEW.id; END; CREATE TRIGGER IF NOT EXISTS t_email_ok_u AFTER UPDATE OF email ON prospects WHEN NEW.email IS NOT NULL AND NEW.email_ok IS NULL BEGIN UPDATE prospects SET email_ok=1 WHERE id=NEW.id; END;");
 test.after(() => app.close());
 const P = await import('../src/prospect.js');
 const C = await import('../src/campaigns.js');
