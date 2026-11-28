@@ -16,7 +16,7 @@ export async function probeNetwork() {
   const r = {};
   try {
     const res = await http.fetch('https://api.brevo.com/v3/account', { headers: { accept: 'application/json', ...(config.brevoKey ? { 'api-key': config.brevoKey } : {}) }, signal: AbortSignal.timeout(15000) });
-    r.brevoApi = res.status === 200 ? 'joignable, clé valide' : res.status === 401 ? (config.brevoKey ? 'joignable, CLÉ REFUSÉE' : 'joignable (clé non encore configurée)') : `joignable, HTTP ${res.status}`;
+    r.brevoApi = res.status === 200 ? 'joignable, clé valide' : res.status === 403 && config.brevoKey ? `clé refusée (403)${config.smtp?.host ? ' : e-mails envoyés par la messagerie professionnelle (repli)' : ' : AUCUN repli configuré'}` : res.status === 401 ? (config.brevoKey ? 'joignable, CLÉ REFUSÉE' : 'joignable (clé non encore configurée)') : `joignable, HTTP ${res.status}`;
   } catch (e) { r.brevoApi = `injoignable (${e.message})`; }
   // Serveurs OpenStreetMap (coordonnées gratuites) : requête minimale, cause exacte en cas d'échec
   r.overpass = {};

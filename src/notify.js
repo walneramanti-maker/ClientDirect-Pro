@@ -83,10 +83,18 @@ async function sendEmail(to, msg) {
   const body = { sender: { name: (msg.fromName || m[1].trim()).slice(0, 70), email: m[2].trim() }, to: [{ email: to }], subject: msg.subject, textContent: msg.text, htmlContent: msg.html || htmlEmail(msg),
     ...(replyTo ? { replyTo: { email: replyTo } } : {}), tags: [msg.tag || 'transactionnel'] };
   let res;
+  // Repli gratuit si Brevo refuse la clé ou est injoignable : la messagerie professionnelle (SMTP), déjà configurée
+  const viaSmtp = async (why) => {
+    if (!config.smtp?.host) return null;
+    const { sendMail, buildMessage } = await import('./smtp.js'); const S = config.smtp;
+    await sendMail({ ...S, to, data: buildMessage({ from: S.from, fromName: msg.fromName || 'ClientDirect Pro', to, subject: msg.subject, text: msg.text, html: msg.html || htmlEmail(msg), replyTo }) });
+    console.log(`E-mail envoyé par la messagerie professionnelle (repli : ${why})`); return { ok: true, via: 'smtp' };
+  };
   try { res = await net.fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': config.brevoKey, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) }); }
-  catch (e) { throw Object.assign(new Error(`Brevo injoignable : ${e.message}`), { retry: 'panne' }); }
+  catch (e) { const r = await viaSmtp('Brevo injoignable').catch(() => null); if (r) return r; throw Object.assign(new Error(`Brevo injoignable : ${e.message}`), { retry: 'panne' }); }
   if (!res.ok) {
     const txt = (await res.text()).slice(0, 200);
+    if (res.status === 401 || res.status === 403) { const r = await viaSmtp(`Brevo ${res.status}`).catch(() => null); if (r) return r; }
     // 429 : débit ou quota ; 401/403 : clé refusée ; 5xx : panne. Aucun de ces cas ne consomme d'essai définitivement.
     const kind = res.status === 429 || /limit|quota|credits/i.test(txt) ? 'quota' : res.status === 401 || res.status === 403 ? 'cle' : res.status >= 500 ? 'panne' : null;
     throw Object.assign(new Error(`Brevo ${res.status}: ${txt}`), { retry: kind });

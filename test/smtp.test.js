@@ -65,3 +65,16 @@ test('désinscription en un clic depuis la messagerie (sans formulaire)', async 
   assert.equal(res.status, 200);
   assert.ok(db.one("SELECT COUNT(*) n FROM prospects WHERE status='optout'").n >= 2);
 });
+
+test('e-mails transactionnels : si Brevo refuse la clé (403), repli automatique sur la messagerie professionnelle', async () => {
+  const { config } = await import('../src/config.js'); const N = await import('../src/notify.js'); const { jsonResponse } = await import('./helpers.js');
+  const before = config.brevoKey; config.brevoKey = 'xkeysib-refusee';
+  app.net.setFetch(async (url) => (String(url).includes('brevo') ? new Response('{"message":"unrecognised IP address"}', { status: 403 }) : jsonResponse({})));
+  try {
+    const n0 = smtp.got.lines.length;
+    N.enqueue(db, { channel: 'email', to: 'client@exemple.fr', template: 'verify_email', payload: { lang: 'fr', url: 'https://x/verifier/t' } });
+    await N.processOutbox(db);
+    assert.ok(smtp.got.lines.slice(n0).some((l) => /RCPT TO:<client@exemple\.fr>/i.test(l)), 'e-mail parti par SMTP');
+    assert.equal(db.one("SELECT status FROM outbox WHERE to_addr='client@exemple.fr' ORDER BY id DESC LIMIT 1").status, 'sent');
+  } finally { config.brevoKey = before; }
+});

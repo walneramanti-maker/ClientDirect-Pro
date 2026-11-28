@@ -104,5 +104,20 @@ process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
 try {
   const rows = db.all("SELECT source, SUM(n) n, MIN(day) d0, MAX(day) d1 FROM visits_source GROUP BY source ORDER BY n DESC");
   const T = db.one("SELECT COUNT(*) n FROM tenants WHERE example=0 AND status!='demo'").n;
-  console.log('Visites mesurées (historique) :', rows.map((r) => `${r.source}=${r.n} (${r.d0}→${r.d1})`).join(' · ') || 'aucune', '· comptes créés hors démo :', T);
+  const tot = rows.reduce((x, r) => x + r.n, 0);
+  console.log('Visites mesurées (historique, robots compris avant le 28/11) :', tot, '· principales sources :', rows.slice(0, 6).map((r) => `${r.source}=${r.n}`).join(' · ') || 'aucune', '· comptes créés hors démo :', T);
 } catch (e) { console.error('Visites :', e.message); }
+
+// État des sauvegardes au démarrage (preuve lisible dans les journaux)
+import('./backup.js').then(({ remoteConfigured }) => {
+  const b = db.one("SELECT COUNT(*) n, MAX(created_at) at FROM backups WHERE status='ok'"); const ko = db.one("SELECT COUNT(*) n FROM backups WHERE status!='ok' AND created_at > ?", Date.now() - 7 * 864e5).n;
+  const v = db.one("SELECT detail, created_at FROM audit WHERE action='job.backup_verify' ORDER BY id DESC LIMIT 1");
+  const age = b.at ? Math.round((Date.now() - b.at) / 60e3) : null;
+  console.log(`Sauvegardes : ${b.n} réussie(s), dernière il y a ${age === null ? '—' : age + ' min'}, échecs sur 7 jours : ${ko}, copie hors serveur : ${remoteConfigured() ? 'oui' : 'NON'}, dernier test de restauration : ${v ? new Date(v.created_at).toISOString().slice(0, 16) + ' ' + String(v.detail).slice(0, 120) : 'aucun'}`);
+}).catch((e) => console.error('Sauvegardes :', e.message));
+// État des notifications au démarrage : une file qui grossit ou des échecs se voient tout de suite
+try {
+  const o = db.one(`SELECT SUM(status='pending') attente, SUM(status='failed') echecs, SUM(status='sent' AND sent_at > ?) envoyes24h FROM outbox WHERE channel='email'`, Date.now() - 864e5);
+  const last = db.one("SELECT last_error error FROM outbox WHERE channel='email' AND last_error IS NOT NULL AND created_at > ? ORDER BY id DESC LIMIT 1", Date.now() - 864e5);
+  console.log(`E-mails transactionnels : ${o.envoyes24h || 0} envoyé(s) en 24 h, ${o.attente || 0} en attente, ${o.echecs || 0} en échec${last ? ` (dernière erreur : ${String(last.error).slice(0, 120)})` : ''}`);
+} catch (e) { console.error('E-mails :', e.message); }
