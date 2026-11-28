@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { setup, signup, jsonResponse } from './helpers.js';
 
-const app = await setup({ STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_WEBHOOK_SECRET: 'whsec_t', STRIPE_PRICE_PRO: 'price_pro', STRIPE_SETUP_PRO: 'price_setup_pro', STRIPE_PRICE_PREMIUM: 'price_prem', BREVO_API_KEY: 'brevo_x', ANTHROPIC_API_KEY: 'sk-ant-x', WHATSAPP_TOKEN: 'wa_x', WHATSAPP_PHONE_ID: '123', ADMIN_EMAIL: 'admin@cdp.fr', MAIL_FROM: 'CDP <no-reply@cdp.fr>', MAKE_WEBHOOK_URL: 'https://hook.eu1.make.com/test123', MAKE_WEBHOOK_SECRET: 'make_secret', MAKE_EVENTS: 'inscription,rdv,devis,incident,paiement_recu' });
+const app = await setup({ AUTORISER_IA_PAYANTE: 'oui', AUTORISER_WHATSAPP_PAYANT: 'oui', STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_WEBHOOK_SECRET: 'whsec_t', STRIPE_PRICE_PRO: 'price_pro', STRIPE_SETUP_PRO: 'price_setup_pro', STRIPE_PRICE_PREMIUM: 'price_prem', BREVO_API_KEY: 'brevo_x', ANTHROPIC_API_KEY: 'sk-ant-x', WHATSAPP_TOKEN: 'wa_x', WHATSAPP_PHONE_ID: '123', ADMIN_EMAIL: 'admin@cdp.fr', MAIL_FROM: 'CDP <no-reply@cdp.fr>', MAKE_WEBHOOK_URL: 'https://hook.eu1.make.com/test123', MAKE_WEBHOOK_SECRET: 'make_secret', MAKE_EVENTS: 'inscription,rdv,devis,incident,paiement_recu' });
 const { db } = app;
 test.after(() => app.close());
 const { runJobs } = await import('../src/jobs.js');

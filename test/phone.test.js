@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, signup, jsonResponse } from './helpers.js';
 
-const app = await setup({ WHATSAPP_TOKEN: 'test-token', WHATSAPP_PHONE_ID: '123', MAKE_WEBHOOK_URL: 'https://hook.test/make', MAKE_EVENTS: 'inscription,rdv,devis' });
+const app = await setup({ AUTORISER_IA_PAYANTE: 'oui', AUTORISER_WHATSAPP_PAYANT: 'oui', WHATSAPP_TOKEN: 'test-token', WHATSAPP_PHONE_ID: '123', MAKE_WEBHOOK_URL: 'https://hook.test/make', MAKE_EVENTS: 'inscription,rdv,devis' });
 const { db } = app;
 const { toE164, e164Ok, phoneValid, domCountryOf } = await import('../src/phone.js');
 const { processOutbox } = await import('../src/notify.js');

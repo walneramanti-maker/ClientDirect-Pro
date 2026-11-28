@@ -24,7 +24,10 @@ export const config = {
   // Alerte quand le disque de la base dépasse ce taux de remplissage (%)
   diskAlertPct: num(env.DISK_ALERT_PCT, 85),
   // IA (Claude). Sans clé : réponses automatiques simples.
-  anthropicKey: env.ANTHROPIC_API_KEY || '',
+  // Services payants : la clé seule ne suffit pas, il faut l'autorisation explicite du propriétaire (AUTORISER_…=oui dans Render).
+  // Sans elle, la clé est ignorée : aucune dépense possible, même si des clients paient.
+  anthropicKey: env.AUTORISER_IA_PAYANTE === 'oui' ? (env.ANTHROPIC_API_KEY || '') : '',
+  anthropicKeyPresent: !!env.ANTHROPIC_API_KEY, paidAiAuthorized: env.AUTORISER_IA_PAYANTE === 'oui',
   aiModel: env.AI_MODEL || 'claude-haiku-5-5',
   aiPriceInPerMTok: num(env.AI_PRICE_IN, 0.10), // USD, prompts < 100k tokens
   aiPriceOutPerMTok: num(env.AI_PRICE_OUT, 0.50),
@@ -56,7 +59,8 @@ export const config = {
   emailAllowlist: String(env.EMAIL_ALLOWLIST || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
   adminEmail: env.ADMIN_EMAIL || '',
   // WhatsApp Cloud API (Meta)
-  waToken: env.WHATSAPP_TOKEN || '',
+  waToken: env.AUTORISER_WHATSAPP_PAYANT === 'oui' ? (env.WHATSAPP_TOKEN || '') : '',
+  waTokenPresent: !!env.WHATSAPP_TOKEN, paidWaAuthorized: env.AUTORISER_WHATSAPP_PAYANT === 'oui',
   waPhoneId: env.WHATSAPP_PHONE_ID || '',
   waTplConfirm: env.WHATSAPP_TPL_CONFIRM || 'rdv_confirmation',
   waTplReminder: env.WHATSAPP_TPL_REMINDER || 'rdv_rappel',

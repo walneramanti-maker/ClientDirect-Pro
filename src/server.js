@@ -64,7 +64,7 @@ server.headersTimeout = 20_000; server.requestTimeout = 30_000;
 const stopJobs = config.disableJobs ? () => {} : startScheduler(db);
 server.listen(config.port, () => console.log(`ClientDirect Pro sur ${config.baseUrl} (port ${config.port})`));
 // Fonctions dépendant d'une clé externe : présence seulement, jamais la valeur
-console.log(`Fonctions : assistant IA ${config.anthropicKey ? 'ACTIVÉ' : 'NON ACTIVÉ (ANTHROPIC_API_KEY absente)'} · WhatsApp automatique ${config.waToken && config.waPhoneId ? 'ACTIVÉ' : `NON ACTIVÉ (${[!config.waToken && 'WHATSAPP_TOKEN', !config.waPhoneId && 'WHATSAPP_PHONE_ID'].filter(Boolean).join(', ')} absent)`}`);
+console.log(`Fonctions payantes : assistant IA ${config.anthropicKey ? 'ACTIVÉ' : `NON ACTIVÉ (clé ${config.anthropicKeyPresent ? 'présente' : 'absente'}, autorisation AUTORISER_IA_PAYANTE ${config.paidAiAuthorized ? 'donnée' : 'non donnée'})`} · WhatsApp automatique ${config.waToken && config.waPhoneId ? 'ACTIVÉ' : `NON ACTIVÉ (clé ${config.waTokenPresent ? 'présente' : 'absente'}, autorisation AUTORISER_WHATSAPP_PAYANT ${config.paidWaAuthorized ? 'donnée' : 'non donnée'})`} · plafonds : IA ${config.aiMonthlyBudgetEur} €/mois, WhatsApp ${config.waMonthlyBudgetEur} €/mois`);
 // Prospects préparés à l'avance (liens de démonstration stables)
 if (process.env.PROSPECT_SEED) import('./prospect.js').then(({ seedProspects }) => seedProspects(db, process.env.PROSPECT_SEED.split(','))).then((r) => console.log('Prospects :', JSON.stringify(r))).catch((e) => console.error('Prospects :', e.message));
 // Stripe (mode test) : produits, prix et webhook créés automatiquement à partir de la seule clé secrète

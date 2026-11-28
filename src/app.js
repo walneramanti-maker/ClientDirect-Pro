@@ -161,7 +161,7 @@ export function createApp(db) {
   on('GET', '/metiers', (c) => html(c.res, V.metiersIndex()));
   on('GET', '/metiers/:tpl', (c) => {
     if (!TEMPLATES[c.params.tpl] && !ACTIVITIES[c.params.tpl]) throw HttpError(404, 'Page introuvable');
-    const cur = countryOf(guessCountry(c)).cur; html(c.res, V.metierPage(c.params.tpl, { cur: PRICES[cur] ? cur : 'EUR' }));
+    const ctry = guessCountry(c); const cur = countryOf(ctry).cur; html(c.res, V.metierPage(c.params.tpl, { cur: PRICES[cur] ? cur : 'EUR', country: ctry }));
   });
   // ---------- exemples à tester sans inscription ----------
   on('GET', '/exemples', (c) => html(c.res, V.examplesPage()));

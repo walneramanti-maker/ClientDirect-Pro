@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { setup, signup, jsonResponse } from './helpers.js';
 
-const app = await setup({
+const app = await setup({ AUTORISER_IA_PAYANTE: 'oui', AUTORISER_WHATSAPP_PAYANT: 'oui',
   ADMIN_EMAIL: 'admin@cdp.fr', BREVO_API_KEY: 'brevo_x', STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_WEBHOOK_SECRET: 'whsec_f', STRIPE_PRICE_PRO: 'price_pro',
   RENDER_API_KEY: 'rnd_x', RENDER_SERVICE_ID: 'srv-123', RENDER_HOSTNAME: 'clientdirect-pro.onrender.com',
   SUPABASE_URL: 'https://sb.example.co', SUPABASE_SERVICE_KEY: 'sb_service', BACKUP_KEY: 'k'.repeat(40), BACKUP_KEEP: '3', ANTHROPIC_API_KEY: 'sk-ant-x'
