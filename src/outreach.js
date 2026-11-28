@@ -56,7 +56,7 @@ export const TRADES = {
   }
 };
 // Nouvelles activités : arguments du profil (rendez-vous, devis, commande…) avec le nom réel du métier
-const SUBJECT = { rdv: 'vos clients peuvent-ils prendre rendez-vous en ligne ?', devis: 'recevoir vos demandes de devis même en intervention', table: 'la réservation en ligne, sans commission', commande: 'vos clients peuvent commander ou réserver en ligne', sejour: 'des demandes de réservation en ligne', cours: 'des réservations de séances en ligne', conseil: 'des prises de rendez-vous en ligne' };
+const SUBJECT = { rdv: 'vos clients peuvent-ils prendre rendez-vous en ligne ?', devis: 'recevoir vos demandes de devis en ligne, même quand vous êtes occupé', table: 'la réservation en ligne, sans commission', commande: 'vos clients peuvent commander ou réserver en ligne', sejour: 'des demandes de réservation en ligne', cours: 'des réservations de séances en ligne', conseil: 'des prises de rendez-vous en ligne' };
 const tradeOf = (p) => {
   const a = p.activity && ACTIVITIES[p.activity];
   if (!a || (TRADES[a.key] && !a.services)) return TRADES[p.tpl] || TRADES.artisan;
