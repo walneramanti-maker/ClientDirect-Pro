@@ -38,3 +38,14 @@ test('bilan commercial : chiffres réels, comptes internes et exemples exclus, s
   assert.ok(!JSON.stringify(r).includes('Compte Interne') && !JSON.stringify(r).includes('@'), 'aucune donnée personnelle');
   assert.equal(r.servicesPayants.assistantIA, 'désactivé'); assert.equal(r.servicesPayants.whatsapp, 'désactivé');
 });
+
+test('e-mails publics : lus gratuitement sur le site de l’entreprise, une seule visite par entreprise', async () => {
+  const { freeEmailPass } = await import('../src/enrich.js');
+  db.run("INSERT INTO prospects(siren,name,naf,tpl,city,postal,created_at,website,potential) VALUES('900000001','Garage Libre','45.20A','garage','Cayenne','97300',?,'https://garage-libre.fr',80)", Date.now());
+  const seen = [];
+  app.net.setFetch(async (url) => { seen.push(String(url)); return new Response(String(url).endsWith('/contact') ? '<a href="mailto:contact@garage-libre.fr">Écrire</a> logo@2x.png' : '<p>Bienvenue</p>', { status: 200, headers: { 'content-type': 'text/html' } }); });
+  const r = await freeEmailPass(db, { max: 5 });
+  assert.equal(r.found, 1); assert.equal(db.one("SELECT email FROM prospects WHERE siren='900000001'").email, 'contact@garage-libre.fr');
+  assert.ok(seen.every((u) => u.startsWith('https://garage-libre.fr')), 'seul le site de l’entreprise est lu (aucun service payant)');
+  assert.equal((await freeEmailPass(db, { max: 5 })).checked, 0, 'pas de seconde visite');
+});

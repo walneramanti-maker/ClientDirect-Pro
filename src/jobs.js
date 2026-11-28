@@ -9,6 +9,7 @@ import { retentionJob } from './privacy.js';
 import { previousMonth } from './stats.js';
 import { money } from './markets.js';
 import { commercialReport } from './daily.js';
+import { freeEmailPass } from './enrich.js';
 
 /** Dernier passage des tâches automatiques (en mémoire : ne compte pas comme une modification des données). */
 export const heartbeat = { at: 0 };
@@ -115,6 +116,8 @@ export async function runJobs(db, now = Date.now()) {
     if (prospectDaily(db) > 0 && !cooling && (!v2 || resume || now - lastRun(db, 'job.prospect') > 20 * 36e5)) r.prospect = background('prospect', () => runNationalCampaign(db, { now }), 'Prospection nationale');
     const { enrichEnabled, enrichBatch } = await import('./enrich.js');
     if ((enrichEnabled(db) || config.osmEnrich) && now - lastRun(db, 'job.enrich') > 55 * 60e3) r.enrich = background('enrich', () => enrichBatch(db, { now }), 'Coordonnées');
+    // E-mails publics lus directement sur le site des entreprises (gratuit), 30 sites par heure au plus
+    if (!config.disableJobs && now - lastRun(db, 'job.freeemail') > 55 * 60e3) { mark(db, 'job.freeemail', now); r.freeEmail = background('freeemail', () => freeEmailPass(db, { now }), 'E-mails publics (gratuit)'); }
   }
   // 13. Parrainage et partenariat : validation des récompenses après 30 jours (une fois par jour)
   if (now - lastRun(db, 'job.rewards') > 20 * 36e5) {

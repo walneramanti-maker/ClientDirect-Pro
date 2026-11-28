@@ -3,6 +3,7 @@
 // Désactivée tant qu'aucune clé n'est fournie et qu'aucun plafond mensuel de crédits n'est autorisé.
 import { config } from './config.js';
 import { net } from './net.js';
+import { emailOk } from './util.js';
 import { recordIncident } from './incidents.js';
 import { TEMPLATES } from './templates.js';
 import { ACTIVITIES } from './activities.js';
@@ -254,4 +255,35 @@ export function enrichStatus(db, now = Date.now()) {
   // Coût par prospect réellement joignable (téléphone ou e-mail trouvé), en crédits et en euros selon le prix du crédit
   const perReach = reach ? used / reach : null;
   return { enabled: enrichEnabled(db), keySet: !!config.firecrawlKey, cap: enrichCap(db), used, today: usedToday(db, now), todayCap: effectiveCap(db, now) - (used - usedToday(db, now)), reachableMonth: reach, creditsPerReachable: perReach, eurPerReachable: perReach != null ? perReach * config.enrichEurPerCredit : null, ...c };
+}
+
+// ---------- Recherche gratuite d'e-mails publics sur le site de l'entreprise (sans service payant) ----------
+const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+const BAD_EMAIL = /\.(png|jpe?g|gif|webp|svg|css|js)$|(example|sentry|wixpress|domain|godaddy|ovh|wordpress|w3\.org|schema\.org)\./i;
+async function fetchPublic(url) {
+  const res = await net.fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(8000), headers: { 'user-agent': 'Mozilla/5.0 (compatible; ClientDirectPro/1.0; +https://clientdirectpro.fr)', accept: 'text/html' } });
+  if (!res.ok || !/html/i.test(res.headers.get('content-type') || '')) return '';
+  return (await res.text()).slice(0, 600000);
+}
+/**
+ * Lit la page d'accueil puis la page contact du site public de l'entreprise (2 pages au plus, lecture simple, gratuite)
+ * et retient l'adresse e-mail professionnelle affichée. Ne touche qu'aux entreprises qui ont un site et pas encore d'e-mail.
+ */
+export async function freeEmailPass(db, { max = 30, now = Date.now() } = {}) {
+  const r = { checked: 0, found: 0 };
+  const rows = db.all("SELECT id, website FROM prospects WHERE website IS NOT NULL AND website!='' AND (email IS NULL OR email='') AND status NOT IN ('optout') AND id NOT IN (SELECT CAST(substr(k, 12) AS INTEGER) FROM meta WHERE k LIKE 'free_email_%') ORDER BY potential DESC LIMIT ?", max);
+  for (const p of rows) {
+    r.checked++; db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', `free_email_${p.id}`, String(now));
+    let url; try { url = new URL(p.website); } catch { continue; }
+    if (!/^https?:$/.test(url.protocol) || isPlatform(p.website)) continue;
+    const host = url.hostname.replace(/^www\./, ''); let found = [];
+    for (const page of [url.origin + '/', url.origin + '/contact']) {
+      const html = await fetchPublic(page).catch(() => '');
+      found = [...new Set((html.replace(/&#64;|\[at\]|\(at\)/gi, '@').match(EMAIL_RE) || []).map((e) => e.toLowerCase()))].filter((e) => !BAD_EMAIL.test(e));
+      if (found.length) break;
+    }
+    const email = found.find((e) => e.endsWith('@' + host)) || found.find((e) => /^(contact|info|bonjour|hello|accueil|devis|rdv|reservation|commande|secretariat)@/.test(e)) || found[0];
+    if (email && emailOk(email)) { db.run("UPDATE prospects SET email=?, contact_source=COALESCE(contact_source,'site_public'), enriched_at=? WHERE id=? AND (email IS NULL OR email='')", email, now, p.id); r.found++; }
+  }
+  return r;
 }
