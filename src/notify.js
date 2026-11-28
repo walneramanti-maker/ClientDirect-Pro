@@ -64,7 +64,8 @@ export function apptPayload(t, a, cancelToken) {
 export function notifyAppointment(db, t, a, template, cancelToken) {
   const p = apptPayload(t, a, cancelToken);
   if (a.customer_email) enqueue(db, { tenantId: t.id, channel: 'email', to: a.customer_email, template, payload: p });
-  if (WA[template] && WA[template](p)) enqueue(db, { tenantId: t.id, channel: 'whatsapp', to: a.customer_phone, template, payload: p });
+  // WhatsApp (payant) : seulement pour un abonnement payé, dans la limite mensuelle du client ; sinon l'e-mail suffit
+  if (WA[template] && WA[template](p) && waAllowedFor(db, t)) enqueue(db, { tenantId: t.id, channel: 'whatsapp', to: a.customer_phone, template, payload: p });
 }
 
 /** E-mail de test (administration) : vérifie Brevo ou le SMTP sans attendre une vraie alerte. */
@@ -113,10 +114,21 @@ export function waSpentEur(db, now = Date.now()) {
   const rows = db.all("SELECT to_addr FROM outbox WHERE channel='whatsapp' AND status='sent' AND created_at>=?", start);
   const C = config.costs.waByCc; return rows.reduce((a, r) => a + (String(r.to_addr).replace(/^\+/, '').startsWith('594') ? C['594'] : String(r.to_addr).replace(/^\+/, '').startsWith('33') ? C['33'] : C.default), 0);
 }
+/** Budget WhatsApp du mois : le plus petit entre le plafond fixe et une part du revenu récurrent payé. */
+export function waBudgetEur(db) {
+  const mrr = db.all("SELECT plan FROM tenants WHERE status IN ('active','past_due') AND example=0").reduce((a, r) => a + ({ essentiel: 79, pro: 149, premium: 249 }[r.plan] || 0), 0);
+  return Math.min(config.waMonthlyBudgetEur, mrr * config.waRevenueShare);
+}
+/** Un client peut-il recevoir des WhatsApp automatiques ce mois-ci ? (abonnement payé + limite mensuelle par client) */
+export function waAllowedFor(db, t) {
+  if (!config.waToken || !config.waPhoneId || t.status !== 'active' || t.example) return false;
+  const d = new Date(); const start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+  return db.one("SELECT COUNT(*) n FROM outbox WHERE channel='whatsapp' AND tenant_id=? AND created_at>=?", t.id, start).n < config.waMonthlyPerTenant;
+}
 function waBudgetAlert(db) {
   const k = `wa_budget_alert_${new Date().toISOString().slice(0, 7)}`; if (db.one('SELECT 1 FROM meta WHERE k=?', k)) return;
   db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', k, String(Date.now()));
-  recordIncident(db, { kind: 'whatsapp', severity: 'critical', message: `Plafond mensuel WhatsApp atteint (${config.waMonthlyBudgetEur} €) : confirmations et rappels par e-mail seulement jusqu'au mois prochain. Relevez WA_MONTHLY_BUDGET_EUR pour continuer.` });
+  recordIncident(db, { kind: 'whatsapp', severity: 'critical', message: `Plafond mensuel WhatsApp atteint (${waBudgetEur(db).toFixed(2)} €) : confirmations et rappels par e-mail seulement jusqu'au mois prochain. Relevez WA_MONTHLY_BUDGET_EUR pour continuer.` });
 }
 export async function sendWhatsApp(to, tpl) {
   // Destinataire au format E.164 (chiffres seuls) : un numéro incomplet n'est jamais envoyé à WhatsApp
@@ -208,7 +220,7 @@ export async function processOutbox(db, limit = 50) {
       else if (r.channel === 'email' && !allowlisted(r.to_addr)) { out = { skipped: `EMAIL_ALLOWLIST : ${r.to_addr} non autorisé pendant les essais, message non envoyé` }; }
       else if (r.channel === 'make') { out = await sendMake(r.template, p); }
       else if (r.channel === 'email') { out = await sendEmail(r.to_addr, renderEmail(r.template, p)); if (out.ok) budget--; }
-      else { const f = WA[r.template]; const tpl = f && f(p); if (!tpl) { out = { skipped: 'Pas de modèle WhatsApp' }; } else if (waSpentEur(db) >= config.waMonthlyBudgetEur) { out = { skipped: `Plafond mensuel WhatsApp atteint (${config.waMonthlyBudgetEur} €) : e-mail seul` }; waBudgetAlert(db); } else out = await sendWhatsApp(r.to_addr, tpl); }
+      else { const f = WA[r.template]; const tpl = f && f(p); if (!tpl) { out = { skipped: 'Pas de modèle WhatsApp' }; } else if (waSpentEur(db) >= waBudgetEur(db)) { out = { skipped: `Plafond mensuel WhatsApp atteint (${waBudgetEur(db).toFixed(2)} €) : e-mail seul` }; waBudgetAlert(db); } else out = await sendWhatsApp(r.to_addr, tpl); }
       if (out.skipped) { db.run("UPDATE outbox SET status='skipped', last_error=?, attempts=attempts+1 WHERE id=?", out.skipped, r.id); skipped++; }
       else { db.run("UPDATE outbox SET status='sent', sent_at=?, attempts=attempts+1 WHERE id=?", Date.now(), r.id); sent++; }
     } catch (e) {

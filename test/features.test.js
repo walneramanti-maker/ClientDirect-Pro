@@ -478,6 +478,7 @@ test('concurrence : demandes simultanées sur des créneaux différents toutes a
 });
 test('concurrence : l’assistant et le site visent le même créneau => un seul gagne', async () => {
   const { t } = await signup(app, { business: 'Garage Course', email: 'course@test.fr', plan: 'premium' });
+  db.run("UPDATE tenants SET status='active' WHERE id=?", t.id); // IA réservée aux abonnés payants
   db.run('UPDATE staff SET active=0 WHERE tenant_id=? AND id != (SELECT MIN(id) FROM staff WHERE tenant_id=?)', t.id, t.id);
   const s = await slot(t, 4); let step = 0;
   mock((url, opt) => {

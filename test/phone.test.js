@@ -139,7 +139,7 @@ async function bookOn(t, phone, cc) {
 test('rendez-vous : numéros des clients normalisés, indicatif du client respecté, notifications au bon format', async () => {
   const { t } = await signup(app, { business: 'Garage Numéros', email: 'numeros@tel.test' });
   assert.equal(t.country, 'GF'); assert.equal(t.cc, '594');
-  db.run('UPDATE tenants SET auto_confirm=1 WHERE id=?', t.id);
+  db.run("UPDATE tenants SET auto_confirm=1, status='active' WHERE id=?", t.id); // abonnement payé : WhatsApp et IA (services payants) actifs
   const site = (await app.client().get(`/s/${t.slug}`)).text;
   assert.match(site, /<select id="b-cc" name="cc"[^>]*>/); assert.match(site, /<option value="594" selected>/, 'indicatif du professionnel proposé par défaut');
   const cases = [['0694 11 22 33', undefined, '594694112233'], ['06 12 34 56 78', undefined, '33612345678'], ['0696 11 22 33', '594', '596696112233'],

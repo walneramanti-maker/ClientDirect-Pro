@@ -28,7 +28,11 @@ export const config = {
   aiModel: env.AI_MODEL || 'claude-haiku-5-5',
   aiPriceInPerMTok: num(env.AI_PRICE_IN, 0.10), // USD, prompts < 100k tokens
   aiPriceOutPerMTok: num(env.AI_PRICE_OUT, 0.50),
-  aiMonthlyMessagesPerTenant: num(env.AI_MONTHLY_CAP, 1500),
+  aiMonthlyMessagesPerTenant: num(env.AI_MONTHLY_CAP, 600), // ≈ 0,75 € maximum par client et par mois
+  waMonthlyPerTenant: num(env.WA_MONTHLY_CAP, 200), // ≈ 4,96 € maximum par client et par mois (tarif Meta France)
+  // Part maximale du revenu récurrent des abonnés payants consacrée à chaque service payant (0 client payant = 0 € de dépense)
+  aiRevenueShare: num(env.AI_REVENUE_SHARE, 0.02),
+  waRevenueShare: num(env.WA_REVENUE_SHARE, 0.05),
   // Plafonds de dépense mensuels, toutes entreprises confondues (en euros). Une fois atteints : réponses simples / e-mail seul, et alerte à l'administrateur.
   aiMonthlyBudgetEur: num(env.AI_MONTHLY_BUDGET_EUR, 10),
   waMonthlyBudgetEur: num(env.WA_MONTHLY_BUDGET_EUR, 15),

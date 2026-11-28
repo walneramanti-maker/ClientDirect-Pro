@@ -1,4 +1,6 @@
-import { config, planHas } from './config.js';
+import { config, planHas, PLANS } from './config.js';
+/** Revenu récurrent mensuel des abonnés payants (hors exemples). */
+export const mrrEur = (db) => db.all("SELECT plan FROM tenants WHERE status IN ('active','past_due') AND example=0").reduce((a, r) => a + (PLANS[r.plan]?.monthly || 0), 0);
 import { net } from './net.js';
 import { nowIn, fromMin, phoneFmt, clampStr, pricesShown, addDays, dowOf } from './util.js';
 import { t as tr, currentLang, fmtTime, fmtDay, dayName, locale } from './i18n.js';
@@ -8,7 +10,10 @@ import { notifyAppointment, enqueue } from './notify.js';
 import { recordIncident } from './incidents.js';
 
 const month = () => new Date().toISOString().slice(0, 7);
-export const aiAvailable = (t) => !!config.anthropicKey && planHas(t.plan, 'ia');
+// Service payant : réservé aux abonnements Premium effectivement payés (ni essai, ni démonstration, ni exemple)
+export const aiAvailable = (t) => !!config.anthropicKey && planHas(t.plan, 'ia') && t.status === 'active' && !t.example;
+/** Budget IA du mois : le plus petit entre le plafond fixe et une part du revenu récurrent payé. */
+export const aiBudgetEur = (db) => Math.min(config.aiMonthlyBudgetEur, mrrEur(db) * config.aiRevenueShare);
 
 function brief(t) {
   const n = nowIn(t.tz);
@@ -93,8 +98,8 @@ export async function answer(db, t, convId, question) {
   const m = month(); const u = db.one('SELECT calls FROM ai_usage WHERE tenant_id=? AND month=?', t.id, m);
   if (u && u.calls >= config.aiMonthlyMessagesPerTenant) return done(ruleAnswer(db, t, question), 'simple');
   // Plafond de dépense mensuel, toutes entreprises confondues : au-delà, réponses simples et alerte (une fois par mois)
-  if (aiSpentEur(db, m) >= config.aiMonthlyBudgetEur) {
-    if (!db.one("SELECT 1 FROM meta WHERE k=?", `ai_budget_alert_${m}`)) { db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', `ai_budget_alert_${m}`, String(Date.now())); recordIncident(db, { kind: 'ai', severity: 'critical', message: `Plafond mensuel de l'assistant IA atteint (${config.aiMonthlyBudgetEur} €) : réponses simples jusqu'au mois prochain. Relevez AI_MONTHLY_BUDGET_EUR pour continuer.` }); }
+  if (aiSpentEur(db, m) >= aiBudgetEur(db)) {
+    if (!db.one("SELECT 1 FROM meta WHERE k=?", `ai_budget_alert_${m}`)) { db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', `ai_budget_alert_${m}`, String(Date.now())); recordIncident(db, { kind: 'ai', severity: 'critical', message: `Plafond mensuel de l'assistant IA atteint (${aiBudgetEur(db).toFixed(2)} €) : réponses simples jusqu'au mois prochain. Relevez AI_MONTHLY_BUDGET_EUR pour continuer.` }); }
     return done(ruleAnswer(db, t, question), 'simple');
   }
 

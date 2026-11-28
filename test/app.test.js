@@ -50,7 +50,7 @@ test('réservation : pas de double réservation, même avec des demandes simulta
 
 test('réservation : deux postes = deux rendez-vous au même moment, confirmation automatique', async () => {
   const { t } = await signup(app, { business: 'Garage Duo', email: 'duo@test.fr' });
-  db.run('UPDATE tenants SET auto_confirm=1 WHERE id=?', t.id);
+  db.run("UPDATE tenants SET auto_confirm=1, status='active' WHERE id=?", t.id); // abonnement payé : WhatsApp et IA (services payants) actifs
   const staff = db.all('SELECT id FROM staff WHERE tenant_id=? AND active=1', t.id); assert.ok(staff.length >= 2);
   db.run('UPDATE staff SET active=0 WHERE tenant_id=? AND id NOT IN (?,?)', t.id, staff[0].id, staff[1].id);
   const svc = db.one('SELECT id FROM services WHERE tenant_id=? ORDER BY id LIMIT 1', t.id).id;
@@ -132,7 +132,7 @@ test('abonnement : page de paiement Stripe puis activation par notification sign
 
 test('assistant IA : répond et réserve via l’outil, sans annoncer une réservation non faite', async () => {
   const { t } = await signup(app, { business: 'Garage IA', email: 'ia@test.fr', plan: 'premium' });
-  db.run('UPDATE tenants SET auto_confirm=1 WHERE id=?', t.id);
+  db.run("UPDATE tenants SET auto_confirm=1, status='active' WHERE id=?", t.id); // abonnement payé : WhatsApp et IA (services payants) actifs
   const svc = db.one('SELECT id FROM services WHERE tenant_id=? ORDER BY id LIMIT 1', t.id).id;
   const day = await futureDay(t.slug, svc); const time = (await app.client().json(`/s/${t.slug}/creneaux?service=${svc}&date=${day}`)).slots[1];
   let step = 0; calls = [];
