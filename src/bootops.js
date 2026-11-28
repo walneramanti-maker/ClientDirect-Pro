@@ -1,6 +1,7 @@
 // Opérations ponctuelles d'administration au démarrage, pilotées par des variables d'environnement (hébergement sans console).
 // Chacune est idempotente et journalisée ; une opération risquée refuse d'agir au moindre doute.
 import { deleteTenant } from './privacy.js';
+import { itemMessage } from './campaigns.js';
 
 const meta = (db, k) => db.one('SELECT v FROM meta WHERE k=?', k)?.v;
 const setMeta = (db, k, v) => db.run('INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v', k, v);
@@ -200,6 +201,9 @@ export function campaignPreview(db, log = console.log) {
   // Campagne complète à présenter avant validation : répartition, puis 3 messages intégraux (adresses masquées)
   const by = (col) => db.all(`SELECT p.${col} k, COUNT(*) n FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? GROUP BY p.${col} ORDER BY n DESC`, c.id).map((x) => `${x.k} : ${x.n}`).join(', ');
   log(`Campagne ${c.id} « ${c.name} » — répartition par département : ${by('dept')} ; par métier : ${by('tpl')} ; potentiel moyen : ${db.one('SELECT ROUND(AVG(p.potential)) a FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=?', c.id).a}`);
+  // Relances (J+4 et J+10) telles qu'elles partiront, pour la première entreprise de la liste
+  { const p = db.one('SELECT p.* FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC LIMIT 1', c.id);
+    if (p) for (const step of [1, 2]) { const m = itemMessage(db, p, 'email', step); log(`Relance ${step === 1 ? '1 (J+4)' : '2 (J+10, dernière)'} (campagne ${c.id}, ${p.name}) — Objet : ${m.subject} ⏎ ${String(m.text).replace(/\r?\n/g, ' ⏎ ')}`); } }
   for (const m of db.all('SELECT p.name, p.city, i.subject, i.message FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC LIMIT 3', c.id)) log(`Message type (campagne ${c.id}, ${m.name}, ${m.city}) — Objet : ${m.subject} ⏎ ${String(m.message).replace(/\r?\n/g, ' ⏎ ').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, (e) => mask(e))}`);
 }
 

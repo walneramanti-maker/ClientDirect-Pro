@@ -109,7 +109,7 @@ export function sequenceEmail(p, { name, demoUrl, token, stopUrl, step = 0 }) {
   if (step === 1) {
     return {
       subject: `Re: ${T.subject(name)}`,
-      text: `Bonjour,\n\nJe me permets de revenir vers vous : l'exemple de site préparé pour ${name} est toujours disponible ici :\n${demoUrl}\n\nEn deux mots : ${T.clients} peuvent ${T.does[0]}, et vous recevez chaque demande par e-mail et sur WhatsApp.\n\n${essai}\n${trial}\n\nUne question ? Répondez à ce message, je vous réponds personnellement.\n\nBien cordialement,\n\n${legalFooter(stopUrl)}`
+      text: `Bonjour,\n\nJe me permets de revenir vers vous : l'exemple de site préparé pour ${name} est toujours disponible ici :\n${demoUrl}\n\nEn deux mots : ${T.clients} peuvent ${T.does[0]}, et vous recevez chaque demande par e-mail et dans votre espace, depuis votre téléphone.\n\n${essai}\n${trial}\n\nUne question ? Répondez à ce message, je vous réponds personnellement.\n\nBien cordialement,\n\n${legalFooter(stopUrl)}`
     };
   }
   return {
