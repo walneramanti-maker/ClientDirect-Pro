@@ -531,8 +531,33 @@ em.soon{display:inline-block;font-style:normal;font-size:.72rem;font-weight:800;
   .m-fold>.fold-sum::after{content:'+';font-size:1.3rem;line-height:1}
   .m-fold.open>.fold-sum::after{content:'−'}
   .m-fold:not(.open)>:not(.fold-sum){display:none}.wrap>.m-fold>.fold-sum{width:100%;margin:0 0 10px}.m-fold.open>.wrap{padding:6px 16px 22px}
-  .sticky-cta{position:fixed;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:50;display:flex;flex-direction:column;align-items:center;padding:12px;border-radius:14px;background:#2563eb;color:#fff!important;font-weight:700;text-decoration:none;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:transform .2s}
-  .sticky-cta small{font-weight:500;opacity:.9;font-size:.78rem}
-  .sticky-cta.hide{transform:translateY(160%)}
-  .home{padding-bottom:84px}
+}
+
+/* Accueil façon application iPhone : en-tête épuré, barre d'onglets, tarifs sans défilement horizontal */
+.langdd{display:none}
+@media (max-width:640px){
+  .home{padding-bottom:calc(var(--tab-h) + var(--safe-b) + 12px)}
+  .home header.mk nav{display:none}
+  .home header.mk .wrap.row{justify-content:space-between;min-height:52px;width:100%;max-width:none;box-sizing:border-box;margin:0}
+  .home .langdd{display:block;position:relative}
+  .home .langdd summary{list-style:none;cursor:pointer;font-weight:800;padding:8px 12px;border-radius:12px;background:rgba(15,27,61,.06);min-height:40px;display:flex;align-items:center}
+  .home .langdd summary::-webkit-details-marker{display:none}
+  .home .langdd div{position:absolute;right:0;top:46px;z-index:40;background:#fff;border-radius:14px;box-shadow:0 12px 30px rgba(16,24,40,.18);padding:6px;display:grid;min-width:150px}
+  .home .langdd a{padding:12px 14px;border-radius:10px;color:var(--ink);text-decoration:none;font-weight:600}
+  .home .hero-mk .offer{display:none}
+  .home .hero-mk h1{font-size:2rem;line-height:1.12;margin:6px 0 12px}
+  .home .hero-mk .cta .btn{min-height:54px;font-size:1.06rem;border-radius:16px;display:flex;align-items:center;justify-content:center}
+  .home .trial-note{margin:-2px 0 4px;text-align:center;color:#5ee39b;font-weight:700;font-size:.95rem}
+  .home .chips{list-style:none;display:flex;gap:8px;padding:0;margin:18px 0 0}
+  .home .chips li{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px;border-radius:16px;background:rgba(255,255,255,.08);color:#fff;font-weight:700;font-size:.85rem}
+  .home .chips svg{width:22px;height:22px}
+  .apptab .tab-cta{color:#fff!important;background:#1f5eff!important;border-radius:16px;margin:0 2px;box-shadow:0 6px 16px rgba(31,94,255,.35)}
+  /* Formules : un sélecteur Essentiel | Pro | Premium, une formule à la fois, rien qui dépasse de l'écran */
+  body.home .plans.segd{display:block!important;overflow:visible;margin:0;padding:0}
+  body.home .plans.segd > .plan{display:none}
+  body.home .plans.segd > .plan.sel{display:flex}
+  .home .compare{table-layout:fixed;width:100%;min-width:0}
+  .home .compare th[scope=row]{width:44%;word-wrap:break-word}
+  .home .compare em.soon{white-space:normal;display:inline-block}
+  .home #formules .scroll{overflow:visible}
 }

@@ -645,7 +645,7 @@
  "{p} HT/mois": "{p}/month excl. tax",
  "Rien à payer pendant l’essai. Ensuite, mise en service unique : {l} HT.": "Nothing to pay during the trial. Then a one-time setup fee: {l} excl. tax.",
  "Actions rapides": "Quick actions",
- "Devis": "Quote",
+ "Devis": "Quotes",
  "Navigation principale": "Main navigation",
  "Mon site": "My site",
  "Menu": "Menu",
@@ -673,5 +673,13 @@
  "Voir la vidéo de démonstration (40 s)": "Watch the demo video (40 s)",
  "Essayer un site d’exemple": "Try an example website",
  "Voir les formules et les tarifs": "See plans and pricing",
- "14 jours gratuits · sans carte bancaire": "14 days free · no credit card"
+ "14 jours gratuits · sans carte bancaire": "14 days free · no credit card",
+ "Votre site travaille pour vous, même pendant votre sommeil.": "Your website works for you, even while you sleep.",
+ "Créez votre site professionnel et recevez vos réservations et demandes de devis.": "Create your professional website and receive bookings and quote requests.",
+ "14 jours gratuits · Sans carte bancaire": "14 days free · No credit card",
+ "Réservations": "Bookings",
+ "Langue": "Language",
+ "Navigation": "Navigation",
+ "Créer": "Create",
+ "Tarifs": "Pricing"
 }
