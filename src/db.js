@@ -120,7 +120,8 @@ const MIGRATIONS = [
   `ALTER TABLE prospects ADD COLUMN activity TEXT`,
   `ALTER TABLE tenants ADD COLUMN past_due_since INTEGER`,
   `ALTER TABLE prospects ADD COLUMN email_ok INTEGER`,
-  `ALTER TABLE prospects ADD COLUMN email_checked_at INTEGER`
+  `ALTER TABLE prospects ADD COLUMN email_checked_at INTEGER`,
+  `CREATE TABLE IF NOT EXISTS funnel(day TEXT NOT NULL, step TEXT NOT NULL, channel TEXT NOT NULL DEFAULT '', n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(day, step, channel))`,
 ];
 
 export function openDb(file, { appEnv = null } = {}) {

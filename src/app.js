@@ -75,6 +75,7 @@ function sameOrigin(req) {
 
 const method0 = (req) => (req.method === 'HEAD' ? 'GET' : req.method);
 /** Canal d'acquisition d'une visite : lien de recommandation, campagne, page métier, sinon rien. */
+import * as F from './funnel.js';
 export function sourceFrom(url, path) {
   const clean = (v) => String(v || '').toLowerCase().replace(/[^\w.-]/g, '').slice(0, 40);
   const ref = clean(url.searchParams.get('ref')); if (ref) return ref.startsWith('p-') ? `partner:${ref.slice(2)}` : `site:${ref}`;
@@ -234,7 +235,10 @@ export function createApp(db) {
   on('GET', '/health/sauvegardes', (c) => { const b = backupHealth(db); json(c.res, { ok: b.ok, problemes: b.problems, derniere: b.lastOk, test: b.verified ? { ok: b.verified.ok, at: b.verified.at } : null }, b.ok ? 200 : 503); });
 
   // ---------- inscription ----------
+  // Balise discrète envoyée au premier champ rempli (aucune donnée saisie n'est transmise)
+  on('POST', '/f/commence', (c) => { if (sameOrigin(c.req) && c.funnel) F.count(db, 'formulaire_commence'); send(c.res, 204, ''); });
   on('GET', '/inscription', (c) => {
+    if (c.funnel) F.count(db, 'page_inscription', F.channelOf(c.req, c.url, [new URL(config.baseUrl).hostname, config.rootDomain].filter(Boolean)));
     const claim = c.url.searchParams.get('claim'); const demo = claim ? demoTenantByToken(db, claim) : null;
     if (claim && !demo) return html(c.res, V.messagePage('Lien expiré', 'Cette démonstration a déjà été activée ou n’existe plus.', ['Créer un site', '/inscription']), 404);
     const plan = c.url.searchParams.get('formule'); const tpl = c.url.searchParams.get('tpl');
@@ -256,6 +260,7 @@ export function createApp(db) {
     if (f.cgu !== 'on') errors.push(tr("Vous devez accepter les conditions d'utilisation."));
     if (!PLANS[f.plan]) errors.push(tr('Formule inconnue.'));
     if (emailOk(email) && db.one('SELECT 1 FROM users WHERE email=?', email)) errors.push(tr('Un compte existe déjà avec cette adresse. Connectez-vous.'));
+    if (c.funnel) { F.count(db, 'envoi'); for (const e of errors) F.count(db, 'erreur:' + F.errorField(e)); }
     if (errors.length) return html(c.res, V.signupPage({ csrf: csrfToken(c), f, errors, claim: demo ? f.claim : null, demo }), 400);
     const now = Date.now();
     const ulang = LANGS[f.lang] ? f.lang : c.lang;
@@ -286,6 +291,7 @@ export function createApp(db) {
     if (config.adminEmail && !/^(autotest|utm:controle)/.test(c.source || '')) enqueue(db, { channel: 'email', to: config.adminEmail, template: 'admin_new_signup', key: `inscription:${tenantId}`, payload: { lang: 'fr', tenant: t.name, metier: t.metier, city: t.city, plan: t.plan, source: c.source, at: new Date().toLocaleString('fr-FR', { timeZone: 'America/Cayenne' }) + ' (Guyane)', siteUrl: `${config.baseUrl}/s/${t.slug}`, adminUrl: `${config.baseUrl}/admin` } });
     emit(db, 'inscription', { entreprise: t.name, metier: t.metier, ville: t.city, formule: t.plan, email, nom: name, depuis_demo: !!demo, site: `${config.baseUrl}/s/${t.slug}` }, tenantId);
     const s = createSession(db, userId);
+    if (c.funnel) F.count(db, 'inscrit');
     redirect(c.res, '/pro?bienvenue=1', { 'Set-Cookie': cookie(SESSION, s.token, { maxAge: 30 * 86400 }) });
   });
 
@@ -899,6 +905,14 @@ export function createApp(db) {
     c.source = cookies.cdp_src && /^[\w:.-]{1,60}$/.test(cookies.cdp_src) ? cookies.cdp_src : newSrc;
     if (newSrc && !cookies.cdp_src) extra.push(cookie('cdp_src', newSrc, { maxAge: 90 * 86400 }));
     if (newSrc && (path === '/' || path.startsWith('/metiers/'))) countVisit(db, newSrc);
+    // Entonnoir : visiteurs réels (hors robots et comptes connectés), une fois par jour et par navigateur
+    c.funnel = !siteSlug && !session && !F.isBot(req);
+    if (c.funnel && method0(req) === 'GET' && (path === '/' || /^\/(metiers|territoires|exemple|tarifs|demo)(\/|$)/.test(path) || path === '/exemples')) {
+      const today = new Date().toISOString().slice(0, 10);
+      const own = [mainHost, config.rootDomain].filter(Boolean);
+      F.count(db, 'page:' + (path === '/' ? 'accueil' : path.split('/')[1]), '');
+      if (cookies.cdp_v !== today) { F.count(db, 'visite', F.channelOf(req, url, own)); extra.push(cookie('cdp_v', today, { maxAge: 86400 })); }
+    }
     if (extra.length) { const orig = res.writeHead.bind(res); res.writeHead = (st, h = {}) => { const sc = h['Set-Cookie']; h['Set-Cookie'] = [...extra, ...(sc ? [].concat(sc) : [])]; return orig(st, h); }; }
     return withLang(lang, async () => {
       { const q = new URLSearchParams(url.search); q.delete('lang'); setQuery(q.toString()); }

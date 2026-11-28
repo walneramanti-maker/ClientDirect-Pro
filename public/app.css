@@ -508,3 +508,8 @@ body.typing .mbar{display:none}
 }
 @media (pointer:coarse) and (min-width:700px){.mk nav{align-items:center}.mk nav > a:not(.btn){display:inline-flex;align-items:center;min-height:44px}}
 em.soon{display:inline-block;font-style:normal;font-size:.72rem;font-weight:800;letter-spacing:.02em;text-transform:uppercase;color:#8a5a00;background:#fff4d6;border:1px solid #f3d58a;border-radius:999px;padding:1px 8px;margin-left:6px;vertical-align:middle;white-space:nowrap}
+
+/* Offre d'essai visible dès le premier écran, sur téléphone comme sur ordinateur */
+.offer{display:inline-flex;align-items:center;gap:8px;margin:0 0 14px;padding:8px 14px;border-radius:999px;background:#16a34a;color:#fff;font-weight:700;font-size:.98rem;line-height:1.25;box-shadow:0 4px 14px rgba(22,163,74,.35)}
+.offer svg{width:18px;height:18px;flex:none;color:#fff;stroke:#fff}
+@media (max-width:640px){.hero-mk h1{font-size:1.85rem;line-height:1.15}.hero-mk .lead{font-size:1.02rem}.hero-mk .lead-plans{display:none}.hero-mk .kicker{font-size:.72rem;margin-bottom:8px}.offer{font-size:.92rem}}

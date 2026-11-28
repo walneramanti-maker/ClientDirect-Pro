@@ -100,3 +100,9 @@ const shutdown = async () => {
   server.close(() => { db.close(); process.exit(0); });
 };
 process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
+// Historique des visites déjà mesurées (compteurs agrégés, sans donnée personnelle)
+try {
+  const rows = db.all("SELECT source, SUM(n) n, MIN(day) d0, MAX(day) d1 FROM visits_source GROUP BY source ORDER BY n DESC");
+  const T = db.one("SELECT COUNT(*) n FROM tenants WHERE example=0 AND status!='demo'").n;
+  console.log('Visites mesurées (historique) :', rows.map((r) => `${r.source}=${r.n} (${r.d0}→${r.d1})`).join(' · ') || 'aucune', '· comptes créés hors démo :', T);
+} catch (e) { console.error('Visites :', e.message); }

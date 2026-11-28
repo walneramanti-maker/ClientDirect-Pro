@@ -3,6 +3,7 @@
 // frais fixes saisis dans « Rentabilité » répartis par jour, et coûts IA / e-mails / WhatsApp du mois.
 import { config } from './config.js';
 import { tenantCosts } from './costs.js';
+import { funnelReport } from './funnel.js';
 
 const REAL = "t.example=0 AND COALESCE(t.internal,0)=0 AND t.status!='demo' AND COALESCE(t.source,'')!='autotest' AND COALESCE(t.source,'') NOT LIKE 'utm:controle%'";
 const dayIso = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -78,5 +79,8 @@ export function commercialReport(db, now = Date.now()) {
     beneficeMois: r2(enc.c / 100 - rep.mois.fraisStripe - rep.mois.fraisFixes - rep.mois.coutsVariables)
   };
   const servicesPayants = { assistantIA: config.anthropicKey ? 'activé' : 'désactivé', whatsapp: config.waToken && config.waPhoneId ? 'activé' : 'désactivé' };
-  return { jour: day, prospection, clients, parFormule, argent, servicesPayants };
+  // Entonnoir : jour courant, 7 derniers jours et depuis la mise en place de la mesure
+  const ago = (k) => dayIso(now - k * 86400e3);
+  const entonnoir = { aujourdhui: funnelReport(db, day, day), septJours: funnelReport(db, ago(6), day), total: funnelReport(db, '2000-01-01', day) };
+  return { jour: day, prospection, entonnoir, clients, parFormule, argent, servicesPayants };
 }

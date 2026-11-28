@@ -43,3 +43,13 @@
   q.addEventListener('keydown', function (e) { if (e.key === 'ArrowDown' && ul.firstChild) { e.preventDefault(); ul.firstChild.focus(); } });
   sel.addEventListener('change', function () { toggle(); q.value = sel.value && sel.value !== 'autre' ? sel.options[sel.selectedIndex].textContent : ''; });
 })();
+
+// Mesure anonyme : signale seulement qu'un formulaire a été commencé (jamais le contenu saisi)
+(function () {
+  var form = document.querySelector('form[action$="/inscription"]') || document.querySelector('form.signup'); if (!form) return;
+  var sent = false;
+  form.addEventListener('input', function () {
+    if (sent) return; sent = true;
+    try { if (navigator.sendBeacon) navigator.sendBeacon('/f/commence'); else fetch('/f/commence', { method: 'POST', keepalive: true, credentials: 'same-origin' }); } catch (e) { /* sans importance */ }
+  }, { passive: true });
+})();
