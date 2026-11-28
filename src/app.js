@@ -448,8 +448,10 @@ export function createApp(db) {
   on('GET', '/demo/:token', (c) => {
     const row = demoTenantByToken(db, c.params.token);
     if (!row) return html(c.res, V.messagePage('Démonstration terminée', 'Ce site a été activé ou la démonstration n’existe plus.', ['Découvrir ClientDirect Pro', '/']), 404);
-    recordDemoView(db, row);
-    if (row.prospect_id && config.trackDemoViews) emit(db, 'demo_vue', { entreprise: row.name, prospect_id: row.prospect_id }, row.id);
+    // Consultation par l'administrateur (connecté), un robot ou un logiciel de vérification de liens : jamais comptée
+    const realView = !c.session && !F.isBot(c.req);
+    if (realView) { recordDemoView(db, row); F.count(db, 'demo_vue'); }
+    if (realView && row.prospect_id && config.trackDemoViews) emit(db, 'demo_vue', { entreprise: row.name, prospect_id: row.prospect_id }, row.id);
     renderSite(c, loadTenant(db, 'id', row.id), `/demo/${c.params.token}`, 'demo', c.params.token);
   });
   siteApi('/demo/:token', demoResolve);

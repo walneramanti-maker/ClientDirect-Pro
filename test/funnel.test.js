@@ -37,7 +37,7 @@ test('rapport d’entonnoir agrégé', () => {
   count(db, 'formulaire_commence', '', now); count(db, 'formulaire_commence', '', now);
   count(db, 'envoi', '', now); count(db, 'erreur:email', '', now); count(db, 'envoi', '', now); count(db, 'inscrit', '', now);
   const r = funnelReport(db, '2026-11-28', '2026-11-28');
-  assert.deepEqual(r.etapes, { visite: 10, page_inscription: 4, formulaire_commence: 2, envoi: 2, inscrit: 1 });
+  assert.deepEqual(r.etapes, { visite: 10, demo_vue: 0, page_inscription: 4, formulaire_commence: 2, envoi: 2, inscrit: 1 });
   assert.equal(r.canaux.google, 6); assert.equal(r.erreursParChamp.email, 1);
   assert.equal(r.taux.visiteVersPageInscription, 40); assert.equal(r.abandonsFormulaire, 1);
 });
@@ -61,5 +61,22 @@ test('parcours réel mesuré de bout en bout (visite → inscription), robots ig
     assert.ok(r.erreursParChamp.email >= 1 && r.erreursParChamp.entreprise >= 1);
     await signup(app, { email: 'funnel@test.fr' });
     assert.equal(funnelReport(app.db, day, day).etapes.inscrit, 1);
+  } finally { app.close(); }
+});
+
+test('démonstrations : vues réelles comptées, administrateur et robots exclus', async () => {
+  const { setup } = await import('./helpers.js');
+  const { prepareDemo } = await import('../src/prospect.js');
+  const app = await setup();
+  try {
+    const db = app.db;
+    db.run("INSERT INTO prospects(name, city, tpl, status, created_at) VALUES('Démo Test','Cayenne','garage','new',1)");
+    const id = db.one("SELECT id FROM prospects WHERE name='Démo Test'").id;
+    const tok = prepareDemo(db, id).demoToken;
+    const n = () => db.one("SELECT COALESCE(SUM(n),0) n FROM visits_source WHERE source='demo'").n;
+    assert.equal((await app.client().get('/demo/' + tok, { 'user-agent': 'curl/8.0' })).status, 200);
+    assert.equal(n(), 0, 'robot ignoré');
+    await app.client().get('/demo/' + tok, { 'user-agent': 'Mozilla/5.0 (iPhone)' });
+    assert.equal(n(), 1, 'vraie visite comptée');
   } finally { app.close(); }
 });

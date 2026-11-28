@@ -36,7 +36,7 @@ test('campagne : sélection par critères, message conforme, validation groupée
   assert.equal(r.status, 303); const id = Number(r.location.split('/').pop());
   const cmp = db.one('SELECT * FROM campaigns WHERE id=?', id); assert.equal(cmp.size, 30, 'seules les entreprises avec e-mail');
   const det = await admin.get(`/admin/campagnes/${id}`);
-  assert.match(det.text, /Valider les 30 messages/); assert.match(det.text, /Formule conseillée pour vous : Pro, 149 € HT\/mois \+ 399 € HT de mise en service/); assert.match(det.text, /dès 79 € HT\/mois/); assert.match(det.text, /engagement de 12 mois/); assert.match(det.text, /Essai gratuit de 14 jours, sans carte bancaire/);
+  assert.match(det.text, /Valider les 30 messages/); assert.match(det.text, /formule Pro, 149 € HT\/mois \+ 399 € HT de mise en service/); assert.match(det.text, /dès 79 € HT\/mois/); assert.match(det.text, /engagement de 12 mois/); assert.match(det.text, /Essai gratuit de 14 jours, sans carte bancaire/);
   assert.match(det.text, /démonstration non officielle, lien personnel, non référencée sur Google/); assert.doesNotMatch(det.text, /visible seulement par vous/);
   assert.match(det.text, /SIRET/);
   // une opposition arrive entre la préparation et la validation
@@ -76,4 +76,14 @@ test('campagnes préparées automatiquement : brouillons régénérés chaque jo
   C.approveCampaign(db, r2.appel.brouillon); C.prepareDrafts(db, Date.UTC(2026, 10, 28));
   assert.equal(db.one('SELECT status FROM campaigns WHERE id=?', r2.appel.brouillon).status, 'approved');
   assert.equal(db.one("SELECT COUNT(*) n FROM campaign_items WHERE sent_at IS NOT NULL").n, before, 'aucun envoi');
+});
+
+test('campagnes : jamais deux fois la même adresse e-mail, textes des brouillons mis à jour', () => {
+  seed(3, { dept: '74', tpl: 'garage' });
+  db.run("UPDATE prospects SET email='meme@exemple.fr' WHERE dept='74'");
+  const id = C.createCampaign(db, { channel: 'email', depts: ['74'], size: 10 });
+  assert.equal(db.one('SELECT COUNT(*) n FROM campaign_items WHERE campaign_id=?', id).n, 1, 'une seule fois la même adresse');
+  assert.equal(C.duplicateAddresses(db), 0);
+  db.run("UPDATE campaign_items SET message='ancien' WHERE campaign_id=?", id);
+  assert.ok(C.refreshDraftTexts(db) >= 1); assert.notEqual(db.one('SELECT message FROM campaign_items WHERE campaign_id=?', id).message, 'ancien');
 });

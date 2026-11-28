@@ -4,7 +4,7 @@ const BOT = /bot|crawl|spider|slurp|preview|monitor|curl|wget|python|headless|li
 const SOCIAL = [['google', /(^|\.)google\./], ['bing', /(^|\.)bing\.com$/], ['duckduckgo', /duckduckgo\.com$/], ['qwant', /qwant\.com$/], ['ecosia', /ecosia\.org$/], ['yahoo', /yahoo\./],
   ['facebook', /(^|\.)(facebook\.com|fb\.com|fb\.me)$/], ['instagram', /instagram\.com$/], ['whatsapp', /(whatsapp\.com|wa\.me)$/], ['linkedin', /(linkedin\.com|lnkd\.in)$/],
   ['tiktok', /tiktok\.com$/], ['youtube', /(youtube\.com|youtu\.be)$/], ['x', /(^|\.)(t\.co|twitter\.com|x\.com)$/], ['webmail', /(mail\.|webmail|outlook\.|live\.com$|orange\.fr$|free\.fr$|laposte\.net$|sfr\.fr$)/]];
-export const STEPS = ['visite', 'page_inscription', 'formulaire_commence', 'envoi', 'inscrit'];
+export const STEPS = ['visite', 'demo_vue', 'page_inscription', 'formulaire_commence', 'envoi', 'inscrit'];
 
 export function isBot(req) { const ua = String(req.headers['user-agent'] || ''); return !ua || BOT.test(ua); }
 

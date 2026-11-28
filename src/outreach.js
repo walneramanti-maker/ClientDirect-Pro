@@ -15,19 +15,19 @@ export const TRADES = {
   garage: {
     metier: 'garage', clients: 'vos clients',
     need: 'Un automobiliste qui cherche un garage le soir ou le week-end choisit celui où il peut réserver tout de suite.',
-    does: ['prendre rendez-vous en ligne pour une vidange, des freins ou la climatisation, à toute heure', 'vous indiquer la marque, le modèle et l’année du véhicule avant de venir', 'recevoir un rappel automatique la veille, pour moins de rendez-vous oubliés'],
+    does: ['prendre rendez-vous en ligne pour une vidange, des freins ou la climatisation, à toute heure', 'vous indiquer la marque, le modèle et l’année du véhicule avant de venir', 'vous écrire directement sur WhatsApp'],
     plan: 'pro', subject: (n) => `${n} : vos clients peuvent-ils réserver leur entretien en ligne ?`
   },
   coiffeur: {
     metier: 'salon de coiffure', clients: 'vos clientes et clients',
     need: 'Pendant une coupe, vous ne pouvez pas répondre au téléphone : chaque appel manqué est un rendez-vous qui part ailleurs.',
-    does: ['réserver leur créneau en ligne, 24 h/24, sans vous appeler', 'choisir la prestation (coupe, tresses, couleur) et voir le prix de départ', 'recevoir un rappel automatique la veille, pour moins de rendez-vous oubliés'],
+    does: ['réserver leur créneau en ligne, 24 h/24, sans vous appeler', 'choisir la prestation : coupe, tresses, couleur…', 'vous écrire directement sur WhatsApp'],
     plan: 'pro', subject: (n) => `${n} : des réservations en ligne, même pendant vos coupes`
   },
   beaute: {
     metier: 'institut de beauté', clients: 'vos clientes',
     need: 'Pendant un soin, vous ne pouvez pas répondre au téléphone : chaque appel manqué est un rendez-vous qui part ailleurs.',
-    does: ['réserver leur soin en ligne, 24 h/24, sans vous appeler', 'préciser la zone ou une peau sensible avant de venir', 'recevoir un rappel automatique la veille, pour moins de rendez-vous oubliés'],
+    does: ['réserver leur soin en ligne, 24 h/24, sans vous appeler', 'préciser la zone ou une peau sensible avant de venir', 'vous écrire directement sur WhatsApp'],
     plan: 'pro', subject: (n) => `${n} : des réservations en ligne, même pendant vos soins`
   },
   restaurant: {
@@ -45,7 +45,7 @@ export const TRADES = {
   location: {
     metier: 'loueur de véhicules', clients: 'vos clients',
     need: 'Un voyageur réserve souvent son véhicule avant d’arriver, depuis son téléphone.',
-    does: ['réserver un créneau de retrait en ligne, avec les dates souhaitées', 'voir vos véhicules et vos prix de départ', 'vous écrire directement sur WhatsApp'],
+    does: ['réserver un créneau de retrait en ligne, avec les dates souhaitées', 'découvrir vos véhicules disponibles', 'vous écrire directement sur WhatsApp'],
     plan: 'pro', subject: (n) => `${n} : des réservations de véhicules en ligne`
   },
   artisan: {
@@ -57,11 +57,18 @@ export const TRADES = {
 };
 // Nouvelles activités : arguments du profil (rendez-vous, devis, commande…) avec le nom réel du métier
 const SUBJECT = { rdv: 'vos clients peuvent-ils prendre rendez-vous en ligne ?', devis: 'recevoir vos demandes de devis en ligne, même quand vous êtes occupé', table: 'la réservation en ligne, sans commission', commande: 'vos clients peuvent commander ou réserver en ligne', sejour: 'des demandes de réservation en ligne', cours: 'des réservations de séances en ligne', conseil: 'des prises de rendez-vous en ligne' };
+// Activités dont l'argument du profil générique ne correspond pas au métier réel
+const PITCH = {
+  traiteur: { need: 'Pour un mariage, un anniversaire ou un repas d’entreprise, vos clients cherchent un traiteur en ligne et demandent plusieurs devis.',
+    does: ['vous demander un devis avec la date et le nombre d’invités', 'découvrir vos formules : buffet, cocktail, repas', 'vous écrire directement sur WhatsApp'],
+    subject: 'recevoir vos demandes de devis pour vos événements' }
+};
 const tradeOf = (p) => {
   const a = p.activity && ACTIVITIES[p.activity];
   if (!a || (TRADES[a.key] && !a.services)) return TRADES[p.tpl] || TRADES.artisan;
   const P = PROFILES[a.profile];
-  return { metier: a.label.toLowerCase(), clients: 'vos clients', need: P.need, does: P.does, plan: P.plan, subject: (n) => `${n} : ${SUBJECT[a.profile]}` };
+  const X = PITCH[a.key] || {};
+  return { metier: a.label.toLowerCase(), clients: 'vos clients', need: X.need || P.need, does: X.does || P.does, plan: P.plan, subject: (n) => `${n} : ${X.subject || SUBJECT[a.profile]}` };
 };
 
 /** Constat sur la présence en ligne : formulé prudemment, jamais affirmé sans vérification. */
@@ -69,8 +76,8 @@ export function needLine(p) {
   let f = {}; try { f = JSON.parse(p.site_flags || '{}'); } catch { f = {}; }
   const st = p.site_status || (p.website ? null : 'aucun_probable');
   if (st === 'aucun') return 'Je n’ai pas trouvé de site Internet à votre nom.';
-  if (st === 'aucun_probable') return 'Je n’ai pas trouvé de site Internet à votre nom (si vous en avez un, dites-le-moi, je ne vous relancerai pas pour rien).';
-  if (st === 'plateforme') return 'Vous êtes présent sur une plateforme ou un réseau social, mais vous n’avez pas encore de site à votre nom.';
+  if (st === 'aucun_probable') return 'Je n’ai pas trouvé de site Internet à votre nom.';
+  if (st === 'plateforme') return 'Vous êtes visible sur une plateforme ou un réseau social, mais pas encore sur un site à votre nom.';
   if (st === 'vieillissant' || st === 'récent') {
     const miss = [!f.booking && 'la réservation en ligne', !f.quote && 'la demande de devis en ligne'].filter(Boolean);
     return miss.length ? `Votre site actuel ne propose pas encore ${miss.join(' ni ')}.` : 'Votre site actuel a déjà l’essentiel ; l’assistant qui répond à vos clients 24 h/24 pourrait vous faire gagner du temps.';
@@ -80,14 +87,14 @@ export function needLine(p) {
 const planOf = (p) => { const t = tradeOf(p); const st = p.site_status; return (st === 'vieillissant' || st === 'récent') && !needLine(p).includes('pas encore') ? 'premium' : t.plan; };
 const eur = (v) => `${v} €`;
 export function planLine(p) {
-  const k = planOf(p); const pl = PLANS[k];
-  return `Formule conseillée pour vous : ${pl.name}, ${eur(pl.monthly)} HT/mois + ${eur(pl.setup)} HT de mise en service (payée une seule fois), avec engagement de 12 mois seulement si vous continuez après l’essai. Les trois formules, dès ${eur(PLANS.essentiel.monthly)} HT/mois : ${config.baseUrl}/#formules`;
+  const pl = PLANS[planOf(p)];
+  return `Ensuite, seulement si vous le décidez : formule ${pl.name}, ${eur(pl.monthly)} HT/mois + ${eur(pl.setup)} HT de mise en service, engagement de 12 mois. Formules dès ${eur(PLANS.essentiel.monthly)} HT/mois : ${config.baseUrl}/#formules`;
 }
 export const trialUrl = (p, token) => `${config.baseUrl}/inscription?claim=${token}&formule=${planOf(p)}`;
 
 function legalFooter(stopUrl) {
   const L = config.legal;
-  return `${L.owner}, fondateur de ClientDirect Pro – ${L.name}, SIRET ${L.siret}${L.phone ? ` – ${L.phone}` : ''}\n\nVos coordonnées professionnelles proviennent du registre public des entreprises (INSEE) et de votre fiche d'établissement publique. Elles servent uniquement à vous présenter ce service et sont conservées au plus 36 mois sans réponse. Vous pouvez y accéder, les faire corriger ou supprimer en répondant à ce message. Pour ne plus recevoir aucun message et supprimer l'exemple : ${stopUrl} (ou répondez STOP).`;
+  return `${L.owner}\nFondateur de ClientDirect Pro${L.phone ? ` · ${L.phone}` : ''}\n\n—\n${L.name}, SIRET ${L.siret}. Vos coordonnées professionnelles proviennent du registre public des entreprises (INSEE) et de votre fiche publique ; elles servent uniquement à vous présenter ce service et sont conservées 36 mois au plus. Accès, rectification ou suppression : répondez à ce message. Pour ne plus recevoir aucun message et supprimer l'exemple : ${stopUrl} (ou répondez STOP).`;
 }
 
 /**
@@ -98,23 +105,24 @@ export function sequenceEmail(p, { name, demoUrl, token, stopUrl, step = 0 }) {
   const T = tradeOf(p);
   // Nom d'une personne (entreprise individuelle sans enseigne) : on parle de « votre salon de coiffure à Rouen »
   if (isPersonName(name)) { const city = p.city ? displayName(p.city) : ''; const lieu = `votre ${T.metier}${city ? ` à ${city}` : ''}`; return personal(sequenceEmail({ ...p }, { name: '\u0000', demoUrl, token, stopUrl, step }), lieu); } const trial = trialUrl(p, token); const days = config.trialDays;
-  const essai = `Essai gratuit de ${days} jours, sans carte bancaire : vous activez le site en 2 minutes, et s'il ne vous convient pas, vous n'avez rien à faire, rien ne vous sera facturé.`;
+  const essai = `Essai gratuit de ${days} jours, sans carte bancaire et sans engagement : si le site ne vous convient pas, vous n'avez rien à faire, rien ne vous sera facturé.`;
+  const Cl = T.clients[0].toUpperCase() + T.clients.slice(1);
   if (step === 0) {
     const nl = needLine(p);
     return {
       subject: T.subject(name),
-      text: `Bonjour,\n\nJe m'appelle ${config.legal.owner}, je dirige ClientDirect Pro, une solution de sites professionnels pour les petites entreprises en France et en Outre-mer.\n\n${T.need}${nl ? ` ${nl}` : ''}\n\nJ'ai donc préparé gratuitement un exemple de site pour ${name}. ${T.clients[0].toUpperCase() + T.clients.slice(1)} peuvent y :\n- ${T.does.join('\n- ')}\n\nVoir l'exemple (démonstration non officielle, lien personnel, non référencée sur Google) :\n${demoUrl}\n\n${essai}\nActiver mon essai gratuit :\n${trial}\n\n${planLine(p)}\n\nSi vous préférez, je vous le présente en 10 minutes, par téléphone ou en visio : répondez simplement à ce message.\n\nBien cordialement,\n\n${legalFooter(stopUrl)}`
+      text: `Bonjour,\n\n${T.need}${nl ? ` ${nl}` : ''}\n\nJ'ai donc préparé gratuitement un exemple de site pour ${name} (démonstration non officielle, lien personnel, non référencée sur Google) :\n${demoUrl}\n\n${Cl} pourraient y :\n- ${T.does.join('\n- ')}\n\nChaque demande vous arrive par e-mail et dans votre espace, sur votre téléphone.\n\n${essai}\nActiver l'essai en 2 minutes :\n${trial}\n\n${planLine(p)}\n\nUne question, ou une présentation de 10 minutes par téléphone ou en visio ? Répondez simplement à ce message.\n\nBien cordialement,\n${legalFooter(stopUrl)}`
     };
   }
   if (step === 1) {
     return {
       subject: `Re: ${T.subject(name)}`,
-      text: `Bonjour,\n\nJe me permets de revenir vers vous : l'exemple de site préparé pour ${name} est toujours disponible ici :\n${demoUrl}\n\nEn deux mots : ${T.clients} peuvent ${T.does[0]}, et vous recevez chaque demande par e-mail et dans votre espace, depuis votre téléphone.\n\n${essai}\n${trial}\n\nUne question ? Répondez à ce message, je vous réponds personnellement.\n\nBien cordialement,\n\n${legalFooter(stopUrl)}`
+      text: `Bonjour,\n\nAvez-vous pu regarder l'exemple de site préparé pour ${name} ?\n${demoUrl}\n\n${Cl} pourraient y ${T.does[0]}, et vous recevriez chaque demande sur votre téléphone.\n\n${essai}\n${trial}\n\nBien cordialement,\n${legalFooter(stopUrl)}`
     };
   }
   return {
     subject: `Re: ${T.subject(name)}`,
-    text: `Bonjour,\n\nC'est mon dernier message : je ne vous relancerai plus.\n\nL'exemple de site pour ${name} reste en ligne encore quelques semaines : ${demoUrl}\nSi le moment est mal choisi, vous pourrez l'activer plus tard, avec le même essai gratuit de ${days} jours, sans carte bancaire :\n${trial}\n\nMerci pour votre temps et bonne continuation.\n\n${legalFooter(stopUrl)}`
+    text: `Bonjour,\n\nC'est mon dernier message : je ne vous relancerai plus.\n\nL'exemple de site pour ${name} reste disponible quelques semaines :\n${demoUrl}\n\nSi le moment est mal choisi, vous pourrez l'activer plus tard, avec le même essai gratuit de ${days} jours, sans carte bancaire :\n${trial}\n\nMerci pour votre temps et bonne continuation.\n${legalFooter(stopUrl)}`
   };
 }
 

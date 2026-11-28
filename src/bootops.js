@@ -1,7 +1,7 @@
 // Opérations ponctuelles d'administration au démarrage, pilotées par des variables d'environnement (hébergement sans console).
 // Chacune est idempotente et journalisée ; une opération risquée refuse d'agir au moindre doute.
 import { deleteTenant } from './privacy.js';
-import { itemMessage } from './campaigns.js';
+import { itemMessage, duplicateAddresses } from './campaigns.js';
 
 const meta = (db, k) => db.one('SELECT v FROM meta WHERE k=?', k)?.v;
 const setMeta = (db, k, v) => db.run('INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v', k, v);
@@ -194,17 +194,18 @@ export function autoResolveIncidents(db, now = Date.now()) {
 /** Aperçu de la campagne e-mail préparée (pour validation) : entreprises, besoin constaté, objet. Adresses masquées. */
 export function campaignPreview(db, log = console.log) {
   // Le brouillon à valider d'abord ; sinon la dernière campagne validée
-  const c = db.one("SELECT id, name, size, status FROM campaigns WHERE channel='email' AND status IN ('draft','approved') ORDER BY (status='draft') DESC, id DESC LIMIT 1");
+  const c = db.one("SELECT id, name, size, status FROM campaigns WHERE channel='email' AND status IN ('draft','approved') ORDER BY (status='draft') DESC, (name LIKE 'Préparée automatiquement%') ASC, id DESC LIMIT 1");
   if (!c) return log('Aperçu campagne : aucune campagne e-mail préparée');
-  const rows = db.all('SELECT p.name, p.city, p.dept, p.postal, p.tpl, p.site_status, p.site_flags, p.potential, p.email, i.subject FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC, i.id', c.id);
-  log(`Aperçu campagne ${c.id} (${c.status}, ${rows.length} entreprises) : ${JSON.stringify(rows.map((r) => ({ ...r, email: mask(r.email) })))}`);
+  log(`Contrôle des doublons d'adresse entre campagnes : ${duplicateAddresses(db)}`);
+  const rows = db.all('SELECT p.name, p.city, p.dept, p.postal, p.tpl, p.activity, p.naf, p.site_status, p.site_flags, p.potential, p.email, i.subject FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC, i.id', c.id);
+  log(`Aperçu campagne ${c.id} (${c.status}, ${rows.length} entreprises) : ${JSON.stringify(rows.map((r) => ({ ...r, email: c.status === 'draft' ? r.email : mask(r.email) })))}`);
   // Campagne complète à présenter avant validation : répartition, puis 3 messages intégraux (adresses masquées)
   const by = (col) => db.all(`SELECT p.${col} k, COUNT(*) n FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? GROUP BY p.${col} ORDER BY n DESC`, c.id).map((x) => `${x.k} : ${x.n}`).join(', ');
   log(`Campagne ${c.id} « ${c.name} » — répartition par département : ${by('dept')} ; par métier : ${by('tpl')} ; potentiel moyen : ${db.one('SELECT ROUND(AVG(p.potential)) a FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=?', c.id).a}`);
   // Relances (J+4 et J+10) telles qu'elles partiront, pour la première entreprise de la liste
   { const p = db.one('SELECT p.* FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC LIMIT 1', c.id);
     if (p) for (const step of [1, 2]) { const m = itemMessage(db, p, 'email', step); log(`Relance ${step === 1 ? '1 (J+4)' : '2 (J+10, dernière)'} (campagne ${c.id}, ${p.name}) — Objet : ${m.subject} ⏎ ${String(m.text).replace(/\r?\n/g, ' ⏎ ')}`); } }
-  for (const m of db.all('SELECT p.name, p.city, i.subject, i.message FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC LIMIT 40', c.id)) log(`Message complet (campagne ${c.id}, ${m.name}, ${m.city}) — Objet : ${m.subject} ⏎ ${String(m.message).replace(/\r?\n/g, ' ⏎ ').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, (e) => mask(e))}`);
+  for (const m of db.all('SELECT p.name, p.city, i.to_addr, i.subject, i.message FROM campaign_items i JOIN prospects p ON p.id=i.prospect_id WHERE i.campaign_id=? ORDER BY p.potential DESC LIMIT 40', c.id)) log(`Message complet (campagne ${c.id}, ${m.name}, ${m.city}) — À : ${c.status === 'draft' ? m.to_addr : mask(m.to_addr)} — Objet : ${m.subject} ⏎ ${String(m.message).replace(/\r?\n/g, ' ⏎ ').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, (e) => mask(e))}`);
 }
 
 /** MARK_INTERNAL=<site>[,<site>] : classe en compte interne (exclu des statistiques clients). Réversible depuis la fiche. */
@@ -278,4 +279,13 @@ export function setAdminDisplayName(db, env = process.env, log = console.log) {
   const n = Number(db.run("UPDATE users SET name=? WHERE email=? AND role='superadmin' AND name!=?", name, login, name).changes);
   if (n) log(`Nom affiché de l’administrateur : ${name}`);
   return n;
+}
+
+/**
+ * Campagne n° 2 (brouillon 15) : figée avec ses 10 entreprises, comme demandé, pour qu'elle ne soit plus remplacée par
+ * la préparation automatique ; ses textes suivent les modèles actuels. Rien n'est validé ni envoyé ici.
+ */
+export function freezeCampaign2(db, log = console.log) {
+  const c = db.one("SELECT id, name, status FROM campaigns WHERE id=15");
+  if (c && c.status === 'draft' && c.name.startsWith('Préparée automatiquement')) { db.run("UPDATE campaigns SET name='Campagne n° 2' WHERE id=15"); log('Campagne 15 figée sous le nom « Campagne n° 2 »'); }
 }

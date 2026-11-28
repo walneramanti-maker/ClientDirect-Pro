@@ -58,7 +58,10 @@ export function createCampaign(db, { name, channel, depts = [], tpls = [], minSc
   if (!CHANNELS[channel]) throw new Error('Canal inconnu');
   size = Math.max(1, Math.min(MAX_CAMPAIGN, Math.floor(Number(size) || 0)));
   const q = eligibleSql({ channel, depts, tpls, minScore, minPotential });
-  const rows = db.all(`SELECT p.* FROM prospects p WHERE ${q.where} ORDER BY p.potential DESC, p.score DESC, p.id LIMIT ?`, ...q.args, size).filter((p) => !isSuppressed(db, p));
+  // Jamais deux fois la même adresse : ni dans cette campagne, ni déjà présente dans une autre campagne en cours ou passée
+  const used = new Set(db.all("SELECT LOWER(i.to_addr) a FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id WHERE c.status!='canceled' AND c.channel='email' AND i.to_addr IS NOT NULL").map((r) => r.a));
+  const rows = db.all(`SELECT p.* FROM prospects p WHERE ${q.where} ORDER BY p.potential DESC, p.score DESC, p.id LIMIT ?`, ...q.args, size * 2).filter((p) => !isSuppressed(db, p))
+    .filter((p) => { if (channel !== 'email') return true; const k = String(p.email || '').toLowerCase(); if (!k || used.has(k)) return false; used.add(k); return true; }).slice(0, size);
   if (!rows.length) throw new Error('Aucune entreprise ne correspond à ces critères (coordonnées requises pour ce canal).');
   let id;
   db.tx(() => {
@@ -189,4 +192,18 @@ export function prepareDrafts(db, now = Date.now()) {
     } catch (e) { out[p.channel] = { aucune: e.message }; }
   }
   return out;
+}
+
+/** Textes des campagnes non encore validées remis à jour avec les modèles actuels (mêmes destinataires, mêmes liens). */
+export function refreshDraftTexts(db) {
+  let n = 0;
+  for (const it of db.all("SELECT i.id, i.prospect_id, c.channel FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id WHERE c.status='draft' AND i.status='ready'")) {
+    const p = db.one('SELECT * FROM prospects WHERE id=?', it.prospect_id); if (!p) continue;
+    const m = itemMessage(db, p, it.channel, 0); db.run('UPDATE campaign_items SET message=?, subject=? WHERE id=?', m.text, m.subject, it.id); n++;
+  }
+  return n;
+}
+/** Doublons d'adresse entre campagnes en cours ou passées (doit rester à 0). */
+export function duplicateAddresses(db) {
+  return db.all("SELECT LOWER(i.to_addr) a, COUNT(DISTINCT i.prospect_id) n FROM campaign_items i JOIN campaigns c ON c.id=i.campaign_id WHERE c.status!='canceled' AND c.channel='email' AND i.to_addr IS NOT NULL GROUP BY LOWER(i.to_addr) HAVING n>1").length;
 }

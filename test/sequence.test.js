@@ -108,7 +108,7 @@ test('relances automatiques : J+4 puis J+10, arrêt sur réponse, opposition, in
   assert.equal((await C.sendNext(db, { now: tue + 4 * 864e5 + 3600e3 })).skipped, 'rien à envoyer à cette heure', 'J+4 tombe un samedi : attente du lundi');
   const j4 = tue + 6 * 864e5;
   const r = await C.sendNext(db, { now: j4 }); assert.equal(r.step, 1, JSON.stringify(r)); assert.equal(r.sent, ids[3].id);
-  const m1 = decode(smtp.got.at(-1)); assert.match(m1.subject, /^Re: Coiffure 3 : /); assert.match(m1.body, /Je me permets de revenir vers vous/); assert.match(m1.body, /sans carte bancaire/);
+  const m1 = decode(smtp.got.at(-1)); assert.match(m1.subject, /^Re: Coiffure 3 : /); assert.match(m1.body, /Avez-vous pu regarder l'exemple de site/); assert.match(m1.body, /sans carte bancaire/);
   assert.equal((await C.sendNext(db, { now: j4 + 2 * 60e3 })).skipped, 'rien à envoyer à cette heure', 'les 3 autres sont arrêtées');
   assert.equal(db.one("SELECT COUNT(*) n FROM campaign_items WHERE campaign_id=? AND next_at IS NULL", id).n, 3);
   assert.equal((await C.sendNext(db, { now: j4 + 5 * 864e5 })).skipped, 'rien à envoyer à cette heure', 'dernière relance 6 jours après la première');
@@ -179,5 +179,5 @@ test('noms : formes juridiques retirées, sigles en capitales, nom de personne r
   assert.equal(P.isPersonName('Remi Francois'), true); assert.equal(P.isPersonName('Garage du Maroni'), false); assert.equal(P.isPersonName('Mala Neva'), false);
   const m = O.sequenceEmail({ tpl: 'coiffeur', city: 'ROUEN', site_status: 'aucun' }, { name: 'Remi Francois', demoUrl: 'd', token: 't', stopUrl: 's' });
   assert.equal(m.subject, 'Votre salon de coiffure à Rouen : des réservations en ligne, même pendant vos coupes');
-  assert.match(m.text, /exemple de site pour votre salon de coiffure à Rouen\./); assert.doesNotMatch(m.text, /Remi|\u0000/);
+  assert.match(m.text, /exemple de site pour votre salon de coiffure à Rouen \(/); assert.doesNotMatch(m.text, /Remi|\u0000/);
 });

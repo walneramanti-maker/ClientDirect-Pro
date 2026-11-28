@@ -76,11 +76,18 @@ export function commercialReport(db, now = Date.now()) {
   const argent = {
     revenuRecurrentMensuel: mrr, encaisseMois: r2(enc.c / 100), facturesMois: enc.k, encaisseTotal: r2(encTotal),
     fraisStripeMois: rep.mois.fraisStripe, chargesFixesMois: rep.mois.fraisFixes, coutsVariablesMois: rep.mois.coutsVariables,
-    beneficeMois: r2(enc.c / 100 - rep.mois.fraisStripe - rep.mois.fraisFixes - rep.mois.coutsVariables)
+    beneficeMois: r2(enc.c / 100 - rep.mois.fraisStripe - rep.mois.fraisFixes - rep.mois.coutsVariables),
+    // Estimation après cotisations sociales de micro-entreprise (21,3 % du chiffre d'affaires encaissé)
+    depensesMois: r2(rep.mois.fraisStripe + rep.mois.fraisFixes + rep.mois.coutsVariables),
+    beneficeNetMois: r2(enc.c / 100 * (1 - 0.213) - rep.mois.fraisStripe - rep.mois.fraisFixes - rep.mois.coutsVariables)
   };
   const servicesPayants = { assistantIA: config.anthropicKey ? 'activé' : 'désactivé', whatsapp: config.waToken && config.waPhoneId ? 'activé' : 'désactivé' };
   // Entonnoir : jour courant, 7 derniers jours et depuis la mise en place de la mesure
   const ago = (k) => dayIso(now - k * 86400e3);
   const entonnoir = { aujourdhui: funnelReport(db, day, day), septJours: funnelReport(db, ago(6), day), total: funnelReport(db, '2000-01-01', day) };
-  return { jour: day, prospection, entonnoir, clients, parFormule, argent, servicesPayants };
+  // Résumé lisible : les chiffres qui comptent, sans robots ni consultations de l'administrateur
+  const hier = funnelReport(db, ago(1), ago(1));
+  const essentiel = { visiteursReelsHier: hier.etapes.visite, visiteursReels7j: entonnoir.septJours.etapes.visite, demosConsulteesHier: hier.etapes.demo_vue, demosConsultees7j: entonnoir.septJours.etapes.demo_vue,
+    inscriptionsMois: clients.inscriptionsMois, abonnesPayants: clients.abonnesPayants, chiffreAffairesMois: argent.encaisseMois, depensesMois: argent.depensesMois, beneficeNetMois: argent.beneficeNetMois };
+  return { jour: day, essentiel, prospection, entonnoir, clients, parFormule, argent, servicesPayants };
 }
