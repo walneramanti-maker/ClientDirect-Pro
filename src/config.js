@@ -21,6 +21,7 @@ export const config = {
   sitemapExclude: String(env.SITEMAP_EXCLUDE || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
   // Google Search Console : code de la balise de vérification (méthode « Balise HTML »)
   googleVerification: String(env.GOOGLE_SITE_VERIFICATION || '').replace(/[^\w-]/g, '').slice(0, 100),
+  bingVerification: String(env.BING_SITE_VERIFICATION || '').replace(/[^\w-]/g, '').slice(0, 100),
   // Alerte quand le disque de la base dépasse ce taux de remplissage (%)
   diskAlertPct: num(env.DISK_ALERT_PCT, 85),
   // IA (Claude). Sans clé : réponses automatiques simples.

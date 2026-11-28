@@ -63,6 +63,8 @@ const server = http.createServer(createApp(db));
 server.headersTimeout = 20_000; server.requestTimeout = 30_000;
 const stopJobs = config.disableJobs ? () => {} : startScheduler(db);
 server.listen(config.port, () => console.log(`ClientDirect Pro sur ${config.baseUrl} (port ${config.port})`));
+// Référencement gratuit : IndexNow reçoit la liste des pages du plan du site, une minute après le démarrage (si elle a changé)
+setTimeout(async () => { try { const xml = await (await fetch(`http://127.0.0.1:${config.port}/sitemap.xml`)).text(); const urls = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]); const { submitIndexNow } = await import('./indexnow.js'); console.log('IndexNow :', JSON.stringify(await submitIndexNow(db, urls))); } catch (e) { console.error('IndexNow impossible :', e.message); } }, 60e3).unref();
 // Fonctions dépendant d'une clé externe : présence seulement, jamais la valeur
 console.log(`Fonctions payantes : assistant IA ${config.anthropicKey ? 'ACTIVÉ' : `NON ACTIVÉ (clé ${config.anthropicKeyPresent ? 'présente' : 'absente'}, autorisation AUTORISER_IA_PAYANTE ${config.paidAiAuthorized ? 'donnée' : 'non donnée'})`} · WhatsApp automatique ${config.waToken && config.waPhoneId ? 'ACTIVÉ' : `NON ACTIVÉ (clé ${config.waTokenPresent ? 'présente' : 'absente'}, autorisation AUTORISER_WHATSAPP_PAYANT ${config.paidWaAuthorized ? 'donnée' : 'non donnée'})`} · plafonds : IA ${config.aiMonthlyBudgetEur} €/mois, WhatsApp ${config.waMonthlyBudgetEur} €/mois`);
 // Prospects préparés à l'avance (liens de démonstration stables)

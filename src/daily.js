@@ -4,7 +4,7 @@
 import { config } from './config.js';
 import { tenantCosts } from './costs.js';
 
-const REAL = "t.example=0 AND t.status!='demo' AND COALESCE(t.source,'')!='autotest' AND COALESCE(t.source,'') NOT LIKE 'utm:controle%'";
+const REAL = "t.example=0 AND COALESCE(t.internal,0)=0 AND t.status!='demo' AND COALESCE(t.source,'')!='autotest' AND COALESCE(t.source,'') NOT LIKE 'utm:controle%'";
 const dayIso = (ms) => new Date(ms).toISOString().slice(0, 10);
 const daysInMonth = (m) => new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0)).getUTCDate();
 const r2 = (x) => Math.round(x * 100) / 100;
@@ -33,4 +33,50 @@ export function dailyReport(db, { days = 30, now = Date.now() } = {}) {
   const abonnes = db.one(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL} AND t.status IN ('active','past_due')`).n;
   const essais = db.one(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL} AND t.status='trial'`).n;
   return { jours: list, mois: { month, inscriptions: sum('inscriptions'), revenus: sum('revenus'), fraisStripe: sum('fraisStripe'), fraisFixes: sum('fraisFixes'), coutsVariables: variables, benefice: r2(sum('revenus') - sum('fraisStripe') - sum('fraisFixes') - variables) }, abonnes, essais };
+}
+
+/**
+ * Bilan commercial (chiffres agrégés, aucune donnée personnelle) : prospection, réponses, inscriptions,
+ * essais, abonnements, chiffre d'affaires et dépenses réelles. Écrit une fois par jour dans le journal du serveur.
+ */
+export function commercialReport(db, now = Date.now()) {
+  const day = dayIso(now); const d0 = Date.parse(day + 'T00:00:00Z'); const month = day.slice(0, 7); const m0 = Date.parse(month + '-01T00:00:00Z');
+  const n = (sql, ...a) => db.one(sql, ...a).n;
+  const prospection = {
+    prospects: n("SELECT COUNT(*) n FROM prospects WHERE status!='optout'"),
+    joignablesEmail: n("SELECT COUNT(*) n FROM prospects WHERE email IS NOT NULL AND email!='' AND status!='optout' AND bounced_at IS NULL"),
+    contactesTotal: n("SELECT COUNT(DISTINCT prospect_id) n FROM campaign_items WHERE status='sent'"),
+    contactesAujourdhui: n("SELECT COUNT(*) n FROM campaign_items WHERE status='sent' AND sent_at>=?", d0),
+    relancesEnvoyees: n('SELECT COUNT(*) n FROM campaign_items WHERE step>0'),
+    reponses: n('SELECT COUNT(*) n FROM prospects WHERE replied_at IS NOT NULL'),
+    oppositions: n("SELECT COUNT(*) n FROM prospects WHERE status='optout'"),
+    rebonds: n('SELECT COUNT(*) n FROM prospects WHERE bounced_at IS NOT NULL'),
+    demosVues: db.one("SELECT COALESCE(SUM(n),0) n FROM visits_source WHERE source='demo'").n,
+    campagnesEnAttente: n("SELECT COUNT(*) n FROM campaigns WHERE status='draft'"),
+    campagnesActives: n("SELECT COUNT(*) n FROM campaigns c WHERE status='approved' AND EXISTS (SELECT 1 FROM campaign_items i WHERE i.campaign_id=c.id AND i.status='ready')")
+  };
+  const clients = {
+    inscriptionsTotal: n(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL}`),
+    inscriptionsAujourdhui: n(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL} AND t.created_at>=?`, d0),
+    inscriptionsMois: n(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL} AND t.created_at>=?`, m0),
+    issuesDeLaProspection: n(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL} AND t.prospect_id IS NOT NULL`),
+    essaisEnCours: n(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL} AND t.status='trial' AND t.trial_ends_at>?`, now),
+    essaisTerminesNonConvertis: n(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL} AND t.status='trial' AND t.trial_ends_at<=?`, now),
+    abonnesPayants: n(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL} AND t.status IN ('active','past_due')`),
+    impayes: n(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL} AND t.status='past_due'`),
+    resilies: n(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL} AND t.status='canceled'`)
+  };
+  clients.tauxConversion = clients.inscriptionsTotal ? r2((clients.abonnesPayants / clients.inscriptionsTotal) * 100) : 0;
+  const parFormule = Object.fromEntries(['essentiel', 'pro', 'premium'].map((p) => [p, n(`SELECT COUNT(*) n FROM tenants t WHERE ${REAL} AND t.status IN ('active','past_due') AND t.plan=?`, p)]));
+  const mrr = ['essentiel', 'pro', 'premium'].reduce((a, p) => a + parFormule[p] * ({ essentiel: 79, pro: 149, premium: 249 }[p]), 0);
+  const enc = db.one(`SELECT COALESCE(SUM(i.amount_cents),0) c, COUNT(*) k FROM invoices i JOIN tenants t ON t.id=i.tenant_id WHERE ${REAL} AND i.status='paid' AND i.paid_at>=?`, m0);
+  const encTotal = db.one(`SELECT COALESCE(SUM(i.amount_cents),0) c FROM invoices i JOIN tenants t ON t.id=i.tenant_id WHERE ${REAL} AND i.status='paid'`).c / 100;
+  const rep = dailyReport(db, { days: 31, now });
+  const argent = {
+    revenuRecurrentMensuel: mrr, encaisseMois: r2(enc.c / 100), facturesMois: enc.k, encaisseTotal: r2(encTotal),
+    fraisStripeMois: rep.mois.fraisStripe, chargesFixesMois: rep.mois.fraisFixes, coutsVariablesMois: rep.mois.coutsVariables,
+    beneficeMois: r2(enc.c / 100 - rep.mois.fraisStripe - rep.mois.fraisFixes - rep.mois.coutsVariables)
+  };
+  const servicesPayants = { assistantIA: config.anthropicKey ? 'activé' : 'désactivé', whatsapp: config.waToken && config.waPhoneId ? 'activé' : 'désactivé' };
+  return { jour: day, prospection, clients, parFormule, argent, servicesPayants };
 }

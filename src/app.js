@@ -10,6 +10,8 @@ import { parseCookies, cookie, readBody, parseForm, html, json, redirect, serveS
 import * as V from './views.js';
 import { TEMPLATES } from './templates.js';
 import { ACTIVITIES } from './activities.js';
+import { TERRITOIRES } from './territoires.js';
+import { indexNowKey } from './indexnow.js';
 const BOOT_AT = Date.now();
 const dirCheck = { at: 0 };
 import { emailOk, randomId, safeEq, clampStr, nowIn, intlPhone, phoneOk, phoneFmt, sha256, csvCell } from './util.js';
@@ -172,6 +174,8 @@ export function createApp(db) {
     { const cur = countryOf(guessCountry(c)).cur; if (PRICES[cur]) tn.currency = cur; } // devise du pays du visiteur (affichage seulement)
     renderSite(c, tn, `/exemple/${c.params.tpl}`, 'example');
   });
+  on('GET', '/territoires/:t', (c) => { const T = TERRITOIRES[c.params.t]; if (!T) throw HttpError(404, 'Page introuvable'); setLang('fr'); c.lang = 'fr'; html(c.res, V.territoirePage(c.params.t, T, { cur: 'EUR' })); });
+  on('GET', '/indexnow-:k', (c) => { const k = indexNowKey(db); if (c.params.k !== `${k}.txt`) throw HttpError(404, 'Page introuvable'); send(c.res, 200, k, { 'Content-Type': 'text/plain; charset=utf-8' }); });
   on('GET', '/favicon.svg', (c) => { if (!serveStatic(c.res, 'favicon.svg', c.req)) throw HttpError(404, 'Page introuvable'); });
   on('GET', '/favicon.ico', (c) => send(c.res, 301, '', { Location: '/favicon.svg', 'Cache-Control': 'public, max-age=86400' }));
   on('GET', '/robots.txt', (c) => send(c.res, 200, robots(`${config.baseUrl}/sitemap.xml`, { allow: config.isProd }), { 'Content-Type': 'text/plain; charset=utf-8' }));
@@ -180,7 +184,7 @@ export function createApp(db) {
     const own = publicTenants(db).filter((t) => !(t.custom_domain && t.domain_status === 'verified'));
     // lastmod = date de dernière mise en production (pas « aujourd'hui » à chaque passage du robot). Annuaire seulement s'il contient des sites.
     const B = config.baseUrl, R = BOOT_AT;
-    const entries = [{ loc: `${B}/`, lastmod: R }, { loc: `${B}/metiers`, lastmod: R }, { loc: `${B}/partenaires`, lastmod: R }, ...[...new Set([...Object.keys(TEMPLATES), ...Object.keys(ACTIVITIES)])].map((k) => ({ loc: `${B}/metiers/${k}`, lastmod: R }))];
+    const entries = [{ loc: `${B}/`, lastmod: R }, { loc: `${B}/metiers`, lastmod: R }, { loc: `${B}/partenaires`, lastmod: R }, ...Object.keys(TERRITOIRES).map((k) => ({ loc: `${B}/territoires/${k}`, lastmod: R })), ...[...new Set([...Object.keys(TEMPLATES), ...Object.keys(ACTIVITIES)])].map((k) => ({ loc: `${B}/metiers/${k}`, lastmod: R }))];
     if (own.length) entries.push({ loc: `${B}/annuaire`, lastmod: Math.max(...own.map((t) => t.updated_at || t.created_at || 0)) || R });
     if (!config.rootDomain) for (const t of own) entries.push({ loc: `${config.baseUrl}/s/${t.slug}`, lastmod: t.updated_at || t.created_at });
     send(c.res, 200, sitemap(entries), { 'Content-Type': 'application/xml; charset=utf-8' });

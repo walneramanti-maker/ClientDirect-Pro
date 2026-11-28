@@ -8,6 +8,7 @@ import { backupJob, verifyBackup, remoteConfigured } from './backup.js';
 import { retentionJob } from './privacy.js';
 import { previousMonth } from './stats.js';
 import { money } from './markets.js';
+import { commercialReport } from './daily.js';
 
 /** Dernier passage des tâches automatiques (en mémoire : ne compte pas comme une modification des données). */
 export const heartbeat = { at: 0 };
@@ -17,6 +18,9 @@ const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet'
 
 /** Tâches automatiques : rappels, envois, fin d'essai, impayés, tickets, alertes. */
 export async function runJobs(db, now = Date.now()) {
+  // Bilan commercial quotidien dans le journal du serveur (chiffres agrégés, sans donnée personnelle), une fois par jour
+  { const k = `bilan_commercial_${new Date(now).toISOString().slice(0, 10)}`;
+    if (!db.one('SELECT 1 FROM meta WHERE k=?', k)) { try { console.log('Bilan commercial :', JSON.stringify(commercialReport(db, now))); db.run('INSERT OR IGNORE INTO meta(k,v) VALUES(?,?)', k, String(now)); } catch (e) { console.error('Bilan commercial impossible :', e.message); } } }
   if ((await import('./maintenance.js')).maintenanceOn(db)) return { maintenance: true }; // aucune écriture pendant une migration
   const r = { reminders: 0, trialNotices: 0, paused: 0, closed: 0, digest: false };
   // 1. Rappels la veille (entre 2 h et 24 h avant), une seule fois par rendez-vous
